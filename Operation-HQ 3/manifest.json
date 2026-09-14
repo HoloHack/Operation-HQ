@@ -1,0 +1,70 @@
+{
+  "manifest_version": 3,
+  "name": "Operation HQ — New Tab",
+  "version": "2.7.0",
+  "description": "A local-first personal command centre with an adaptive procedural compositor, provenance-grounded on-device AI, living widgets, Study OS and resilient browser tools.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2k6G9nn2pwTZpG/8QrPbB3vowwvR1x1owK2XIGxxNQchSl8i0Svf0o/YLiNC/W4FOxPjO7aMH5xF3ueLenIcNxRfZK1vAMDyQsLEK0bP+3Lw/BlD8+FqYSG/evnQWAIRIaYTqt8MF7ELs9j8qV4QhKlqxHQ4HrZyDh3AGIYpSJr9e18SBJEZikWiiZsvCpTX18TSH0mOGMtlSG89blRDrtJvB/BnGGDFakQZBUovmwKHYwvrn/pO2rmqFq7EJMWyNgtBMSp+f/S0lok83xzDC+0YsA91Ih1KxpVZPrm7J8pg9Dc/1X9D7XoMeLfsdMb7ITdbah1hRWtwmAUXzPE/BQIDAQAB",
+  "chrome_url_overrides": {
+    "newtab": "newtab.html"
+  },
+  "permissions": [
+    "storage",
+    "unlimitedStorage",
+    "bookmarks",
+    "identity",
+    "alarms",
+    "tabs",
+    "tabGroups",
+    "contextMenus",
+    "idle",
+    "declarativeNetRequest",
+    "contentSettings",
+    "geolocation"
+  ],
+  "optional_permissions": [
+    "downloads"
+  ],
+  "host_permissions": [
+    "https://gmail.googleapis.com/*",
+    "https://www.googleapis.com/*",
+    "https://wallhaven.cc/*",
+    "https://w.wallhaven.cc/*",
+    "https://api.unsplash.com/*",
+    "https://images.unsplash.com/*",
+    "https://api.pexels.com/*",
+    "https://images.pexels.com/*",
+    "https://api.anthropic.com/*",
+    "https://api.open-meteo.com/*",
+    "https://geocoding-api.open-meteo.com/*",
+    "https://api.elevenlabs.io/*",
+    "https://date.nager.at/*",
+    "https://huggingface.co/*",
+    "https://*.huggingface.co/*",
+    "https://raw.githubusercontent.com/*",
+    "https://accounts.spotify.com/*",
+    "https://api.spotify.com/*"
+  ],
+  "optional_host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
+  "sandbox": {
+    "pages": ["spotify-sandbox.html"]
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self';",
+    "sandbox": "sandbox allow-scripts; script-src 'self' https://sdk.scdn.co; connect-src 'self' https://api.spotify.com https://sdk.scdn.co https://*.spotify.com wss://*.spotify.com; img-src 'self' https://*.scdn.co data:;"
+  },
+  "oauth2": {
+    "client_id": "909480994423-tv8bkcfd8v8il907lph0t2b72oh165k6.apps.googleusercontent.com",
+    "scopes": [
+      "https://www.googleapis.com/auth/gmail.readonly"
+    ]
+  },
+  "background": {
+    "service_worker": "js/background.js"
+  },
+  "icons": {
+    "128": "icons/icon128.png"
+  }
+}
