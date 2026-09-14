@@ -1,0 +1,1458 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Operation HQ</title>
+<script src="js/early-diagnostics.js"></script>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div id="wallpaper-layer" aria-hidden="true">
+  <img id="wallpaper-image" alt="" decoding="async" referrerpolicy="no-referrer">
+</div>
+<div id="scrim"></div>
+<div id="cinematic-field" aria-hidden="true">
+  <div class="cinematic-mesh"></div>
+  <div class="cinematic-horizon"></div>
+  <div class="cinematic-orbit cinematic-orbit-a"></div>
+  <div class="cinematic-orbit cinematic-orbit-b"></div>
+  <div class="cinematic-sweep"></div>
+  <div class="cinematic-grain"></div>
+</div>
+<div id="mode-transition" class="mode-transition" data-kind="theme" aria-hidden="true" role="status" aria-live="polite">
+  <div class="mode-transition-grid"></div>
+  <div class="mode-transition-ring"></div>
+  <div class="mode-transition-scan"></div>
+  <div class="mode-transition-copy"><span class="mode-transition-kicker">Operation state</span><strong class="mode-transition-title"></strong><small class="mode-transition-detail"></small></div>
+</div>
+<div id="daily-quote"></div>
+<div id="toast" role="status" aria-live="polite" aria-atomic="true"></div>
+<button id="wallpaper-block-current" class="hidden" title="Hide this wallpaper and never show it again" aria-label="Hide this wallpaper and never show it again">
+  <span class="icon-inline" data-icon="eye-off"></span><span>Hide wallpaper</span>
+</button>
+
+<main id="app">
+
+  <header id="topbar">
+    <div id="hero-stack">
+      <div id="clock-block">
+        <div id="clock"></div>
+        <div id="date"></div>
+        <button id="weather-chip" class="dock-btn weather-chip-style" data-panel="weather-flyout" title="Weather"><span id="weather-temp">—</span></button>
+      </div>
+      <div id="greeting"></div>
+      <div id="research-nudge" class="hidden"></div>
+    </div>
+    <div id="topbar-controls" role="toolbar" aria-label="Dashboard controls">
+      <button id="palette-btn" title="Command palette (Cmd/Ctrl+K)"></button>
+      <button id="deepwork-btn" title="Deep Work — block distracting sites (configure list in Settings)"></button>
+      <button id="privacy-btn" title="Hide tasks quickly (Alt+H)"></button>
+      <button id="pro-view-btn" title="Professional View — hides Daily Non-Negotiables + personal ventures, for screen-sharing with clients/co-founders"></button>
+      <button id="lockdown-btn" title="Lockdown — Zen + Privacy together, for screen-sharing/calls"></button>
+      <button id="zen-btn" title="Cinema mode — hide every widget and control (Alt+Z)"></button>
+      <button id="settings-btn" title="Settings"></button>
+    </div>
+  </header>
+
+  <section id="widget-canvas" aria-label="Live dashboard widgets">
+    <div id="system-field" aria-hidden="true"><span></span><i></i><b></b></div>
+    <article class="living-widget widget-briefing" id="widget-briefing" data-state="loading">
+      <div class="widget-aurora" aria-hidden="true"></div>
+      <header class="widget-head">
+        <span class="widget-kicker"><span class="widget-live-dot"></span>HQ Foresight</span>
+        <button class="widget-launch" data-open-panel="today-flyout" aria-label="Open Today">Open</button>
+      </header>
+      <div class="briefing-body">
+        <div>
+          <span id="widget-briefing-phase" class="briefing-phase">Reading the day</span>
+          <h2 id="widget-next-title">Checking your real tasks…</h2>
+          <p id="widget-next-reason">Building a clear next-action signal.</p>
+          <button id="widget-assignment-signal" class="widget-assignment-signal hidden" data-open-panel="assignments-flyout" aria-label="Open Assignment Command Centre"></button>
+        </div>
+        <div class="briefing-orbit" aria-hidden="true"><span></span><i></i></div>
+      </div>
+      <footer class="widget-footer briefing-actions">
+        <div class="widget-metrics"><span><strong id="widget-open-count">—</strong> open</span><span><strong id="widget-tomorrow-count">—</strong> tomorrow</span></div>
+        <div><button id="widget-start-next">Start focus</button><button id="widget-complete-next" class="widget-ghost">Complete</button></div>
+      </footer>
+    </article>
+
+    <article class="living-widget widget-weather" id="widget-weather" data-state="loading">
+      <div class="weather-atmosphere" aria-hidden="true"><span></span><i></i><b></b></div>
+      <header class="widget-head">
+        <span class="widget-kicker">Local atmosphere</span>
+        <button class="widget-icon-launch" data-open-panel="weather-flyout" aria-label="Open weather settings"><span class="icon-inline" data-icon="settings"></span></button>
+      </header>
+      <div class="weather-widget-main">
+        <span id="widget-weather-icon" class="weather-widget-icon"></span>
+        <strong id="widget-weather-temp">—</strong>
+      </div>
+      <p id="widget-weather-condition">Loading live weather…</p>
+      <footer class="widget-footer"><span id="widget-weather-location">Locating…</span><span id="widget-weather-range">—</span></footer>
+    </article>
+
+    <article class="living-widget widget-focus" id="widget-focus" data-state="idle">
+      <header class="widget-head">
+        <span class="widget-kicker">Focus engine</span>
+        <button class="widget-icon-launch" data-open-panel="pomodoro-flyout" aria-label="Open focus controls"><span class="icon-inline" data-icon="maximize-2"></span></button>
+      </header>
+      <div class="focus-instrument">
+        <div class="focus-dial" id="widget-focus-dial" style="--progress:0"><span id="widget-focus-time">25:00</span><small id="widget-focus-state">Ready</small></div>
+        <div class="focus-wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+      </div>
+      <button id="widget-focus-toggle" class="widget-primary-wide">Begin 25 minutes</button>
+    </article>
+
+    <article class="living-widget widget-schedule" id="widget-schedule" data-state="idle">
+      <header class="widget-head">
+        <span class="widget-kicker">Time rail</span>
+        <button class="widget-launch" data-open-panel="schedule-flyout" aria-label="Open schedule">Schedule</button>
+      </header>
+      <div class="schedule-live-row"><span id="widget-schedule-time">Now</span><span id="widget-schedule-progress"></span></div>
+      <h3 id="widget-schedule-current">Checking your schedule…</h3>
+      <p id="widget-schedule-detail"></p>
+      <div class="schedule-rail" aria-hidden="true"><span id="widget-schedule-fill"></span><i></i></div>
+      <footer class="widget-footer"><span>Next</span><strong id="widget-schedule-next">—</strong></footer>
+    </article>
+
+    <article class="living-widget widget-assessment" id="widget-assessment" data-state="idle">
+      <div class="assessment-radar" aria-hidden="true"><span></span><i></i><b></b></div>
+      <header class="widget-head">
+        <span class="widget-kicker"><span id="widget-assessment-dot" class="widget-live-dot"></span>Assessment radar</span>
+        <button class="widget-launch" data-open-panel="assignments-flyout" aria-label="Open assessment intake">Review</button>
+      </header>
+      <div class="assessment-widget-count"><strong id="widget-assessment-count">0</strong><span id="widget-assessment-label">No files waiting</span></div>
+      <h3 id="widget-assessment-title">Intake is clear</h3>
+      <p id="widget-assessment-due">Connect Downloads when you want automatic detection.</p>
+      <footer class="widget-footer"><span id="widget-assessment-source">Local-only</span><button id="widget-assessment-start" class="widget-ghost" disabled>Start next step</button></footer>
+    </article>
+
+    <article class="living-widget widget-inbox" id="widget-inbox" data-state="idle">
+      <div class="inbox-stack" aria-hidden="true"><i></i><i></i></div>
+      <header class="widget-head">
+        <span class="widget-kicker"><span id="widget-inbox-dot" class="widget-live-dot"></span>Gmail pulse</span>
+        <button class="widget-launch" data-open-panel="gmail-flyout" aria-label="Open Gmail inbox">Inbox</button>
+      </header>
+      <div class="inbox-count"><strong id="widget-inbox-count">—</strong><span id="widget-inbox-label">Checking saved inbox</span></div>
+      <div id="widget-inbox-list" class="widget-inbox-list"></div>
+    </article>
+
+    <article class="living-widget widget-habits" id="widget-habits" data-state="idle">
+      <header class="widget-head">
+        <span class="widget-kicker">Daily rhythm</span>
+        <span id="widget-habit-streak" class="widget-streak">0 day streak</span>
+      </header>
+      <div class="habit-constellation" id="widget-habit-constellation" aria-hidden="true"></div>
+      <div class="habit-copy"><strong id="widget-habit-score">—</strong><span id="widget-habit-label">Loading today’s rhythm…</span></div>
+      <button id="widget-habit-next" class="widget-primary-wide" disabled>Nothing to complete</button>
+    </article>
+  </section>
+
+  <!-- Daily Non-Negotiables — always visible, core panel -->
+  <section class="panel core-panel" id="daily-panel">
+    <div class="privacy-overlay"><span class="icon-inline" data-icon="lock"></span> Hidden — click the eye icon or press Alt+H to show</div>
+    <div class="panel-head">
+      <h2>Daily Non-Negotiables</h2>
+      <span id="daily-streak" class="streak-badge"><span class="icon-inline" data-icon="flame"></span> 0 days</span>
+    </div>
+    <div id="daily-progress">
+      <div id="daily-progress-bar" role="progressbar" aria-label="Daily habits completed" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div id="daily-progress-fill"></div></div>
+      <span id="daily-progress-label">0 / 0 done today</span>
+    </div>
+    <ul id="daily-list" class="scroll-cap"></ul>
+  </section>
+
+  <!-- Master Tasks — always visible, core panel -->
+  <section class="panel core-panel" id="tasks-panel">
+    <div class="privacy-overlay"><span class="icon-inline" data-icon="lock"></span> Hidden — click the eye icon or press Alt+H to show</div>
+    <div class="panel-head">
+      <h2>Operation HQ</h2>
+      <div class="panel-actions">
+        <select id="task-filter" aria-label="Filter tasks by venture">
+          <option value="all">All Ventures</option>
+        </select>
+        <button id="add-task-btn">+ Task</button>
+      </div>
+    </div>
+    <form id="task-compose" class="task-compose hidden">
+      <div class="task-compose-main"><span class="nexus-kicker">New commitment</span><input id="task-compose-text" type="text" maxlength="240" autocomplete="off" placeholder="What needs to move forward?" aria-label="Task description" required></div>
+      <label>Venture<select id="task-compose-venture" aria-label="Task venture"><option value="">No venture</option></select></label>
+      <label>Priority<select id="task-compose-priority" aria-label="Task priority"><option value="auto">Auto</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select></label>
+      <label>Due<input id="task-compose-due" type="date" aria-label="Task due date"></label>
+      <label>Estimate<input id="task-compose-estimate" type="number" min="5" max="1440" step="5" placeholder="min" aria-label="Estimated task minutes"></label>
+      <div class="task-compose-actions"><button id="task-compose-cancel" class="secondary-btn" type="button">Cancel</button><button id="task-compose-save" type="submit">Add task</button></div>
+      <p id="task-compose-error" class="field-error" role="alert"></p>
+    </form>
+    <div id="completion-banner" class="hidden"></div>
+    <div id="task-progress">
+      <div id="task-progress-bar" role="progressbar" aria-label="Tasks completed" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div id="task-progress-fill"></div></div>
+      <span id="task-progress-label">0 / 0 done</span>
+    </div>
+    <ul id="task-list" class="scroll-cap"></ul>
+  </section>
+
+</main>
+
+<!-- Dock — click to open ONE focused panel at a time, mac-style exclusivity -->
+<nav id="dock" aria-label="Operation HQ tools">
+  <button class="dock-btn nexus-dock-btn" data-panel="nexus-flyout" title="Nexus Command Core"></button>
+  <button class="dock-btn" data-panel="today-flyout" title="Today"></button>
+  <button class="dock-btn" data-panel="pomodoro-flyout" title="Focus Timer"></button>
+  <button class="dock-btn" data-panel="gmail-flyout" title="Inbox"></button>
+  <button class="dock-btn" data-panel="notes-flyout" title="Notes"><span id="capture-count-badge" class="dock-badge hidden"></span></button>
+  <button class="dock-btn" data-panel="calendar-flyout" title="Calendar"></button>
+  <button id="dock-more-btn" class="dock-more-btn" title="More tools" aria-label="More tools" aria-controls="dock-more-tray" aria-expanded="false"><span aria-hidden="true">•••</span><small>More</small></button>
+  <div id="dock-more-tray" class="hidden" role="group" aria-label="More Operation HQ tools">
+    <button class="dock-btn" data-panel="spotify-flyout" title="Spotify"></button>
+    <button class="dock-btn" data-panel="exam-countdown-flyout" title="Exam Countdown"></button>
+    <button class="dock-btn" data-panel="assignments-flyout" title="Assignment Command Centre"></button>
+    <button class="dock-btn" data-panel="schedule-flyout" title="Schedule — today's timetable, switchable profiles"></button>
+    <button class="dock-btn" data-panel="bookmarks-flyout" title="Bookmark Sorter"></button>
+    <button class="dock-btn locked-tool" data-panel="plan-flyout" title="Today's Plan (AI-generated — requires Claude API key)"></button>
+    <button class="dock-btn" data-panel="optimizer-flyout" title="Chrome Optimizer"></button>
+    <button class="dock-btn" data-panel="stats-flyout" title="Weekly Stats"></button>
+    <button class="dock-btn" data-panel="venture-dash-flyout" title="Venture Dashboards — per-venture stats, chart, and task lists"></button>
+    <button class="dock-btn" data-panel="mods-flyout" title="Mods"></button>
+    <button class="dock-btn" data-panel="vault-flyout" title="Idea Vault — timestamp an idea as proof you had it first"></button>
+    <button class="dock-btn locked-tool" data-panel="radar-flyout" title="Idea Radar (requires Claude API key)"></button>
+    <button class="dock-btn" data-panel="srs-flyout" title="Language Practice — spaced repetition flashcards"><span id="srs-due-badge" class="dock-badge hidden"></span></button>
+    <button class="dock-btn gleam-dock-btn" data-panel="gleam-flyout" title="Gleam — social confidence lab"></button>
+  </div>
+</nav>
+
+<!-- Cinema reveal handle — the only control visible while the interface is cleared -->
+<button id="zen-reveal" class="hidden" title="Exit Cinema mode" aria-label="Exit Cinema mode"></button>
+<div id="dock-peek" class="dock-peek" role="tooltip"></div>
+
+<!-- PIN modal — gates un-hiding Privacy Mode when a PIN is set -->
+<div id="pin-modal" class="hidden" role="dialog" aria-modal="true" aria-labelledby="pin-modal-title" aria-hidden="true" inert>
+  <div class="pin-modal-box">
+    <p id="pin-modal-title">Enter PIN to reveal</p>
+    <input type="password" id="pin-modal-input" maxlength="12" autocomplete="off" aria-label="Privacy PIN">
+    <div class="pin-modal-actions">
+      <button id="pin-modal-submit">Unlock</button>
+      <button id="pin-modal-cancel">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div id="backup-passphrase-modal" class="hidden" role="dialog" aria-modal="true" aria-labelledby="backup-passphrase-title" aria-hidden="true" inert>
+  <div class="pin-modal-box">
+    <p id="backup-passphrase-title">This backup is encrypted.<br>Enter the passphrase to restore it.</p>
+    <input type="password" id="backup-passphrase-input" class="passphrase-input" autocomplete="off" aria-label="Backup passphrase">
+    <p id="backup-passphrase-error" class="passphrase-error" role="alert" aria-live="assertive"></p>
+    <div class="pin-modal-actions">
+      <button id="backup-passphrase-submit">Restore</button>
+      <button id="backup-passphrase-cancel">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div id="venture-report-modal" class="hidden" role="dialog" aria-modal="true" aria-labelledby="venture-report-title" aria-hidden="true" inert>
+  <div class="pin-modal-box report-modal-box">
+    <p id="venture-report-title">Client/co-founder-safe weekly update — generated from this venture's real task and metric data, respecting Professional View's privacy filter.</p>
+    <textarea id="venture-report-text" readonly aria-label="Generated weekly update"></textarea>
+    <div class="pin-modal-actions">
+      <button id="venture-report-copy">Copy to Clipboard</button>
+      <button id="venture-report-close">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Command Palette (Cmd/Ctrl+K) — keyboard-first access to every dock
+     action and top-bar toggle, reusing the exact same click handlers those
+     buttons already have rather than duplicating any logic. -->
+<div id="command-palette" class="hidden" role="dialog" aria-modal="true" aria-label="Command palette" aria-hidden="true" inert>
+  <div class="palette-box">
+    <div class="palette-input-row">
+      <span class="icon-inline" data-icon="search"></span>
+      <input type="text" id="palette-input" placeholder="Type a command…" autocomplete="off" spellcheck="false" role="combobox" aria-label="Search commands" aria-controls="palette-results" aria-expanded="false" aria-autocomplete="list">
+    </div>
+    <div id="palette-context"></div>
+    <ul id="palette-results" class="scroll-cap" role="listbox"></ul>
+  </div>
+</div>
+
+<!-- Flyout panels — only one shown at a time, positioned above the dock -->
+<div id="flyout-backdrop" class="hidden"></div>
+
+<section class="flyout panel wide nexus-panel" id="nexus-flyout" role="dialog" aria-modal="true" aria-hidden="true" inert>
+  <div class="panel-head nexus-panel-head"><div><span class="nexus-kicker">Local command router</span><h2>Nexus Core</h2></div><span id="nexus-engine-state" class="nexus-engine-state">Ready</span><button class="flyout-close"></button></div>
+  <div class="nexus-cortex" aria-label="Live Operation HQ system status">
+    <div class="nexus-core-visual" aria-hidden="true"><i></i><i></i><i></i><span>N</span></div>
+    <div class="nexus-telemetry">
+      <div><span>Mode</span><strong id="nexus-telemetry-mode">Normal</strong></div>
+      <div><span>Workload</span><strong id="nexus-telemetry-workload">0 open</strong></div>
+      <div><span>Timeline</span><strong id="nexus-telemetry-timeline">Open time</strong></div>
+      <div><span>Authority</span><strong id="nexus-telemetry-authority">Local first</strong></div>
+    </div>
+    <div class="nexus-signal-wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+  </div>
+  <div class="nexus-context" id="nexus-context" aria-live="polite"></div>
+  <form id="nexus-command-form" class="nexus-command-form">
+    <span class="icon-inline" data-icon="terminal"></span>
+    <input id="nexus-command-input" type="text" autocomplete="off" spellcheck="false" placeholder="Try: open TikTok messages, start focus, clean tabs…" aria-label="Nexus command">
+    <button id="nexus-command-run" type="submit">Run</button>
+  </form>
+  <div id="nexus-suggestions" class="nexus-suggestions" role="listbox" aria-label="Command suggestions" hidden></div>
+  <div id="nexus-command-trace" class="nexus-command-trace" aria-live="polite">Awaiting a command · deterministic local routing</div>
+  <div class="nexus-recents"><span>Recent</span><div id="nexus-recent-commands"></div><button id="nexus-clear-recents" class="secondary-btn" type="button">Clear</button></div>
+  <div id="nexus-result" class="nexus-result" role="status" aria-live="polite">Commands run locally. Restricted platforms open in their original app.</div>
+  <div id="nexus-plan-preview" class="nexus-plan-preview" hidden>
+    <div><span class="nexus-kicker">Review before action</span><strong id="nexus-plan-title"></strong><p id="nexus-plan-steps"></p></div>
+    <div class="nexus-plan-actions"><button id="nexus-plan-cancel" class="secondary-btn">Cancel</button><button id="nexus-plan-run">Confirm</button></div>
+  </div>
+  <div class="nexus-layout">
+    <div class="nexus-section">
+      <h3>Mission sequences</h3>
+      <div class="nexus-mission-list">
+        <button class="nexus-mission" data-nexus-mission="study"><span class="icon-inline" data-icon="graduation-cap"></span><span><strong>Study launch</strong><small>Deep Work · 25-minute focus · study tools</small></span></button>
+        <button class="nexus-mission" data-nexus-mission="build"><span class="icon-inline" data-icon="code-2"></span><span><strong>Build sprint</strong><small>Deep Work · 50-minute focus · venture dashboard</small></span></button>
+        <button class="nexus-mission" data-nexus-mission="review"><span class="icon-inline" data-icon="scan-eye"></span><span><strong>Evening close</strong><small>Weekly signals · open tasks · tomorrow</small></span></button>
+      </div>
+      <div id="nexus-mission-preview" class="nexus-mission-preview" hidden>
+        <div><strong id="nexus-mission-title"></strong><p id="nexus-mission-steps"></p></div>
+        <button id="nexus-mission-run">Confirm mission</button>
+      </div>
+    </div>
+    <div class="nexus-section">
+      <h3>Fast handoffs</h3>
+      <div class="nexus-handoff-grid">
+        <button data-nexus-command="open Gmail"><span class="icon-inline" data-icon="mail"></span><span>Gmail</span><small>Read-only</small></button>
+        <button data-nexus-command="open TikTok messages"><span class="icon-inline" data-icon="external-link"></span><span>TikTok</span><small>Open-only</small></button>
+        <button data-nexus-command="open Instagram messages"><span class="icon-inline" data-icon="external-link"></span><span>Instagram</span><small>Open-only</small></button>
+        <button data-nexus-command="open Discord messages"><span class="icon-inline" data-icon="message-circle"></span><span>Discord</span><small>Open-only</small></button>
+        <button data-nexus-command="open calendar"><span class="icon-inline" data-icon="calendar"></span><span>Calendar</span><small>Local</small></button>
+        <button data-nexus-command="clean tabs"><span class="icon-inline" data-icon="panels-top-left"></span><span>Tab review</span><small>Confirm first</small></button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="flyout panel wide today-panel" id="today-flyout" role="dialog" aria-modal="true" aria-hidden="true" inert>
+  <div class="panel-head"><div><span class="nexus-kicker">Personal operations</span><h2>Today</h2></div><span id="today-date-label" class="today-date-label"></span><button class="flyout-close"></button></div>
+  <form id="today-capture-form" class="today-capture-form">
+    <input id="today-capture-input" maxlength="240" placeholder="Capture something without breaking flow…" aria-label="Quick capture text" required>
+    <select id="today-capture-destination" aria-label="Quick capture destination"><option value="task">Task</option><option value="note">Note</option><option value="followup">Follow-up</option><option value="event">Today event</option></select>
+    <button type="submit">Capture</button>
+  </form>
+  <div id="today-undo" class="today-undo hidden" role="status" aria-live="polite"><span id="today-undo-text"></span><button id="today-undo-btn" class="secondary-btn">Undo</button></div>
+  <section class="today-foresight" aria-labelledby="today-foresight-title">
+    <div class="today-foresight-main">
+      <span class="today-bucket-kicker" id="today-foresight-title">HQ Foresight · next action</span>
+      <strong id="today-next-title">No open task selected</strong>
+      <p id="today-next-reason">Add a real task and Operation HQ will surface the clearest next move.</p>
+      <div class="today-next-actions"><button id="today-start-next" disabled>Start 25 min</button><button id="today-complete-next" class="secondary-btn" disabled>Mark done</button></div>
+    </div>
+    <div class="today-signals" aria-label="Today overview">
+      <div><strong id="today-signal-open">0</strong><span>unfinished</span></div>
+      <div><strong id="today-signal-remaining">0</strong><span>remaining today</span></div>
+      <div><strong id="today-signal-tomorrow">0</strong><span>tomorrow</span></div>
+    </div>
+  </section>
+  <div class="today-grid">
+    <section class="today-bucket today-now"><span class="today-bucket-kicker">Now</span><div id="today-now"></div></section>
+    <section class="today-bucket"><span class="today-bucket-kicker">Later</span><div id="today-later"></div></section>
+    <section class="today-bucket"><span class="today-bucket-kicker">Waiting</span><div id="today-waiting"></div></section>
+    <section class="today-bucket"><span class="today-bucket-kicker">Tomorrow</span><div id="today-tomorrow"></div></section>
+  </div>
+</section>
+
+<section class="flyout panel" id="pomodoro-flyout" role="dialog" aria-modal="true" aria-hidden="true" inert>
+  <div class="panel-head"><h2>Focus Timer</h2><button class="flyout-close"></button></div>
+  <div id="pomodoro-display">25:00</div>
+  <div id="pomodoro-controls">
+    <button id="pomo-start">Start</button>
+    <button id="pomo-reset">Reset</button>
+    <select id="pomo-mode" aria-label="Focus timer duration">
+      <option value="25">Focus 25</option>
+      <option value="5">Break 5</option>
+      <option value="50">Deep 50</option>
+    </select>
+  </div>
+  <div class="focus-scene-section">
+    <div class="focus-scene-heading"><span>Focus scenes</span><button id="focus-scene-exit" class="secondary-btn hidden">Exit scene</button></div>
+    <div id="focus-scene-grid" class="focus-scene-grid"></div>
+    <div id="focus-scene-preview" class="focus-scene-preview hidden"><strong id="focus-scene-preview-title"></strong><p id="focus-scene-preview-steps"></p><div><button id="focus-scene-cancel" class="secondary-btn">Cancel</button><button id="focus-scene-confirm">Deploy scene</button></div></div>
+  </div>
+  <form id="interruption-form" class="interruption-form">
+    <input id="interruption-input" maxlength="180" placeholder="Park an interruption for later…" aria-label="Interruption note">
+    <button type="submit">Park</button>
+  </form>
+  <div id="focus-timeline" class="focus-timeline" aria-live="polite"></div>
+</section>
+
+<section class="flyout panel wide" id="spotify-flyout" role="dialog" aria-modal="true" aria-hidden="true" inert>
+  <div class="panel-head">
+    <h2>Spotify</h2>
+    <span id="spotify-status" style="font-size:11px; color:var(--text-dim); margin-left:auto; margin-right:8px;"></span>
+    <button id="spotify-connect-btn">Connect Spotify</button>
+    <button id="spotify-disconnect-btn" class="hidden">Disconnect</button>
+    <button class="flyout-close"></button>
+  </div>
+
+  <div id="spotify-connect-prompt">
+    <p class="settings-note">Controls your real Spotify Premium account through Spotify's own official Web Playback SDK — search, browse your playlists, and play/pause/skip, all in this custom UI. Needs your own Spotify Premium subscription and a free Client ID from developer.spotify.com (add it in Settings &gt; Integrations first). Doesn't remove ads on the free tier or add offline playback — those stay Spotify's own product tiers, not something this can change.</p>
+  </div>
+
+  <div id="spotify-main-area" class="hidden">
+    <input type="text" id="spotify-search-input" placeholder="Search tracks…" aria-label="Search Spotify tracks" style="width:100%; margin-bottom:8px;">
+    <ul id="spotify-search-results" class="scroll-cap" style="max-height:140px;"></ul>
+
+    <div style="display:flex; gap:12px; margin-top:10px;">
+      <div style="flex:1;">
+        <h3 style="font-size:12px; color:var(--text-dim); margin-bottom:6px;">Your Playlists</h3>
+        <ul id="spotify-playlist-list" class="scroll-cap" style="max-height:220px;"></ul>
+      </div>
+      <div style="flex:1;">
+        <h3 style="font-size:12px; color:var(--text-dim); margin-bottom:6px;">Tracks</h3>
+        <ul id="spotify-playlist-tracks" class="scroll-cap" style="max-height:220px;"></ul>
+      </div>
+    </div>
+  </div>
+
+  <div id="spotify-now-playing" class="hidden">
+    <div class="spotify-now-playing-info">
+      <div id="spotify-now-playing-title"></div>
+      <div id="spotify-now-playing-artist" style="font-size:11px; color:var(--text-dim);"></div>
+    </div>
+    <div class="spotify-transport">
+          <button id="spotify-prev-btn" aria-label="Previous track"><span class="icon-inline" data-icon="skip-back"></span></button>
+          <button id="spotify-play-pause-btn" aria-label="Play or pause"><span class="icon-inline" data-icon="play"></span></button>
+          <button id="spotify-next-btn" aria-label="Next track"><span class="icon-inline" data-icon="skip-forward"></span></button>
+      <input type="range" id="spotify-volume-slider" min="0" max="1" step="0.05" value="0.5" title="Volume" aria-label="Spotify volume">
+    </div>
+  </div>
+</section>
+
+<section class="flyout panel wide" id="exam-countdown-flyout" role="dialog" aria-modal="true" aria-hidden="true" inert>
+  <div class="panel-head"><div><span class="nexus-kicker">Capacity-aware revision</span><h2>Exam Reverse Planner</h2></div><button class="flyout-close"></button></div>
+  <p class="settings-note">Reverse-engineers a day-by-day study allocation from your target hours, weighted by the same real completion-capacity data Today's Plan already learns — a day that's historically light gets less, a free day gets more. You supply the target hours; this only solves how to realistically spread them out.</p>
+  <div class="exam-add-form">
+    <input type="text" id="exam-subject-input" placeholder="Subject (e.g. Chemistry)" aria-label="Exam subject">
+    <input type="date" id="exam-date-input" title="Exam date" aria-label="Exam date">
+    <input type="number" id="exam-hours-input" placeholder="Target hours" min="1" step="0.5" aria-label="Target study hours">
+    <button id="exam-add-btn">Add</button>
+  </div>
+  <div class="study-inline-status"><p id="exam-countdown-status" class="assignment-status" role="status" aria-live="polite">Plans are suggestions based on the target hours you enter.</p><button id="exam-undo-delete" class="secondary-btn hidden" type="button">Undo exam delete</button></div>
+  <ul id="exam-countdown-list" class="scroll-cap"></ul>
+</section>
+
+<section class="flyout panel wide" id="gmail-flyout" role="dialog" aria-modal="true" aria-hidden="true" inert>
+  <div class="panel-head"><div><span class="gmail-kicker">Message Pulse</span><h2>Gmail</h2></div><button class="flyout-close"></button></div>
+  <div class="gmail-connection-bar">
+    <span class="gmail-connection-dot" id="gmail-connection-dot" aria-hidden="true"></span>
+    <span id="gmail-status" role="status" aria-live="polite">Not connected. No email data has been loaded.</span>
+  </div>
+  <div class="gmail-actions">
+    <button id="gmail-connect-btn">Connect Gmail</button>
+    <button id="gmail-refresh-btn" class="secondary" hidden>Refresh</button>
+    <button id="gmail-disconnect-btn" class="secondary" hidden>Disconnect</button>
+    <button id="gmail-oauth-help-btn" class="secondary" hidden>Fix Google access</button>
+  </div>
+  <form id="gmail-search-form" class="gmail-search" role="search">
+    <input id="gmail-search-input" type="search" placeholder="Search sender or subject…" aria-label="Search Gmail">
+    <select id="gmail-filter" aria-label="Gmail filter">
+      <option value="in:inbox">Inbox</option>
+      <option value="in:inbox is:unread">Unread</option>
+      <option value="in:inbox is:important">Important</option>
+      <option value="in:inbox is:starred">Starred</option>
+    </select>
+    <button type="submit">Search</button>
+  </form>
+  <div class="gmail-intelligence-head">
+    <div><span class="gmail-kicker">Local intelligence</span><strong>Priority lanes</strong></div>
+    <span id="gmail-triage-summary">Messages are classified on this device.</span>
+  </div>
+  <div id="gmail-smart-filters" class="gmail-smart-filters" role="group" aria-label="Gmail smart categories">
+    <button type="button" data-smart-filter="all" class="active" aria-pressed="true">All</button>
+    <button type="button" data-smart-filter="urgent" aria-pressed="false">Urgent</button>
+    <button type="button" data-smart-filter="school" aria-pressed="false">School</button>
+    <button type="button" data-smart-filter="work" aria-pressed="false">Work</button>
+    <button type="button" data-smart-filter="venture" aria-pressed="false">Ventures</button>
+    <button type="button" data-smart-filter="social" aria-pressed="false">Social</button>
+    <button type="button" data-smart-filter="finance" aria-pressed="false">Finance</button>
+    <button type="button" data-smart-filter="updates" aria-pressed="false">Updates</button>
+  </div>
+  <ul id="gmail-list" class="scroll-cap" aria-label="Gmail inbox" aria-live="polite"></ul>
+  <div id="gmail-pagination" class="gmail-pagination" hidden>
+    <button id="gmail-prev-page" class="secondary" type="button">Previous</button>
+    <span id="gmail-page-label">Page 1</span>
+    <button id="gmail-next-page" class="secondary" type="button">Next</button>
+  </div>
+  <p class="gmail-privacy-note">Read-only access. Categories are virtual and stay inside HQ. Actions create local tasks/calendar entries or open the original service; Operation HQ cannot send, archive, edit or delete mail.</p>
+  <details class="gmail-oauth-identity"><summary>OAuth setup identity</summary><p>Google Console Item ID: <code>cbgepkbfmcahdpahipkdeahppfbggjok</code></p><p>Scope: <code>gmail.readonly</code></p></details>
+</section>
+
+<section class="flyout panel wide notes-workspace" id="notes-flyout" role="dialog" aria-modal="true" aria-hidden="true" inert>
+  <div class="panel-head">
+    <div><span class="nexus-kicker">Thinking space</span><h2>Notes</h2></div>
+    <div class="notes-head-actions">
+      <span id="notes-save-status" class="notes-save-status" role="status">Loading…</span>
+      <button id="notes-export" class="secondary-btn" type="button">Export</button>
+      <button class="flyout-close"></button>
+    </div>
+  </div>
+  <div class="notes-command-row">
+    <label class="notes-search-field"><span>Find</span><input id="notes-search" type="search" placeholder="Search this notebook…" aria-label="Search notes"></label>
+    <span id="notes-search-result" class="notes-search-result" aria-live="polite"></span>
+    <span id="notes-word-count" class="notes-word-count">0 words</span>
+    <button id="notes-restore-recovery" class="secondary-btn hidden" type="button">Restore pre-repair copy</button>
+  </div>
+  <details class="notes-capture-drawer">
+    <summary><span>Captured from the web</span><small>Review snippets waiting for a home</small></summary>
+    <ul id="capture-list" class="scroll-cap"></ul>
+  </details>
+  <div class="notes-editor-shell">
+    <div id="notes-toolbar" class="notes-toolbar" role="toolbar" aria-label="Note formatting">
+      <button data-cmd="bold" title="Bold" aria-label="Bold" aria-pressed="false"><b>B</b></button>
+      <button data-cmd="italic" title="Italic" aria-label="Italic" aria-pressed="false"><i>I</i></button>
+      <button data-cmd="heading" title="Heading" aria-label="Heading" aria-pressed="false">H2</button>
+      <span class="notes-toolbar-divider" aria-hidden="true"></span>
+      <button data-cmd="bulletList" title="Bullet list" aria-label="Bullet list" aria-pressed="false">•</button>
+      <button data-cmd="orderedList" title="Numbered list" aria-label="Numbered list" aria-pressed="false">1.</button>
+      <button data-cmd="blockquote" title="Quote" aria-label="Quote" aria-pressed="false">”</button>
+      <button data-cmd="code" title="Code block" aria-label="Code block" aria-pressed="false">&lt;/&gt;</button>
+    </div>
+    <div id="notes-editor-container" class="notes-editor"></div>
+    <textarea id="notes-area-fallback" class="hidden" placeholder="Start with the thought…" aria-label="Notes"></textarea>
+  </div>
+</section>
+
+<section class="flyout panel wide calendar-workspace" id="calendar-flyout" role="dialog" aria-modal="true" aria-hidden="true" inert>
+  <div class="panel-head">
+    <div><span class="nexus-kicker">Time architecture</span><h2>Calendar</h2></div>
+    <div class="calendar-head-controls">
+      <button id="cal-today" class="secondary-btn" type="button">Today</button>
+      <div class="cal-navigation" aria-label="Calendar navigation">
+        <button id="cal-prev" type="button" aria-label="Previous period">‹</button>
+        <span id="cal-label" aria-live="polite"></span>
+        <button id="cal-next" type="button" aria-label="Next period">›</button>
+      </div>
+      <div class="cal-view-switch" role="tablist" aria-label="Calendar view">
+        <button type="button" role="tab" data-cal-view="month" aria-selected="true">Month</button>
+        <button type="button" role="tab" data-cal-view="week" aria-selected="false">Week</button>
+        <button type="button" role="tab" data-cal-view="agenda" aria-selected="false">Agenda</button>
+      </div>
+      <button id="cal-undo" class="secondary-btn hidden" type="button">Undo</button>
+      <button class="flyout-close"></button>
+    </div>
+  </div>
+  <form id="cal-quick-form" class="cal-quick-form">
+    <label for="cal-quick-input">Quick add</label>
+    <input id="cal-quick-input" type="text" autocomplete="off" placeholder="Math revision tomorrow at 4pm for 45m #school">
+    <button id="cal-quick-add" type="submit">Schedule</button>
+    <span id="cal-quick-status" role="status"></span>
+  </form>
+  <div class="cal-glance" aria-label="Calendar at a glance">
+    <span id="cal-today-stat">0 today</span>
+    <span id="cal-next-stat">Runway clear</span>
+    <span id="cal-conflict-stat" data-state="clear">No conflicts</span>
+    <label class="cal-search"><span>Filter</span><input id="cal-search" type="search" placeholder="Event, place, category…" aria-label="Filter calendar"></label>
+  </div>
+  <button id="cal-reminder-banner" class="cal-reminder-banner hidden" type="button"><span>HQ reminder</span><strong id="cal-reminder-title">Upcoming event</strong><small id="cal-reminder-time">Open details</small></button>
+  <div class="calendar-layout">
+    <div id="cal-grid" class="cal-surface mode-month scroll-cap"></div>
+    <aside class="cal-inspector" aria-label="Selected day and event editor">
+      <div class="cal-selected-head">
+        <div><span class="nexus-kicker">Selected day</span><h3 id="cal-selected-label">Today</h3><p id="cal-selected-summary">Open day</p></div>
+        <button id="cal-new-event" type="button">+ Event</button>
+      </div>
+      <div id="cal-day-events" class="cal-day-events"></div>
+      <form id="cal-event-form" class="cal-event-form hidden">
+        <div class="cal-editor-head"><strong id="cal-editor-title">New event</strong><span>Stored locally</span></div>
+        <label>Title<input id="cal-event-title" type="text" required maxlength="180" autocomplete="off" aria-label="Event title"></label>
+        <div class="cal-form-grid">
+          <label>Date<input id="cal-event-date" type="date" required aria-label="Event date"></label>
+          <label class="cal-check-field"><input id="cal-event-all-day" type="checkbox" aria-label="All-day event"><span>All day</span></label>
+        </div>
+        <div id="cal-time-fields" class="cal-form-grid">
+          <label>Starts<input id="cal-event-start" type="time" aria-label="Event start time"></label>
+          <label>Ends<input id="cal-event-end" type="time" aria-label="Event end time"></label>
+        </div>
+        <div class="cal-form-grid">
+          <label>Calendar<select id="cal-event-category" aria-label="Event calendar"><option value="school">School</option><option value="deadline">Deadline</option><option value="focus">Focus</option><option value="personal">Personal</option></select></label>
+          <label>Priority<select id="cal-event-priority" aria-label="Event priority"><option value="normal">Normal</option><option value="high">High</option><option value="low">Low</option></select></label>
+        </div>
+        <label>Location<input id="cal-event-location" type="text" maxlength="180" placeholder="Optional place or link" aria-label="Event location"></label>
+        <div class="cal-form-grid">
+          <label>Repeats<select id="cal-event-repeat" aria-label="Event repeat pattern"><option value="none">Does not repeat</option><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select></label>
+          <label id="cal-repeat-until-field" class="hidden">Until<input id="cal-event-repeat-until" type="date" aria-label="Repeat until date"></label>
+        </div>
+        <label>HQ reminder<select id="cal-event-reminder" aria-label="HQ reminder timing"><option value="0">None</option><option value="10">10 minutes before</option><option value="30">30 minutes before</option><option value="60">1 hour before</option><option value="1440">1 day before</option></select><small>Shown inside HQ while a new tab is open; no system notification permission is used.</small></label>
+        <label>Notes<textarea id="cal-event-notes" rows="3" maxlength="1200" placeholder="Context, preparation, links…" aria-label="Event notes"></textarea></label>
+        <p id="cal-event-error" class="field-error" role="alert"></p>
+        <div class="cal-editor-actions"><button id="cal-event-delete" class="danger-btn hidden" type="button">Delete</button><span></span><button id="cal-event-cancel" class="secondary-btn" type="button">Cancel</button><button id="cal-event-save" type="submit">Save event</button></div>
+      </form>
+    </aside>
+  </div>
+</section>
+
+<section class="flyout panel wide" id="schedule-flyout" role="dialog" aria-modal="true" aria-hidden="true" inert>
+  <div class="panel-head">
+    <h2>Schedule</h2>
+    <button class="flyout-close"></button>
+  </div>
+
+  <div id="schedule-first-run" class="schedule-first-run hidden">
+    <span class="nexus-kicker">First-run choice</span>
+    <h3>How should Schedule begin?</h3>
+    <p>No timetable is added behind your back. Start empty, or deliberately import the previously prepared Operation HQ weekly schedule.</p>
+    <div class="panel-actions"><button id="schedule-start-blank-btn">Start blank</button><button id="schedule-use-hq-template-btn" class="secondary-btn">Use prepared HQ schedule</button></div>
+  </div>
+
+  <div id="schedule-profile-row">
+    <select id="schedule-profile-select" aria-label="Schedule profile"></select>
+    <button id="schedule-add-profile-btn" title="New profile">+ Profile</button>
+    <button id="schedule-import-master-btn" title="Import or update the supplied master timetable">Sync v8</button>
+    <button id="schedule-rename-profile-btn" title="Rename">Rename</button>
+    <button id="schedule-delete-profile-btn" title="Delete">Delete</button>
+  </div>
+  <form id="schedule-profile-editor" class="schedule-profile-editor hidden">
+    <label><span id="schedule-profile-editor-label">Profile name</span><input id="schedule-profile-name" type="text" maxlength="80" autocomplete="off" aria-label="Schedule profile name" required></label>
+    <span id="schedule-profile-error" class="field-error" role="alert"></span>
+    <button id="schedule-profile-cancel" class="secondary-btn" type="button">Cancel</button>
+    <button id="schedule-profile-save" type="submit">Save profile</button>
+  </form>
+
+  <section class="schedule-intelligence" aria-labelledby="schedule-intelligence-title">
+    <div class="schedule-intelligence-head"><div><span class="nexus-kicker">Timeline intelligence</span><h3 id="schedule-intelligence-title">Current phase</h3></div><button id="schedule-plan-tasks-btn">Build task plan</button></div>
+    <div id="schedule-phase-banner" class="schedule-phase-banner">Checking the active timetable…</div>
+    <div id="schedule-smart-plan" class="schedule-smart-plan hidden">
+      <div class="schedule-plan-head"><strong>Review proposed calendar blocks</strong><span id="schedule-plan-capacity"></span></div>
+      <ul id="schedule-smart-plan-preview"></ul>
+      <div class="panel-actions"><button id="schedule-apply-plan-btn">Apply to calendar</button><button id="schedule-dismiss-plan-btn" class="secondary-btn">Dismiss</button><button id="schedule-undo-plan-btn" class="secondary-btn" disabled>Undo applied plan</button></div>
+    </div>
+  </section>
+
+  <div class="settings-group">
+    <h3 id="schedule-today-heading">Today</h3>
+    <div id="schedule-week-override-row" class="hidden">
+      <label>This week: </label>
+      <select id="schedule-week-override" aria-label="Schedule week override">
+        <option value="auto">Auto-detect</option>
+        <option value="regular">Force regular</option>
+        <option value="alt">Force alt</option>
+      </select>
+    </div>
+    <ul id="schedule-today-list" class="scroll-cap"></ul>
+  </div>
+
+  <div class="settings-group">
+    <h3>Edit Blocks</h3>
+    <div id="schedule-day-tabs"></div>
+    <div id="schedule-editor-alt-toggle" class="hidden"></div>
+    <ul id="schedule-editor-list" class="scroll-cap"></ul>
+    <button id="schedule-add-block-btn" style="margin-top:8px;">+ Add Block</button>
+  </div>
+</section>
+
+<section class="flyout panel wide" id="bookmarks-flyout" role="dialog" aria-modal="true" aria-hidden="true" inert>
+  <div class="panel-head"><h2>Bookmark Sorter</h2><button class="flyout-close"></button></div>
+  <div id="inbox-count" class="inbox-count-banner">Checking Inbox…</div>
+  <div id="forgotten-bookmark-card" class="hidden"></div>
+  <div class="panel-actions" style="margin-bottom:8px;">
+    <button id="preview-bookmarks-btn">Preview</button>
+    <button id="sort-bookmarks-btn">Sort Now</button>
+    <button id="sort-inbox-btn">Sort Inbox Only</button>
+    <button id="refine-uncategorized-btn">Deep topic review (reads pages)</button>
+    <button id="undo-bookmarks-btn" disabled>Undo Last Sort</button>
+  </div>
+  <div id="bookmark-progress"><div id="bookmark-progress-bar"><div id="bookmark-progress-fill"></div></div><span id="bookmark-progress-label"></span></div>
+  <div id="bookmark-status">One rule: topic first, platform second. HQ scores the saved title and URL, uses a stable-domain fallback only when content has no clear signal, and sends ties or weak evidence to Review Queue instead of guessing. Preview explains uncertain items; Deep Review can read page metadata after permission; every applied move has exact-path undo.</div>
+  <div id="bookmark-log" class="scroll-cap"></div>
+</section>
+
+<section class="flyout panel" id="weather-flyout" role="dialog" aria-modal="true" aria-hidden="true" inert>
+  <div class="panel-head">
+    <div><h2>Weather</h2><p class="panel-kicker">Your quiet local forecast</p></div>
+    <button class="flyout-close"></button>
+  </div>
+  <div class="weather-location-row">
+    <div id="weather-location-label"></div>
+    <span id="weather-source-badge" class="weather-source-badge">Automatic</span>
+  </div>
+  <div id="weather-detail"></div>
+  <div id="weather-permission-state" class="weather-permission-state" role="status" aria-live="polite"></div>
+  <div class="weather-controls" aria-label="Weather preferences">
+    <label class="weather-control-row"><span>Automatic location</span><input type="checkbox" class="hq-toggle" id="weather-auto-location" aria-label="Use automatic weather location" checked></label>
+    <label class="weather-control-row"><span>Temperature</span><select id="weather-unit" aria-label="Temperature unit"><option value="celsius">Celsius</option><option value="fahrenheit">Fahrenheit</option></select></label>
+    <label class="weather-control-row"><span>Refresh</span><select id="weather-refresh" aria-label="Weather refresh interval"><option value="15">Every 15 minutes</option><option value="45">Every 45 minutes</option><option value="90">Every 90 minutes</option></select></label>
+  </div>
+  <div class="panel-actions weather-actions">
+    <button id="weather-use-geo-btn" class="primary-btn">Refresh my location</button>
+    <button id="weather-open-settings-btn" class="ghost-btn hidden">Open location settings</button>
+  </div>
+  <div id="weather-manual-wrap" class="weather-manual-wrap hidden">
+    <label for="weather-city-input">Manual city</label>
+    <input type="text" id="weather-city-input" placeholder="Search city or suburb…" autocomplete="off" aria-label="Weather city">
+    <ul id="weather-city-suggestions" class="hidden"></ul>
+  </div>
+</section>
+
+<section class="flyout panel wide" id="plan-flyout" role="dialog" aria-modal="true" aria-hidden="true" inert>
+  <div class="panel-head">
+    <h2>Today's Plan</h2>
+    <button class="flyout-close"></button>
+  </div>
+  <div class="panel-actions" style="margin-bottom:8px;">
+    <button id="generate-plan-btn">Generate / Regenerate</button>
+  </div>
+  <div id="daily-plan-status" style="font-size:12px; color:var(--text-dim); margin-bottom:8px;"></div>
+  <div id="daily-plan-rationale" class="plan-rationale"></div>
+  <button id="read-plan-btn" class="hidden" style="margin-bottom:8px;"><span class="icon-inline" data-icon="volume-2"></span> Read it to me</button>
+  <div id="daily-plan-premortem" class="premortem-banner"></div>
+  <div id="failure-pattern-banner" class="premortem-banner"></div>
+  <div id="failure-taxonomy-pending"></div>
+  <p class="settings-note">AI-generated from your open task library — turns "build map UI" into a specific plan for today, using your calendar and fixed weekly rhythm as constraints. Calls the Claude API using your own key; costs a small amount per generation.</p>
+  <ul id="daily-plan-list" class="scroll-cap"></ul>
+</section>
+
+<section class="flyout panel wide assignment-panel" id="assignments-flyout" role="dialog" aria-modal="true" aria-hidden="true" inert>
+  <div class="panel-head"><div><span class="nexus-kicker">Roadmap 1.9 · local-first</span><h2>Study OS</h2></div><button class="flyout-close"></button></div>
+  <p class="settings-note">One truthful pipeline from deadline to evidence to recall. Nothing is submitted, rescheduled or sent anywhere without your review.</p>
+  <nav id="study-tabs" class="study-tabs" role="tablist" aria-label="Study OS sections">
+    <button id="study-tab-overview" class="active" type="button" role="tab" aria-selected="true" aria-controls="study-view-overview" data-study-view="overview">Command view</button>
+    <button id="study-tab-assignments" type="button" role="tab" aria-selected="false" aria-controls="study-view-assignments" data-study-view="assignments" tabindex="-1">Assignments</button>
+    <button id="study-tab-research" type="button" role="tab" aria-selected="false" aria-controls="study-view-research" data-study-view="research" tabindex="-1">Research</button>
+    <button id="study-tab-revision" type="button" role="tab" aria-selected="false" aria-controls="study-view-revision" data-study-view="revision" tabindex="-1">Recall</button>
+  </nav>
+
+  <section id="study-view-overview" class="study-view" role="tabpanel" aria-labelledby="study-tab-overview">
+    <div id="study-command-metrics" class="study-command-metrics" aria-live="polite"></div>
+    <div class="study-command-grid">
+      <article class="study-next-card">
+        <span class="nexus-kicker">Next defensible move</span>
+        <h3 id="study-next-title">No study commitment is ready</h3>
+        <p id="study-next-reason">Add an assignment, exam or due flashcard. HQ will use only real stored data.</p>
+        <div class="study-next-meta"><span id="study-next-subject">No subject</span><span id="study-next-duration">—</span></div>
+        <button id="study-mission-prepare" type="button" disabled>Prepare 25-minute mission</button>
+      </article>
+      <article class="study-radar-card">
+        <div class="study-radar-orbit" aria-hidden="true"><i></i><span></span><b></b></div>
+        <span class="nexus-kicker">Deadline radar</span>
+        <div id="study-deadline-list" class="study-deadline-list"></div>
+      </article>
+    </div>
+    <section id="study-mission-preview" class="study-mission-preview hidden" aria-labelledby="study-mission-title">
+      <span class="nexus-kicker">Review before launch</span>
+      <h3 id="study-mission-title">Study mission</h3>
+      <p id="study-mission-consequence"></p>
+      <div class="study-mission-actions"><button id="study-mission-cancel" class="secondary-btn" type="button">Cancel</button><button id="study-mission-confirm" type="button">Start mission</button></div>
+    </section>
+    <p id="study-overview-status" class="assignment-status" role="status" aria-live="polite">All counts are derived from your local records.</p>
+  </section>
+
+  <section id="study-view-assignments" class="study-view hidden" role="tabpanel" aria-labelledby="study-tab-assignments" hidden>
+  <section class="assessment-intake" aria-labelledby="assessment-intake-title">
+    <div class="assessment-intake-head">
+      <div><span class="nexus-kicker">Local file intelligence</span><h3 id="assessment-intake-title">Assessment Intake</h3></div>
+      <span id="assessment-intake-permission" class="assessment-permission" data-state="disconnected">Not connected</span>
+    </div>
+    <div class="assessment-intake-actions">
+      <button id="assessment-downloads-connect">Connect download history</button>
+      <button id="assessment-downloads-disconnect" class="secondary-btn" disabled>Disconnect history</button>
+      <button id="assessment-folder-connect" class="secondary-btn">Grant Downloads folder</button>
+      <button id="assessment-folder-forget" class="secondary-btn" disabled>Forget folder</button>
+      <label class="assessment-file-import secondary-btn" for="assessment-file-input">Import files</label>
+      <input id="assessment-file-input" class="visually-hidden" type="file" multiple accept=".pdf,.docx,.txt,.md,.html,.htm,.rtf" aria-label="Import assessment files">
+      <button id="assessment-intake-refresh" class="secondary-btn">Scan now</button>
+      <button id="assessment-intake-clear" class="secondary-btn">Clear intake</button>
+    </div>
+    <div class="assessment-privacy-grid">
+      <label><input id="assessment-auto-scan" class="hq-toggle" type="checkbox" checked aria-label="Scan a previously granted folder when Operation HQ opens"> Auto-scan granted folder</label>
+      <label><input id="assessment-only-likely" class="hq-toggle" type="checkbox" checked aria-label="Only surface files that look like assessment documents"> Assessment-like files only</label>
+    </div>
+    <p class="assessment-boundary">Chrome’s optional Downloads permission can expose download records including source URLs; Operation HQ uses and stores only the download ID, basename, status, size and date. It cannot read document contents. Reading a PDF, DOCX or text file requires your separate folder grant or direct import. Derived details stay on this device; no file is uploaded.</p>
+    <div id="assessment-intake-summary" class="assessment-intake-summary" aria-live="polite"></div>
+    <div id="assessment-intake-status" class="assignment-status" role="status" aria-live="polite">Nothing is scanned until you connect or import.</div>
+    <div id="assessment-intake-list" class="assessment-intake-list" aria-label="Assessment files awaiting review"></div>
+  </section>
+  <div class="assignment-divider"><span>Tracked and accepted</span></div>
+  <form id="assignment-form" class="assignment-form">
+    <input id="assignment-title" maxlength="120" placeholder="Assessment or assignment" aria-label="Assignment title" required>
+    <input id="assignment-subject" maxlength="48" placeholder="Subject" aria-label="Assignment subject" required>
+    <input id="assignment-due" type="date" aria-label="Assignment due date" required>
+    <input id="assignment-minutes" type="number" min="25" max="3000" step="25" value="100" aria-label="Estimated work minutes" required>
+    <select id="assignment-type" aria-label="Assignment type"><option value="general">General task</option><option value="exam">Exam</option><option value="writing">Writing</option><option value="research">Research</option><option value="presentation">Presentation</option><option value="practical">Practical</option></select>
+    <input id="assignment-weight" type="number" min="0" max="100" step="1" placeholder="Weight % (optional)" aria-label="Assessment weighting percentage">
+    <select id="assignment-priority" aria-label="Assignment priority"><option value="high">High priority</option><option value="medium" selected>Medium priority</option><option value="low">Low priority</option></select>
+    <textarea id="assignment-requirements" rows="2" maxlength="1200" placeholder="Requirements or rubric points — one per line (optional)" aria-label="Assignment requirements"></textarea>
+    <button type="submit">Track assignment</button>
+  </form>
+  <div id="assignment-summary" class="assignment-summary" aria-live="polite"></div>
+  <div id="assignment-status" class="assignment-status" role="status" aria-live="polite">No changes are made automatically.</div>
+  <ul id="assignment-list" class="assignment-list scroll-cap" aria-label="Tracked assignments"></ul>
+  <section id="assignment-plan" class="assignment-plan hidden" aria-labelledby="assignment-plan-title">
+    <div class="assignment-plan-head"><div><span class="nexus-kicker">Review before calendar</span><h3 id="assignment-plan-title">Session plan</h3></div><span id="assignment-plan-total"></span></div>
+    <ol id="assignment-plan-list"></ol>
+    <div class="assignment-plan-actions"><button id="assignment-plan-cancel" class="secondary-btn">Cancel</button><button id="assignment-plan-apply">Apply sessions</button></div>
+  </section>
+  <div class="assignment-undo-row"><button id="assignment-plan-undo" class="secondary-btn" disabled>Undo last session plan</button><button id="assignment-delete-undo" class="secondary-btn hidden" type="button">Undo assignment delete</button></div>
+  </section>
+
+  <section id="study-view-research" class="study-view hidden" role="tabpanel" aria-labelledby="study-tab-research" hidden>
+    <div class="study-section-head"><div><span class="nexus-kicker">Evidence with provenance</span><h3>Research pipeline</h3></div><button id="study-source-current-tab" class="secondary-btn" type="button">Use previous web page</button></div>
+    <p class="settings-note">HQ stores only the source details and notes you choose. It does not scrape page text or invent citations.</p>
+    <form id="study-source-form" class="study-source-form">
+      <input id="study-source-title" maxlength="180" placeholder="Source title" aria-label="Research source title" required>
+      <input id="study-source-url" type="url" maxlength="1800" placeholder="https://…" aria-label="Research source URL" required>
+      <input id="study-source-author" maxlength="120" placeholder="Author or organisation (optional)" aria-label="Research source author or organisation">
+      <input id="study-source-date" type="date" aria-label="Research source publication date">
+      <input id="study-source-subject" maxlength="48" placeholder="Subject" aria-label="Research source subject">
+      <select id="study-source-kind" aria-label="Research source type"><option value="unknown">Type not checked</option><option value="primary">Primary source</option><option value="secondary">Secondary source</option><option value="dataset">Dataset</option><option value="official">Official guidance</option></select>
+      <select id="study-source-stage" aria-label="Research pipeline stage"><option value="inbox">Inbox</option><option value="skim">Skim</option><option value="read">Read</option><option value="extract">Extract</option><option value="apply">Apply</option><option value="archive">Archive</option></select>
+      <select id="study-source-assignment" aria-label="Linked assignment"><option value="">No linked assignment</option></select>
+      <textarea id="study-source-notes" rows="3" maxlength="2400" placeholder="What matters, evidence, limitations, and how you may use it" aria-label="Research source notes"></textarea>
+      <button type="submit">Save source</button>
+    </form>
+    <div class="study-source-controls">
+      <input id="study-source-search" type="search" placeholder="Search sources, subjects or notes…" aria-label="Search research sources">
+      <select id="study-source-filter" aria-label="Filter research sources by stage"><option value="all">All stages</option><option value="inbox">Inbox</option><option value="skim">Skim</option><option value="read">Read</option><option value="extract">Extract</option><option value="apply">Apply</option><option value="archive">Archive</option></select>
+      <button id="study-source-export" class="secondary-btn" type="button">Export references</button>
+    </div>
+    <div id="study-source-summary" class="assignment-summary" aria-live="polite"></div>
+    <div class="study-inline-status"><p id="study-source-status" class="assignment-status" role="status" aria-live="polite">No source is added until you save it.</p><button id="study-source-undo-delete" class="secondary-btn hidden" type="button">Undo source delete</button></div>
+    <div id="study-source-list" class="study-source-list scroll-cap"></div>
+  </section>
+
+  <section id="study-view-revision" class="study-view hidden" role="tabpanel" aria-labelledby="study-tab-revision" hidden>
+    <div class="study-section-head"><div><span class="nexus-kicker">Active recall</span><h3>Revision control</h3></div></div>
+    <div id="study-revision-summary" class="study-revision-summary" aria-live="polite"></div>
+    <div id="study-exam-targets" class="study-exam-targets"></div>
+    <div class="study-revision-actions"><button id="study-open-srs" type="button">Open Recall Lab</button><button id="study-open-exams" class="secondary-btn" type="button">Open exam planner</button></div>
+    <p class="settings-note">Study targets are based on the hours you entered and any available completion history. Defaults are labelled; HQ never guesses how many hours a subject “should” take.</p>
+  </section>
+</section>
+
+<section class="flyout panel wide" id="optimizer-flyout" role="dialog" aria-modal="true" aria-hidden="true" inert>
+  <div class="panel-head">
+    <h2>Chrome Optimizer</h2>
+    <button class="flyout-close"></button>
+  </div>
+  <div class="optimizer-tabs" role="tablist" aria-label="Browser tools">
+    <button id="optimizer-review-tab" class="active" role="tab" aria-selected="true" aria-controls="optimizer-review-view">Tab review</button>
+    <button id="optimizer-workspaces-tab" role="tab" aria-selected="false" aria-controls="optimizer-workspaces-view" tabindex="-1">Workspaces</button>
+  </div>
+  <div id="optimizer-review-view" role="tabpanel" aria-labelledby="optimizer-review-tab">
+  <div id="optimizer-summary" style="font-size:12px; color:var(--text-dim); margin-bottom:8px;"></div>
+  <div class="panel-actions" style="margin-bottom:8px;">
+    <button id="select-all-inactive">Select All</button>
+    <button id="suspend-selected-btn" disabled>Suspend Selected</button>
+    <button id="refresh-optimizer-btn">Refresh</button>
+  </div>
+  <div id="optimizer-status" style="font-size:12px; color:var(--text-dim); margin-bottom:8px;"></div>
+  <p class="settings-note">Nothing suspends without you checking it and clicking Suspend — unlike Chrome's built-in Memory Saver, no surprise reloads mid-form. Suspended tabs stay in your tab bar; clicking one reloads it, same as before.</p>
+  <ul id="optimizer-list" class="scroll-cap"></ul>
+  </div>
+  <div id="optimizer-workspaces-view" class="hidden" role="tabpanel" aria-labelledby="optimizer-workspaces-tab">
+    <p class="settings-note">Save useful tabs as durable workspaces. Sync merges the current window with the saved set, so a temporarily closed important tab is not silently erased. Restore rebuilds saved tab groups in a separate window.</p>
+    <form id="workspace-save-form" class="workspace-save-form">
+      <input id="workspace-name-input" maxlength="48" placeholder="Workspace name" aria-label="Workspace name" required>
+      <button type="submit">Save current window</button>
+    </form>
+    <div class="workspace-intelligence-actions"><button id="workspace-analyse-btn" class="secondary-btn">Analyse current tabs</button><button id="workspace-health-btn" class="secondary-btn">Workspace health</button><button id="workspace-group-btn" disabled>Group by topic</button><button id="workspace-cancel-group-btn" class="secondary-btn hidden">Cancel</button></div>
+    <div id="workspace-intelligence" class="workspace-intelligence hidden" aria-live="polite"></div>
+    <div id="workspace-health" class="workspace-health hidden" aria-live="polite"></div>
+    <div id="workspace-status" class="workspace-status" role="status" aria-live="polite"></div>
+    <ul id="workspace-list" class="workspace-list scroll-cap" aria-label="Saved browser workspaces"></ul>
+  </div>
+</section>
+
+<section class="flyout panel wide" id="stats-flyout" role="dialog" aria-modal="true" aria-hidden="true" inert>
+  <div class="panel-head">
+    <h2>Weekly Stats</h2>
+    <button class="flyout-close"></button>
+  </div>
+  <div id="weekly-stats-headline" style="font-size:16px; font-weight:600; margin-bottom:4px;"></div>
+  <div id="weekly-stats-sub" style="font-size:12px; color:var(--text-dim); margin-bottom:14px;"></div>
+  <div style="height:220px; position:relative;">
+    <canvas id="weekly-stats-canvas"></canvas>
+  </div>
+</section>
+
+<section class="flyout panel wide" id="venture-dash-flyout" role="dialog" aria-modal="true" aria-hidden="true" inert>
+  <div class="panel-head">
+    <h2>Venture Dashboards</h2>
+    <button id="venture-report-btn" title="Generate a client/co-founder-safe weekly update"><span class="icon-inline" data-icon="file-text"></span></button>
+    <button class="flyout-close"></button>
+  </div>
+  <p class="settings-note">Not just a shared task list — a filtered view per venture, computed live from your real tasks. Add or rename ventures from the task form; they show up here automatically.</p>
+  <div id="venture-dash-tabs"></div>
+  <div id="venture-dash-stats"></div>
+  <div style="height:160px; position:relative; margin:14px 0;">
+    <canvas id="venture-dash-canvas"></canvas>
+  </div>
+  <div class="settings-group">
+    <h3>Open Tasks</h3>
+    <ul id="venture-dash-open-list" class="scroll-cap"></ul>
+  </div>
+  <div class="settings-group">
+    <h3>Recently Completed</h3>
+    <ul id="venture-dash-recent-list" class="scroll-cap"></ul>
+  </div>
+  <div class="settings-group">
+    <h3>Revenue &amp; Metrics</h3>
+    <p class="settings-note">Manual entry — MRR, client count, hours billed. Log whatever's relevant; every field is optional except at least one number.</p>
+    <div class="venture-metric-form">
+      <input type="date" id="venture-metric-date" title="Date" aria-label="Metric date">
+      <input type="number" id="venture-metric-mrr" placeholder="MRR $" step="0.01" title="Monthly recurring revenue" aria-label="Monthly recurring revenue">
+      <input type="number" id="venture-metric-clients" placeholder="Clients" step="1" title="Client count" aria-label="Client count">
+      <input type="number" id="venture-metric-hours" placeholder="Hours" step="0.25" title="Hours billed" aria-label="Hours billed">
+      <button id="venture-metric-add-btn">Add</button>
+    </div>
+    <div style="height:120px; position:relative; margin:10px 0;">
+      <canvas id="venture-metrics-canvas"></canvas>
+    </div>
+    <ul id="venture-metrics-list" class="scroll-cap"></ul>
+  </div>
+</section>
+
+<section class="flyout panel" id="mods-flyout" role="dialog" aria-modal="true" aria-hidden="true" inert>
+  <div class="panel-head">
+    <h2>Mods</h2>
+    <button class="flyout-close"></button>
+  </div>
+  <p class="settings-note">One click swaps accent color + wallpaper category together — like Opera GX's mod packs.</p>
+  <div id="mods-grid"></div>
+</section>
+
+<section class="flyout panel wide" id="vault-flyout" role="dialog" aria-modal="true" aria-hidden="true" inert>
+  <div class="panel-head">
+    <h2>Idea Vault</h2>
+    <button class="flyout-close"></button>
+  </div>
+  <p class="settings-note">Stamps the exact text with a SHA-256 hash + timestamp — proof you had it at a specific moment, without exposing it to anyone unless you choose to share the receipt. The full text stays local to this device only.</p>
+  <textarea id="vault-input" placeholder="Paste or type the idea/concept to timestamp..." aria-label="Idea to timestamp" style="width:100%; min-height:80px; margin-bottom:8px;"></textarea>
+  <button id="vault-stamp-btn">Stamp It</button>
+  <ul id="vault-list" class="scroll-cap" style="margin-top:12px;"></ul>
+</section>
+
+<section class="flyout panel wide" id="radar-flyout" role="dialog" aria-modal="true" aria-hidden="true" inert>
+  <div class="panel-head">
+    <h2>Idea Radar</h2>
+    <button class="flyout-close"></button>
+  </div>
+  <p class="settings-note">Real web search (via your Claude API key) checking whether your venture names are showing up elsewhere. Uses API credits each run — manual by default.</p>
+  <button id="radar-run-btn">Check Now</button>
+  <label style="margin-top:10px; display:block;"><input type="checkbox" class="hq-toggle" id="toggle-radar-weekly" aria-label="Run Idea Radar weekly"> Auto-check weekly (Sunday mornings)</label>
+  <div id="radar-status" style="font-size:12px; color:var(--text-dim); margin:10px 0;"></div>
+  <div id="radar-report" class="scroll-cap" style="max-height:280px; white-space:pre-wrap; font-size:13px;"></div>
+</section>
+
+<section class="flyout panel wide gleam-app" id="gleam-flyout" role="dialog" aria-modal="true" aria-hidden="true" inert>
+  <div class="gleam-ambient" aria-hidden="true"><i></i><i></i><i></i><span></span></div>
+  <header class="gleam-topbar">
+    <div class="gleam-brand"><div class="gleam-mark" aria-hidden="true"><i></i><span>G</span></div><div><span>Operation HQ module</span><h2>Gleam</h2></div></div>
+    <div class="gleam-top-status"><span id="gleam-local-state">Private · on this device</span><strong id="gleam-top-focus">Today’s social rep</strong></div>
+    <button class="flyout-close gleam-close"></button>
+  </header>
+  <div class="gleam-layout">
+    <aside class="gleam-sidebar">
+      <nav class="gleam-nav" role="tablist" aria-label="Gleam sections">
+        <button id="gleam-tab-home" class="gleam-nav-btn active" data-gleam-view="home" role="tab" aria-selected="true" aria-controls="gleam-view-home"><span>01</span>Command</button>
+        <button id="gleam-tab-learn" class="gleam-nav-btn" data-gleam-view="learn" role="tab" aria-selected="false" aria-controls="gleam-view-learn"><span>02</span>Learn</button>
+        <button id="gleam-tab-practice" class="gleam-nav-btn" data-gleam-view="practice" role="tab" aria-selected="false" aria-controls="gleam-view-practice"><span>03</span>Simulate</button>
+        <button id="gleam-tab-missions" class="gleam-nav-btn" data-gleam-view="missions" role="tab" aria-selected="false" aria-controls="gleam-view-missions"><span>04</span>Missions</button>
+        <button id="gleam-tab-rehearse" class="gleam-nav-btn" data-gleam-view="rehearse" role="tab" aria-selected="false" aria-controls="gleam-view-rehearse"><span>05</span>Rehearse</button>
+        <button id="gleam-tab-progress" class="gleam-nav-btn" data-gleam-view="progress" role="tab" aria-selected="false" aria-controls="gleam-view-progress"><span>06</span>Evidence</button>
+        <button id="gleam-tab-privacy" class="gleam-nav-btn" data-gleam-view="privacy" role="tab" aria-selected="false" aria-controls="gleam-view-privacy"><span>07</span>Control</button>
+      </nav>
+      <div class="gleam-sidebar-signal"><span>Practice streak</span><strong id="gleam-sidebar-streak">0 days</strong><small id="gleam-sidebar-next">Start with one tiny rep.</small></div>
+    </aside>
+
+    <div class="gleam-workspace">
+      <section id="gleam-onboarding" class="gleam-onboarding" aria-labelledby="gleam-onboarding-title">
+        <div class="gleam-onboarding-orbit" aria-hidden="true"><i></i><i></i><span></span></div>
+        <span class="gleam-eyebrow">Initial calibration · about 60 seconds</span>
+        <h3 id="gleam-onboarding-title">Build social skill through real reps—not personality theatre.</h3>
+        <p>Choose what you want to practise. Gleam measures completed practice and your own reflections; it never ranks your worth, reads contacts, or listens in the background.</p>
+        <form id="gleam-onboarding-form">
+          <fieldset><legend>Main goals</legend><div class="gleam-choice-grid">
+            <label><input type="checkbox" name="gleam-goal" value="conversation" aria-label="Practise starting conversations"> Starting conversations</label>
+            <label><input type="checkbox" name="gleam-goal" value="confidence" aria-label="Practise speaking with confidence"> Speaking with confidence</label>
+            <label><input type="checkbox" name="gleam-goal" value="listening" aria-label="Practise listening and connection"> Listening and connection</label>
+            <label><input type="checkbox" name="gleam-goal" value="speaking" aria-label="Practise presentations and interviews"> Presentations and interviews</label>
+            <label><input type="checkbox" name="gleam-goal" value="assertiveness" aria-label="Practise boundaries and disagreement"> Boundaries and disagreement</label>
+            <label><input type="checkbox" name="gleam-goal" value="teamwork" aria-label="Practise teamwork and leadership"> Teamwork and leadership</label>
+          </div></fieldset>
+          <div class="gleam-calibration-row">
+            <label>Current comfort<select id="gleam-baseline-comfort" aria-label="Current social comfort"><option value="1">1 · Very hesitant</option><option value="2">2 · Hesitant</option><option value="3" selected>3 · Mixed</option><option value="4">4 · Usually comfortable</option><option value="5">5 · Very comfortable</option></select></label>
+            <label>Daily practice<select id="gleam-daily-minutes" aria-label="Daily social practice time"><option value="5">5 minutes</option><option value="10" selected>10 minutes</option><option value="15">15 minutes</option></select></label>
+          </div>
+          <p id="gleam-onboarding-status" class="gleam-inline-status" role="status" aria-live="polite"></p>
+          <button type="submit" class="gleam-primary">Build my practice system</button>
+        </form>
+      </section>
+
+      <section id="gleam-view-home" class="gleam-view" data-view="home" role="tabpanel" aria-labelledby="gleam-tab-home">
+        <div class="gleam-view-head"><div><span class="gleam-eyebrow">Adaptive command deck</span><h3 id="gleam-home-heading">Your next social rep</h3><p id="gleam-home-copy">Small deliberate practice beats waiting to feel perfectly confident.</p></div><button id="gleam-home-start" class="gleam-primary">Start today’s mission</button></div>
+        <div class="gleam-metric-grid">
+          <article><span>Real reps</span><strong id="gleam-metric-reps">0</strong><small>completed actions</small></article>
+          <article><span>Practice sessions</span><strong id="gleam-metric-sessions">0</strong><small>lessons + simulations</small></article>
+          <article><span>Reflection trend</span><strong id="gleam-metric-trend">—</strong><small>your before/after ratings</small></article>
+          <article><span>This week</span><strong id="gleam-metric-week">0</strong><small>days practised</small></article>
+        </div>
+        <div class="gleam-home-grid">
+          <article id="gleam-daily-mission-card" class="gleam-hero-card" data-level="light">
+            <div class="gleam-card-orbit" aria-hidden="true"><i></i><span></span></div>
+            <span class="gleam-eyebrow">Today’s field mission</span><h4 id="gleam-daily-mission-title">Calibrating…</h4><p id="gleam-daily-mission-description"></p>
+            <div class="gleam-mission-meta"><span id="gleam-daily-mission-skill"></span><span id="gleam-daily-mission-level"></span><span id="gleam-daily-mission-time"></span></div>
+            <div class="gleam-card-actions"><button id="gleam-daily-mission-start" class="gleam-primary">Open mission</button><button id="gleam-daily-mission-swap" class="gleam-secondary">Different mission</button></div>
+          </article>
+          <article class="gleam-signal-card"><div class="gleam-signal-ring" id="gleam-practice-ring" style="--gleam-progress:0"><span id="gleam-practice-percent">0%</span></div><div><span class="gleam-eyebrow">Practice coverage</span><h4>Train the weakest-used skill</h4><p id="gleam-signal-copy">No evidence yet. Complete a lesson, simulation, or real-world mission.</p></div></article>
+        </div>
+        <div class="gleam-section-title"><div><span class="gleam-eyebrow">Six trainable systems</span><h4>Practice map</h4></div><button id="gleam-home-open-learn" class="gleam-text-btn">View curriculum →</button></div>
+        <div id="gleam-home-skills" class="gleam-skill-grid"></div>
+      </section>
+
+      <section id="gleam-view-learn" class="gleam-view" data-view="learn" role="tabpanel" aria-labelledby="gleam-tab-learn" hidden>
+        <div class="gleam-view-head"><div><span class="gleam-eyebrow">Original micro-curriculum</span><h3>Learn one move. Use it today.</h3><p>Short lessons with a method, example, knowledge check, and field action.</p></div><label class="gleam-filter">Track<select id="gleam-lesson-filter" aria-label="Filter social skill lessons"><option value="all">All tracks</option></select></label></div>
+        <div class="gleam-split-view"><div id="gleam-lesson-list" class="gleam-library-list" aria-label="Social skill lessons"></div><article id="gleam-lesson-viewer" class="gleam-detail-card"><div class="gleam-empty-visual" aria-hidden="true"><i></i><span></span></div><h4>Choose a lesson</h4><p>Each lesson takes about four minutes and ends with something you can actually try.</p></article></div>
+      </section>
+
+      <section id="gleam-view-practice" class="gleam-view" data-view="practice" role="tabpanel" aria-labelledby="gleam-tab-practice" hidden>
+        <div class="gleam-view-head"><div><span class="gleam-eyebrow">Branching conversation simulator</span><h3>Practise the moment before it matters.</h3><p>Responses are scored only against visible communication cues—not against your personality.</p></div><button id="gleam-practice-reset" class="gleam-secondary" disabled>Restart scenario</button></div>
+        <div class="gleam-practice-layout"><div><div id="gleam-scenario-list" class="gleam-scenario-grid"></div></div><article id="gleam-scenario-stage" class="gleam-simulator"><div class="gleam-sim-empty"><span>SIMULATION READY</span><h4>Select a real-life situation</h4><p>School, work, sport, presentations, group projects, and difficult conversations are available offline.</p></div></article></div>
+        <article class="gleam-response-lab"><div><span class="gleam-eyebrow">Response laboratory</span><h4>Test your own wording</h4><p>Get transparent cue-based feedback. This is draft analysis, not a judgement of you.</p></div><div class="gleam-response-controls"><select id="gleam-response-skill" aria-label="Skill focus for response feedback"><option value="conversation">Conversation</option><option value="listening">Listening</option><option value="confidence">Clarity</option><option value="assertiveness">Assertiveness</option><option value="teamwork">Teamwork</option><option value="speaking">Speaking</option></select><textarea id="gleam-response-input" maxlength="1200" rows="4" aria-label="Draft response to analyse" placeholder="Write what you might say…"></textarea><div><button id="gleam-response-analyse" class="gleam-primary">Analyse cues</button><button id="gleam-response-ai" class="gleam-secondary" disabled>Deep coach · Local AI</button><button id="gleam-response-clear" class="gleam-text-btn">Clear</button></div></div><div id="gleam-response-output" class="gleam-coach-output" role="status" aria-live="polite">Your feedback will show the exact cues it detected and one next improvement.</div></article>
+      </section>
+
+      <section id="gleam-view-missions" class="gleam-view" data-view="missions" role="tabpanel" aria-labelledby="gleam-tab-missions" hidden>
+        <div class="gleam-view-head"><div><span class="gleam-eyebrow">Real-world transfer</span><h3>Field missions</h3><p>Choose a low-pressure action, do it in real life, then record what actually happened.</p></div><select id="gleam-mission-filter" aria-label="Filter social missions"><option value="all">All skills</option></select></div>
+        <article id="gleam-active-mission" class="gleam-active-mission" hidden></article>
+        <div id="gleam-mission-library" class="gleam-mission-library"></div>
+      </section>
+
+      <section id="gleam-view-rehearse" class="gleam-view" data-view="rehearse" role="tabpanel" aria-labelledby="gleam-tab-rehearse" hidden>
+        <div class="gleam-view-head"><div><span class="gleam-eyebrow">Pre-conversation architect</span><h3>Walk in with a plan—not a memorised robot script.</h3><p>Build an opening, two useful questions, your core point, and a clean exit.</p></div></div>
+        <div class="gleam-rehearse-grid"><form id="gleam-rehearse-form" class="gleam-form-card">
+          <label>Situation<input id="gleam-rehearse-situation" maxlength="180" required aria-label="Conversation situation" placeholder="e.g. Joining a new group project"></label>
+          <label>Your goal<select id="gleam-rehearse-goal" aria-label="Conversation goal"><option value="connect">Build connection</option><option value="ask">Ask for something clearly</option><option value="present">Explain an idea</option><option value="resolve">Resolve a disagreement</option><option value="interview">Prepare for an interview</option></select></label>
+          <label>Who you are speaking with<input id="gleam-rehearse-person" maxlength="80" required aria-label="Person or role in conversation" placeholder="e.g. teacher, teammate, classmate"></label>
+          <label>Useful context<textarea id="gleam-rehearse-context" maxlength="800" rows="5" aria-label="Known conversation context" placeholder="Facts, concerns, or what you already know. Avoid private information you do not need."></textarea></label>
+          <button type="submit" class="gleam-primary">Build rehearsal map</button><p id="gleam-rehearse-status" class="gleam-inline-status" role="status" aria-live="polite"></p>
+        </form><article id="gleam-rehearse-output" class="gleam-blueprint-card"><div class="gleam-empty-visual" aria-hidden="true"><i></i><span></span></div><h4>Your conversation map will appear here.</h4><p>It will use flexible prompts, not fake dialogue or a word-for-word performance.</p></article></div>
+      </section>
+
+      <section id="gleam-view-progress" class="gleam-view" data-view="progress" role="tabpanel" aria-labelledby="gleam-tab-progress" hidden>
+        <div class="gleam-view-head"><div><span class="gleam-eyebrow">Evidence, not vanity metrics</span><h3>What you have actually practised</h3><p>Practice frequency, scenario decisions, field reps, and your own before/after reflections.</p></div></div>
+        <div id="gleam-progress-summary" class="gleam-progress-summary"></div>
+        <div class="gleam-progress-layout"><article><h4>Practice by skill</h4><div id="gleam-progress-skills" class="gleam-progress-skills"></div></article><article><h4>Recent evidence</h4><div id="gleam-evidence-list" class="gleam-evidence-list"></div></article></div>
+      </section>
+
+      <section id="gleam-view-privacy" class="gleam-view" data-view="privacy" role="tabpanel" aria-labelledby="gleam-tab-privacy" hidden>
+        <div class="gleam-view-head"><div><span class="gleam-eyebrow">Private by architecture</span><h3>Your data. Your call.</h3><p>No account, contacts, microphone, camera, cloud sync, ad profile, or passive monitoring.</p></div></div>
+        <div class="gleam-control-grid"><article><h4>Practice settings</h4><label>Daily target<select id="gleam-settings-minutes" aria-label="Gleam daily practice target"><option value="5">5 minutes</option><option value="10">10 minutes</option><option value="15">15 minutes</option></select></label><label>Mission intensity<select id="gleam-settings-intensity" aria-label="Gleam mission intensity"><option value="light">Light pressure</option><option value="balanced">Balanced</option><option value="stretch">Stretch</option></select></label><fieldset class="gleam-settings-tracks"><legend>Focus tracks</legend><div class="gleam-choice-grid"><label><input class="gleam-settings-goal" type="checkbox" value="conversation" aria-label="Use Conversation in Gleam recommendations"> Conversation</label><label><input class="gleam-settings-goal" type="checkbox" value="listening" aria-label="Use Listening in Gleam recommendations"> Listening</label><label><input class="gleam-settings-goal" type="checkbox" value="confidence" aria-label="Use Clarity in Gleam recommendations"> Clarity</label><label><input class="gleam-settings-goal" type="checkbox" value="assertiveness" aria-label="Use Assertiveness in Gleam recommendations"> Assertiveness</label><label><input class="gleam-settings-goal" type="checkbox" value="teamwork" aria-label="Use Teamwork in Gleam recommendations"> Teamwork</label><label><input class="gleam-settings-goal" type="checkbox" value="speaking" aria-label="Use Speaking in Gleam recommendations"> Speaking</label></div></fieldset><button id="gleam-settings-save" class="gleam-primary">Save settings</button></article><article><h4>Data controls</h4><p>Export only this module or erase its profile, lessons, attempts, missions, rehearsals, and reflections.</p><button id="gleam-export" class="gleam-secondary">Export Gleam data</button><button id="gleam-reset" class="gleam-danger">Erase Gleam data</button><p id="gleam-privacy-status" class="gleam-inline-status" role="status" aria-live="polite"></p></article></div>
+        <article class="gleam-boundary-card"><span>Capability boundary</span><ul><li>Built-in simulations are deterministic and offline.</li><li>Local AI is optional, starts only after you load it, and receives only text you submit.</li><li>Practice signals measure use inside Gleam; they do not diagnose confidence or predict how other people see you.</li><li>Real-world missions should stay respectful, age-appropriate, and easy to leave at any time.</li></ul></article>
+      </section>
+    </div>
+  </div>
+</section>
+
+<section class="flyout panel wide" id="srs-flyout" role="dialog" aria-modal="true" aria-hidden="true" inert>
+  <div class="panel-head">
+    <div><span class="nexus-kicker">Study OS · evidence-based recall</span><h2>Recall Lab</h2></div>
+    <button class="flyout-close"></button>
+  </div>
+  <p class="settings-note">A local SM-2 scheduler for any subject. Reviews change real per-card intervals; session limits prevent one giant backlog from hijacking your day.</p>
+
+  <div id="srs-metrics" class="srs-metrics" aria-live="polite"></div>
+
+  <div id="srs-review-summary">
+    <span id="srs-due-count">0 cards due today</span>
+    <div class="srs-session-controls"><select id="srs-session-deck" aria-label="Recall session subject"><option value="all">All subjects</option></select><label>Limit <input id="srs-session-limit" type="number" min="5" max="100" step="5" value="20" aria-label="Maximum cards this session"></label><button id="srs-start-review-btn">Review now</button></div>
+  </div>
+
+  <div id="srs-review-area" class="hidden">
+    <div id="srs-review-lang"></div>
+    <div id="srs-review-front"></div>
+    <div id="srs-review-back" class="hidden"></div>
+    <button id="srs-show-answer-btn">Show Answer</button>
+    <div id="srs-grade-buttons" class="hidden">
+      <button data-q="1" class="srs-grade srs-grade-again">Again</button>
+      <button data-q="3" class="srs-grade srs-grade-hard">Hard</button>
+      <button data-q="4" class="srs-grade srs-grade-good">Good</button>
+      <button data-q="5" class="srs-grade srs-grade-easy">Easy</button>
+    </div>
+    <div id="srs-review-progress"></div>
+  </div>
+
+  <div class="settings-group" id="srs-add-group">
+    <h3>Add a Card</h3>
+    <div class="interval-row">
+      <select id="srs-new-lang" aria-label="Flashcard language or subject"></select>
+    </div>
+    <textarea id="srs-new-front" rows="2" maxlength="1200" placeholder="Question, prompt or cue" aria-label="Flashcard front"></textarea>
+    <textarea id="srs-new-back" rows="3" maxlength="2400" placeholder="Answer, explanation or worked method" aria-label="Flashcard back"></textarea>
+    <input type="text" id="srs-new-tags" maxlength="160" placeholder="Tags, comma separated (optional)" aria-label="Flashcard tags">
+    <button id="srs-add-card-btn">Add Card</button>
+
+    <div id="srs-lang-list" style="margin-top:10px;"></div>
+    <div class="interval-row" style="margin-top:6px;">
+      <input type="text" id="srs-new-lang-input" placeholder="Add a language or subject…" aria-label="New flashcard language or subject" style="flex:1;">
+      <button id="srs-add-lang-btn">Add</button>
+    </div>
+  </div>
+
+  <div class="srs-library-controls"><input id="srs-search" type="search" placeholder="Search cards or tags…" aria-label="Search flashcards"><select id="srs-library-deck" aria-label="Filter flashcards by subject"><option value="all">All subjects</option></select><button id="srs-export-btn" class="secondary-btn" type="button">Export</button><label class="secondary-btn srs-import-label" for="srs-import-input">Import TSV/JSON</label><input id="srs-import-input" class="visually-hidden" type="file" accept=".tsv,.txt,.json" aria-label="Import flashcards"></div>
+  <div class="study-inline-status"><p id="srs-status" class="assignment-status" role="status" aria-live="polite"></p><button id="srs-undo-delete-btn" class="secondary-btn hidden" type="button">Undo card delete</button></div>
+  <ul id="srs-card-list" class="scroll-cap"></ul>
+</section>
+
+<!-- Settings drawer -->
+<div id="settings-backdrop" class="hidden"></div>
+<div id="settings-drawer" class="hidden" role="dialog" aria-modal="true" aria-labelledby="settings-title" aria-hidden="true" inert>
+  <div class="settings-head">
+    <h2 id="settings-title">Settings</h2>
+    <button id="close-settings" aria-label="Close settings"></button>
+  </div>
+
+  <div id="settings-body">
+    <nav id="settings-sidebar" role="tablist" aria-label="Settings sections">
+      <button id="settings-tab-appearance" class="settings-tab active" data-cat="appearance" role="tab" aria-selected="true" aria-controls="settings-content" tabindex="0"><span class="icon-inline" data-icon="sparkles"></span><span class="settings-tab-label">Appearance</span></button>
+      <button id="settings-tab-privacy" class="settings-tab" data-cat="privacy" role="tab" aria-selected="false" aria-controls="settings-content" tabindex="-1"><span class="icon-inline" data-icon="shield"></span><span class="settings-tab-label">Privacy &amp; Security</span></button>
+      <button id="settings-tab-integrations" class="settings-tab" data-cat="integrations" role="tab" aria-selected="false" aria-controls="settings-content" tabindex="-1"><span class="icon-inline" data-icon="bot"></span><span class="settings-tab-label">Integrations</span></button>
+      <button id="settings-tab-billing" class="settings-tab" data-cat="billing" role="tab" aria-selected="false" aria-controls="settings-content" tabindex="-1"><span class="icon-inline" data-icon="credit-card"></span><span class="settings-tab-label">Paid Services</span></button>
+      <button id="settings-tab-data" class="settings-tab" data-cat="data" role="tab" aria-selected="false" aria-controls="settings-content" tabindex="-1"><span class="icon-inline" data-icon="briefcase"></span><span class="settings-tab-label">Ventures &amp; Data</span></button>
+      <button id="settings-tab-general" class="settings-tab" data-cat="general" role="tab" aria-selected="false" aria-controls="settings-content" tabindex="-1"><span class="icon-inline" data-icon="settings"></span><span class="settings-tab-label">General</span></button>
+    </nav>
+    <div id="settings-content" role="tabpanel" aria-labelledby="settings-tab-appearance">
+  <div class="settings-group" data-category="appearance">
+    <h3>Wallpaper</h3>
+    <label>Category</label>
+    <select id="wallpaper-category" aria-label="Wallpaper category">
+      <option value="anime">Anime</option>
+      <option value="gaming">Gaming / Cyberpunk</option>
+      <option value="cars">Cars</option>
+      <option value="scenic">Scenic / Landscape</option>
+      <option value="minimal">Minimal / Aesthetic</option>
+      <option value="space">Space</option>
+      <option value="custom">Custom URL list</option>
+    </select>
+    <p class="settings-note">Only 4K-class landscape images pass the quality gate. Wallhaven uses its top-voted list; Scenic and Minimal use the same 4K gate when provider keys are present.</p>
+    <div id="anime-scene-settings" class="anime-scene-settings hidden">
+      <label for="anime-scene">Anime scene channel</label>
+      <select id="anime-scene">
+        <option value="curated">Peak anime mix</option>
+        <option value="sukuna">Sukuna</option>
+        <option value="gojo">Gojo</option>
+        <option value="yuji-black-flash">Yuji · Black Flash</option>
+        <option value="luffy-gear-5">Luffy · Gear 5</option>
+        <option value="luffy-gear-4">Luffy · Gear 4</option>
+        <option value="luffy-gear-2">Luffy · Gear 2</option>
+        <option value="observation-haki">Observation Haki</option>
+        <option value="demon-slayer">Demon Slayer</option>
+        <option value="cherry-blossom">Anime · Cherry blossom</option>
+      </select>
+      <p class="settings-note">Character channels use quality-ranked SFW results and still reject anything below the 4K landscape gate. If a narrow scene has no qualifying image, HQ widens the query without lowering quality.</p>
+    </div>
+    <div id="wallpaper-scene-settings" class="anime-scene-settings hidden">
+      <label for="wallpaper-scene">Scene channel</label>
+      <select id="wallpaper-scene" aria-label="Wallpaper scene channel"><option value="curated">Curated best</option></select>
+      <p class="settings-note">Each category has specific premium-style channels. HQ widens the subject only when necessary; it never lowers the landscape or decoded-4K gate.</p>
+    </div>
+    <label class="weather-control-row"><span>Match interface colours to wallpaper</span><input type="checkbox" class="hq-toggle" id="wallpaper-adaptive-colour" aria-label="Match interface colours to wallpaper" checked></label>
+    <label>Rotate every</label>
+    <div class="interval-row">
+      <input type="number" id="wallpaper-interval-value" min="1" value="1" aria-label="Wallpaper refresh interval">
+      <select id="wallpaper-interval-unit" aria-label="Wallpaper refresh interval unit">
+        <option value="tab">Every new tab</option>
+        <option value="hours">Hour(s)</option>
+        <option value="days">Day(s)</option>
+        <option value="weeks">Week(s)</option>
+        <option value="months">Month(s)</option>
+        <option value="forever">Forever (manual only)</option>
+      </select>
+    </div>
+    <button id="wallpaper-refresh-now">Shuffle Now</button>
+    <p id="wallpaper-status" class="wallpaper-status" role="status" aria-live="polite">Checking wallpaper…</p>
+    <div class="wallpaper-safety-row">
+      <span id="wallpaper-blocked-count" class="settings-note">0 wallpapers hidden on this device.</span>
+      <button id="wallpaper-clear-blocklist" class="secondary-btn">Restore hidden wallpapers</button>
+    </div>
+    <label style="margin-top:12px;">Wallhaven API key (optional)</label>
+    <input type="text" id="key-wallhaven" placeholder="Higher rate limit, not required" aria-label="Wallhaven API key">
+    <label>Unsplash API key (required for Scenic)</label>
+    <input type="text" id="key-unsplash" placeholder="Free at unsplash.com/developers" aria-label="Unsplash API key">
+    <label>Pexels API key (required for Minimal)</label>
+    <input type="text" id="key-pexels" placeholder="Free at pexels.com/api" aria-label="Pexels API key">
+    <div id="custom-wallpaper-settings" class="hidden">
+      <label style="margin-top:12px;">Custom wallpaper URLs</label>
+      <textarea id="custom-wallpaper-urls" aria-label="Custom wallpaper URLs" placeholder="One HTTPS image URL per line" rows="4"></textarea>
+      <button id="save-custom-wallpapers" class="secondary-btn">Save custom wallpapers</button>
+      <p class="settings-note">Used when Category is Custom. HTTPS images below 4K-class resolution are rejected when loaded.</p>
+    </div>
+  </div>
+
+  <div class="settings-group" data-category="billing">
+    <h3>Paid Services</h3>
+    <p class="settings-note">Everything on this tab requires your own account and your own billing elsewhere — nothing here is free, and nothing runs without you supplying a key. Kept in one place on purpose, separate from the free integrations tab, so it's always obvious which features can quietly cost real money.</p>
+  </div>
+
+  <div class="settings-group" data-category="billing">
+    <h3>Claude API Key (Daily Plan)</h3>
+    <p class="settings-note">Powers Today's Plan. Your key is stored only in this browser and calls the API directly — never published or shared this build with the key still in it. Get one at console.anthropic.com. Costs a small amount per generation (roughly a cent).</p>
+    <input type="password" id="key-claude" placeholder="sk-ant-..." aria-label="Claude API key">
+  </div>
+
+  <div class="settings-group" data-category="billing">
+    <h3>ElevenLabs API Key (Read Plan Aloud)</h3>
+    <p class="settings-note">Adds a "Read it to me" button to Today's Plan that speaks the plan rationale out loud. Free tier exists (~10,000 characters/month at time of writing — check elevenlabs.io/pricing, this changes) but is still a metered, paid-above-that account, so it lives here rather than in the free Integrations tab. Without a key, the button simply doesn't appear.</p>
+    <input type="password" id="key-elevenlabs" placeholder="Free tier at elevenlabs.io" aria-label="ElevenLabs API key">
+  </div>
+
+  <div class="settings-group" data-category="integrations">
+    <h3>Local AI (offline, private, zero cost)</h3>
+    <p class="settings-note">Runs Llama 3.2 1B directly in this tab via WebGPU. It can summarize, explain, extract actions, make a quiz, critique a plan, and refine an imported assessment brief. Nothing is sent to an API. The first load downloads roughly 700MB–900MB and the model must be loaded once per fresh tab session.</p>
+    <div id="local-ai-status" style="font-size:12px; color:var(--text-dim); margin-bottom:8px;"></div>
+    <div id="local-ai-progress-bar" class="hidden" style="background:rgba(255,255,255,0.1); border-radius:4px; height:6px; margin-bottom:8px; overflow:hidden;">
+      <div id="local-ai-progress-fill" style="background:var(--accent); height:100%; width:0%; transition:width 0.2s;"></div>
+    </div>
+    <button id="local-ai-load-btn">Load Local AI</button>
+    <div class="local-ai-lab">
+      <div class="local-ai-lab-head"><span class="nexus-kicker">Native intelligence lab</span><button id="local-ai-cancel-btn" class="secondary-btn" disabled>Cancel</button></div>
+      <select id="local-ai-mode" aria-label="Local AI operation">
+        <option value="actions">Turn text into actions</option>
+        <option value="summarize">Summarize clearly</option>
+        <option value="explain">Explain simply</option>
+        <option value="quiz">Create a self-test</option>
+        <option value="critique">Critique my plan</option>
+        <option value="rewrite">Rewrite for clarity</option>
+      </select>
+      <textarea id="local-ai-input" rows="6" maxlength="12000" aria-label="Text for local AI" placeholder="Paste a real brief, note, draft or plan…"></textarea>
+      <button id="local-ai-run-btn" disabled>Run locally</button>
+      <div id="local-ai-output" class="local-ai-output" role="status" aria-live="polite">Load Local AI to use the lab.</div>
+    </div>
+  </div>
+
+  <div class="settings-group" data-category="integrations">
+    <h3>Integration Health & Permissions</h3>
+    <p class="settings-note">Live local status only—this does not contact any provider. It shows which services are configured and what Chrome access is currently granted.</p>
+    <div id="integration-health-list" class="integration-health-list"></div>
+    <details class="permission-ledger">
+      <summary>Installed permission ledger</summary>
+      <div id="permission-ledger-content" class="settings-note">Open Settings to inspect permissions.</div>
+    </details>
+  </div>
+
+  <div class="settings-group" data-category="integrations">
+    <h3>Research Suggestions</h3>
+    <p class="settings-note">Off by default. When on, this watches Notes, Tasks, and your Capture inbox — never Idea Vault — for a word that keeps showing up across at least 3 separate entries in the last two weeks, and quietly offers a one-click Perplexity search for it near the greeting. Purely local word-matching (no new permission, no data leaves the device unless you click "Research it"), and each topic is suppressed for 7 days after it's shown once, so it can't nag.</p>
+    <label><input type="checkbox" class="hq-toggle" id="toggle-research-nudge" aria-label="Enable research nudges"> Suggest research topics from my notes &amp; tasks</label>
+  </div>
+
+  <div class="settings-group" data-category="integrations">
+    <h3>Spotify Client ID</h3>
+    <p class="settings-note">Free — register your own app at developer.spotify.com/dashboard (takes about 2 minutes), then add this exact Redirect URI there: <code id="spotify-redirect-uri-display">(shown once you open the Spotify panel)</code>. Requires your own Spotify Premium account to actually play anything — the Web Playback SDK itself is Premium-only, same as the ads/offline distinction elsewhere in this app.</p>
+    <input type="text" id="key-spotify-client-id" placeholder="Spotify Client ID" aria-label="Spotify client ID">
+  </div>
+
+  <div class="settings-group" data-category="integrations">
+    <h3>Automation Webhook (Zapier / Make / n8n / anything)</h3>
+    <p class="settings-note">Completely free — this is a plain HTTP POST from your browser, not an API with a key or a cost. Paste any webhook URL (a Zapier "Catch Hook" trigger, a Make.com webhook, an n8n webhook node, anything that accepts a POST) and HQ will fire a JSON payload to it whenever today's plan finishes generating: <code>{"event":"plan_generated","date":"...","taskCount":N,"plannedMinutes":N}</code>. Whatever you build downstream from there (log it to a sheet, ping Slack, whatever) happens entirely on your own automation platform — HQ has no idea what you do with it. Sent fire-and-forget; a failed or missing webhook never blocks or slows down plan generation.</p>
+    <input type="text" id="key-webhook-plan" placeholder="https://hooks.zapier.com/hooks/catch/..." aria-label="Plan webhook URL">
+  </div>
+
+  <div class="settings-group" data-category="appearance">
+    <h3>Accent Color</h3>
+    <div id="accent-swatches">
+        <button class="swatch" data-color="#7c5cff" style="background:#7c5cff" aria-label="Use violet accent"></button>
+        <button class="swatch" data-color="#00d4a0" style="background:#00d4a0" aria-label="Use mint accent"></button>
+        <button class="swatch" data-color="#ff6b6b" style="background:#ff6b6b" aria-label="Use coral accent"></button>
+        <button class="swatch" data-color="#ffb648" style="background:#ffb648" aria-label="Use amber accent"></button>
+        <button class="swatch" data-color="#4da6ff" style="background:#4da6ff" aria-label="Use blue accent"></button>
+    </div>
+  </div>
+
+  <div class="settings-group" data-category="appearance">
+    <h3>Layout</h3>
+    <label>Style</label>
+    <select id="layout-style-select" aria-label="Dashboard layout style">
+      <option value="living">Living dashboard (default) — all adaptive widgets</option>
+      <option value="focus">Focus dashboard — only the essential signal</option>
+      <option value="full">Expanded dashboard — widgets plus detailed lists</option>
+    </select>
+    <p class="settings-note">Living is the designed default. Focus automatically quiets non-essential widgets. Cinema mode hides the entire interface instantly with Alt+Z.</p>
+    <div class="widget-visibility-settings" role="group" aria-label="Visible dashboard widgets">
+      <label><input type="checkbox" class="hq-toggle widget-visibility-toggle" data-widget="briefing" aria-label="Show Foresight widget" checked> Foresight</label>
+      <label><input type="checkbox" class="hq-toggle widget-visibility-toggle" data-widget="weather" aria-label="Show Weather widget" checked> Weather</label>
+      <label><input type="checkbox" class="hq-toggle widget-visibility-toggle" data-widget="focus" aria-label="Show Focus widget" checked> Focus</label>
+      <label><input type="checkbox" class="hq-toggle widget-visibility-toggle" data-widget="schedule" aria-label="Show Schedule widget" checked> Schedule</label>
+      <label><input type="checkbox" class="hq-toggle widget-visibility-toggle" data-widget="assessment" aria-label="Show Assessment Radar widget" checked> Assessment radar</label>
+      <label><input type="checkbox" class="hq-toggle widget-visibility-toggle" data-widget="inbox" aria-label="Show Gmail widget" checked> Gmail</label>
+      <label><input type="checkbox" class="hq-toggle widget-visibility-toggle" data-widget="habits" aria-label="Show Daily rhythm widget" checked> Daily rhythm</label>
+    </div>
+    <div class="widget-layout-actions">
+      <button id="widget-arrange-toggle" class="secondary-btn" type="button" aria-pressed="false">Arrange widgets</button>
+      <button id="widget-order-reset" class="secondary-btn" type="button">Reset order</button>
+    </div>
+    <p class="settings-note" id="widget-order-status" role="status" aria-live="polite">Each widget keeps its data and behaviour when moved.</p>
+    <label for="motion-profile-select">Motion direction</label>
+    <select id="motion-profile-select" aria-label="Dashboard motion profile">
+      <option value="auto">Adaptive — cinematic when the device can handle it</option>
+      <option value="cinematic">Cinematic — maximum layered motion</option>
+      <option value="balanced">Balanced — depth without constant movement</option>
+      <option value="calm">Calm — state changes only</option>
+    </select>
+    <label><input type="checkbox" class="hq-toggle" id="motion-depth-toggle" aria-label="Enable pointer-responsive depth" checked> Pointer-responsive depth</label>
+    <p class="settings-note" id="motion-profile-status" role="status">Motion always pauses in background tabs and respects reduced-motion.</p>
+    <label><input type="checkbox" class="hq-toggle" id="pin-daily" aria-label="Pin Daily Non-Negotiables"> Pin Daily Non-Negotiables to main screen</label>
+    <label><input type="checkbox" class="hq-toggle" id="pin-tasks" aria-label="Pin Operation HQ tasks"> Pin Operation HQ to main screen</label>
+    <label style="margin-top:10px;"><input type="checkbox" class="hq-toggle" id="toggle-blur" aria-label="Blur wallpaper behind panels"> Blur wallpaper behind panels</label>
+  </div>
+
+  <div class="settings-group" data-category="privacy">
+    <h3>Privacy</h3>
+    <p class="settings-note">Privacy Mode (Alt+H) now also hides Gmail preview and Notes content, not just tasks — anything that could reveal what you're working on. Hiding is always instant; a PIN (if set) is only needed to reveal it again, so it works even if you have to hide fast.</p>
+    <label>PIN to require before un-hiding (optional)</label>
+    <input type="password" id="privacy-pin-input" placeholder="e.g. a 4-digit code" maxlength="12" aria-label="Privacy PIN">
+    <button id="clear-pin-btn" style="margin-top:6px;">Clear PIN</button>
+    <label style="margin-top:10px;"><input type="checkbox" class="hq-toggle" id="toggle-idle-privacy" aria-label="Enable automatic Privacy Mode after idle"> Auto-hide after 2 minutes idle (stepped away = auto-protected)</label>
+    <p class="settings-note">"Lockdown" (top-bar icon) engages Zen + Privacy together in one click — meant for right before a video call or screen share, so nothing personal is visible if your screen gets shared unexpectedly.</p>
+  </div>
+
+  <div class="settings-group" data-category="general">
+    <h3>Sound</h3>
+    <label><input type="checkbox" class="hq-toggle" id="toggle-sound" checked aria-label="Enable sound cues"> Completion chimes (task/daily/streak/pomodoro)</label>
+    <label>Volume</label>
+    <input type="range" id="sound-volume" min="0" max="1" step="0.05" value="0.25" aria-label="Sound volume" style="width:100%;">
+  </div>
+
+  <div class="settings-group" data-category="general">
+    <h3>Bookmark Sorter</h3>
+    <label><input type="checkbox" class="hq-toggle" id="toggle-realtime-sort" checked aria-label="Enable real-time bookmark classification"> Auto-sort new bookmarks as you add them</label>
+    <p class="settings-note">When off, new bookmarks stay wherever Chrome puts them until you run Sort Now manually.</p>
+  </div>
+
+  <div class="settings-group" data-category="general">
+    <h3>Public Holidays (Calendar)</h3>
+    <p class="settings-note">Free, no key — pulls from Nager.Date's public holiday API. Enter a 2-letter country code and the local-month Calendar will mark public holidays automatically. Leave blank to disable (default) — nothing is fetched until you set this.</p>
+    <input type="text" id="holiday-country-code" placeholder="e.g. US, GB, AU, IN, CA" maxlength="2" aria-label="Holiday country code" style="text-transform:uppercase; width:80px;">
+  </div>
+
+  <div class="settings-group" data-category="general">
+    <h3>System Health</h3>
+    <p class="build-identity"><span>Loaded build</span><strong id="build-version">2.4.0 · Resilient Surface</strong></p>
+    <p id="boot-status" class="system-health" role="status" aria-live="polite">Starting Operation HQ…</p>
+    <p id="safe-mode-status" class="settings-note"></p>
+    <div class="system-health-actions">
+      <button id="copy-diagnostics-btn" class="secondary-btn">Copy diagnostics</button>
+      <button id="clear-diagnostics-btn" class="secondary-btn">Clear saved diagnostics</button>
+      <button id="exit-safe-mode-btn" class="secondary-btn hidden">Exit safe mode and reload</button>
+    </div>
+  </div>
+
+  <div class="settings-group" data-category="privacy">
+    <h3>Deep Work — Site Blocking</h3>
+    <p class="settings-note">Sites listed here become completely unreachable (blocked at the network level, before any page content loads) while Deep Work is on — toggle it from the shield icon in the top bar. Turning it off instantly restores access.</p>
+    <div id="deepwork-site-list"></div>
+    <div class="interval-row" style="margin-top:8px;">
+      <input type="text" id="new-deepwork-site-input" placeholder="e.g. youtube.com" aria-label="Site to block during Deep Work" style="flex:1;">
+      <button id="add-deepwork-site-btn">Add</button>
+    </div>
+  </div>
+
+  <div class="settings-group" data-category="privacy">
+    <h3>Deep Work — Disable JS Instead (lighter option)</h3>
+    <p class="settings-note">For sites you still need reachable but want neutered rather than fully blocked — e.g. Gmail stays open for anything urgent, but its interactive JS (and the scrolling/notifications that come with it) is off. Uses <code>chrome.contentSettings</code> rather than the network-level block above, which comes with a real caveat worth knowing: unlike the full block, there's no guarantee this lands before a page's own inline scripts have already started running, so it's meaningfully less airtight than the block list — a genuinely lighter option, not an equally strong one.</p>
+    <div id="deepwork-jsdisable-site-list"></div>
+    <div class="interval-row" style="margin-top:8px;">
+      <input type="text" id="new-deepwork-jsdisable-site-input" placeholder="e.g. gmail.com" aria-label="Site where JavaScript should be disabled" style="flex:1;">
+      <button id="add-deepwork-jsdisable-site-btn">Add</button>
+    </div>
+  </div>
+
+  <div class="settings-group" data-category="data">
+    <h3>Your Data</h3>
+    <p class="settings-note">Everything is stored locally in this browser — a profile reset or reinstall would lose it. Back it up here.</p>
+    <label style="display:block; margin-bottom:8px;"><input type="checkbox" class="hq-toggle" id="toggle-encrypt-backup" aria-label="Encrypt backup with a passphrase"> Encrypt with a passphrase</label>
+    <div id="encrypt-backup-fields" class="hidden" style="margin-bottom:8px;">
+      <input type="password" id="backup-export-passphrase" placeholder="Passphrase" aria-label="Backup passphrase" style="width:100%; margin-bottom:6px;" autocomplete="new-password">
+      <input type="password" id="backup-export-passphrase-confirm" placeholder="Confirm passphrase" aria-label="Confirm backup passphrase" style="width:100%;" autocomplete="new-password">
+      <p class="settings-note" style="margin:6px 0 0;">There's no recovery if you forget this — it's not stored anywhere, including by this extension.</p>
+    </div>
+    <button id="export-data-btn">Export All Data (JSON)</button>
+    <label style="margin-top:8px;">Import from backup</label>
+    <input type="file" id="import-data-input" accept=".json" aria-label="Import backup JSON">
+  </div>
+
+  <div class="settings-group" data-category="data">
+    <h3>Ventures (task categories)</h3>
+    <div id="venture-list"></div>
+    <input type="text" id="new-venture-input" placeholder="Add venture..." aria-label="New venture name">
+    <button id="add-venture-btn">Add</button>
+  </div>
+
+  <div class="settings-group" data-category="data">
+    <h3>Professional View — venture visibility</h3>
+    <p class="settings-note">Ventures checked here are hidden when Professional View is on — for screen-sharing with clients or co-founders without them seeing school/personal habit tracking.</p>
+    <div id="venture-personal-list"></div>
+  </div>
+    </div>
+  </div>
+</div>
+
+<script src="js/lib/chart.umd.min.js"></script>
+<script src="js/lib/tiptap/tiptap-bundle.js"></script>
+<script src="js/notes-editor.js"></script>
+<script src="js/local-ai.js"></script>
+<script src="js/gleam.js"></script>
+<script src="js/eleven-labs-client.js"></script>
+<script src="js/icons.js"></script>
+<script src="js/research-link.js"></script>
+<script src="js/spinner.js"></script>
+<script src="js/spotify-client.js"></script>
+<script src="js/spotify-player.js"></script>
+<script src="js/spotify-ui.js"></script>
+<script src="js/exam-countdown.js"></script>
+<script src="js/assignments.js"></script>
+<script src="js/assessment-intake.js"></script>
+<script src="js/storage-schema.js"></script>
+<script src="js/context-bus.js"></script>
+<script src="js/mode-transitions.js"></script>
+<script src="js/cinematic-motion.js"></script>
+<script src="js/quotes.js"></script>
+<script src="js/tasks.js"></script>
+<script src="js/dailytasks.js"></script>
+<script src="js/calendar.js"></script>
+<script src="js/schedule.js"></script>
+<script src="js/seed.js"></script>
+<script src="js/classifier.js"></script>
+<script src="js/bookmarks.js"></script>
+<script src="js/mail-intelligence.js"></script>
+<script src="js/gmail.js"></script>
+<script src="js/today.js"></script>
+<script src="js/wallpaper.js"></script>
+<script src="js/pomodoro.js"></script>
+<script src="js/focus-scenes.js"></script>
+<script src="js/weather.js"></script>
+<script src="js/claude-client.js"></script>
+<script src="js/daily-planner.js"></script>
+<script src="js/completion-detection.js"></script>
+<script src="js/chrome-optimizer.js"></script>
+<script src="js/workspaces.js"></script>
+<script src="js/integration-health.js"></script>
+<script src="js/activity-log.js"></script>
+<script src="js/sound.js"></script>
+<script src="js/mods.js"></script>
+<script src="js/capture.js"></script>
+<script src="js/research-nudge.js"></script>
+<script src="js/forgotten-bookmark.js"></script>
+<script src="js/weekly-stats.js"></script>
+<script src="js/venture-dashboard.js"></script>
+<script src="js/backup-crypto.js"></script>
+<script src="js/idea-vault.js"></script>
+<script src="js/professional-view.js"></script>
+<script src="js/idea-radar.js"></script>
+<script src="js/deepwork.js"></script>
+<script src="js/srs.js"></script>
+<script src="js/study-os.js"></script>
+<script src="js/nexus.js"></script>
+<script src="js/command-palette.js"></script>
+<script src="js/living-widgets.js"></script>
+<script src="js/newtab.js"></script>
+</body>
+</html>
