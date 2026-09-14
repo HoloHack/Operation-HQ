@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>HQ Spotify Player (sandboxed)</title>
+</head>
+<body>
+<!-- This page is listed in manifest.json's "sandbox.pages" and gets its
+     own relaxed CSP (content_security_policy.sandbox) specifically so it
+     — and only it — is allowed to load a remote script. Every other page
+     in this extension is bound by the normal MV3 extension_pages CSP,
+     which explicitly forbids remote script sources. This page has no
+     access to chrome.* APIs (that's what "sandboxed" means) and talks to
+     the rest of the extension purely via postMessage — see
+     js/spotify-player.js for the parent side of that bridge. -->
+<script src="https://sdk.scdn.co/spotify-player.js"></script>
+<script src="js/spotify-sandbox.js"></script>
+</body>
+</html>
