@@ -43,7 +43,7 @@ const LivingWidgets = {
   },
 
   async renderBriefing() {
-    const saved = await chrome.storage.local.get(["hq_current_focus_task","hq_assignments_v1"]);
+    const saved = await chrome.storage.local.get(["hq_current_focus_task","hq_assignments_v1","hq_calendar_events"]);
     const focus = saved.hq_current_focus_task;
     const block = typeof Today !== "undefined" ? Today.currentScheduleBlock() : null;
     const next = typeof Today !== "undefined" ? Today.chooseNextTask(block, focus?.id) : null;
@@ -52,7 +52,10 @@ const LivingWidgets = {
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
     const tomorrowKey = this.localDateKey(tomorrow);
-    const tomorrowEvents = typeof Calendar !== "undefined" ? (Calendar.events[tomorrowKey] || []).length : 0;
+    const calendarEvents = saved.hq_calendar_events && typeof saved.hq_calendar_events === "object" && !Array.isArray(saved.hq_calendar_events)
+      ? saved.hq_calendar_events
+      : {};
+    const tomorrowEvents = (calendarEvents[tomorrowKey] || []).length;
     const tomorrowBlocks = typeof Schedule !== "undefined" && Schedule.active
       ? Schedule.blocksFor(Schedule.active, SCHEDULE_DAY_KEYS[tomorrow.getDay()], tomorrow).length
       : 0;
@@ -133,7 +136,9 @@ const LivingWidgets = {
     const minutes = Math.floor(Pomodoro.seconds / 60).toString().padStart(2, "0");
     const seconds = (Pomodoro.seconds % 60).toString().padStart(2, "0");
     this.setText("widget-focus-time", `${minutes}:${seconds}`);
-    this.setText("widget-focus-state", Pomodoro.running ? "Locked in" : progress > 0 ? "Paused" : "Ready");
+    const focusLabel = Pomodoro.focusLabel || (typeof ContextBus !== "undefined" ? ContextBus.get().focusLabel : "");
+    this.setText("widget-focus-state", Pomodoro.running ? (focusLabel || "Locked in") : progress > 0 ? "Paused" : (focusLabel || "Ready"));
+    this.el("widget-focus")?.setAttribute("aria-label", focusLabel ? `Focus timer for ${focusLabel}` : "Focus timer");
     this.setText("widget-focus-toggle", Pomodoro.running ? "Pause focus" : progress > 0 ? "Resume focus" : `Begin ${modeMinutes} minutes`);
     this.el("widget-focus-dial")?.style.setProperty("--progress", String(progress));
     this.setState("widget-focus", Pomodoro.running ? "running" : progress > 0 ? "paused" : "idle");
@@ -274,7 +279,8 @@ const LivingWidgets = {
     const phase = this.dayPhase();
     document.body.dataset.dayPhase = phase.key;
     document.documentElement.style.setProperty("--day-energy", ({ morning: ".84", build: "1", midday: ".94", afternoon: ".9", evening: ".72", late: ".58" })[phase.key] || ".8");
-    const environment = {
+    const generatedEnvironment = typeof AdaptiveThemes !== "undefined" ? AdaptiveThemes.environmentRGB() : null;
+    const environment = generatedEnvironment || {
       morning: [105, 211, 255],
       build: [78, 232, 190],
       midday: [96, 201, 255],

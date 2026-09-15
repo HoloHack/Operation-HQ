@@ -19,6 +19,7 @@ const Mods = {
     const mod = MODS.find(m => m.id === modId);
     if (!mod) return;
 
+    if (typeof AdaptiveThemes !== "undefined") await AdaptiveThemes.deactivate();
     ModeTransitions?.play?.("theme", mod.name, "Recalibrating atmosphere and interface colour");
     setAccent(mod.accent);
     await chrome.storage.local.set({

@@ -20,6 +20,17 @@
     try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
   }
 
+  function readSession(key, fallback) {
+    try {
+      const value = sessionStorage.getItem(key);
+      return value == null ? fallback : JSON.parse(value);
+    } catch { return fallback; }
+  }
+
+  function writeSession(key, value) {
+    try { sessionStorage.setItem(key, JSON.stringify(value)); } catch {}
+  }
+
   function clean(value) {
     return String(value || "Unknown error")
       .replace(/(?:api[_-]?key|token|authorization|bearer)\s*[:=]\s*[^\s,;]+/gi, "credential=[redacted]")
@@ -39,7 +50,15 @@
     write(LOG_KEY, log.slice(-MAX_ENTRIES));
   }
 
-  const previousPending = read(PENDING_KEY, null);
+  // A pending boot belongs to one new-tab document, not the whole extension.
+  // localStorage made two tabs look like one crashed boot: tab B could see tab
+  // A's marker before tab A reached its healthy checkpoint and eventually
+  // force the entire dashboard into Safe Mode. sessionStorage is isolated per
+  // tab and survives a same-tab reload, which is exactly the crash signal we
+  // need. Remove the legacy global marker so older builds cannot poison this
+  // detector after an upgrade.
+  const previousPending = readSession(PENDING_KEY, null);
+  try { localStorage.removeItem(PENDING_KEY); } catch {}
   let crashCount = Number(read(CRASH_KEY, 0)) || 0;
   if (previousPending && now - previousPending > 2500 && now - previousPending < 10 * 60 * 1000) {
     crashCount += 1;
@@ -47,7 +66,7 @@
     record("incomplete-startup", "The previous new-tab boot did not reach its healthy checkpoint.");
   }
   if (crashCount >= 3) write(SAFE_KEY, true);
-  write(PENDING_KEY, now);
+  writeSession(PENDING_KEY, now);
 
   window.addEventListener("error", event => {
     record("error", event.error?.message || event.message, event.filename, event.lineno, event.colno);
@@ -65,10 +84,15 @@
       try { localStorage.removeItem(LOG_KEY); } catch {}
     },
     markHealthy() {
-      try { localStorage.removeItem(PENDING_KEY); localStorage.removeItem(CRASH_KEY); } catch {}
+      try {
+        sessionStorage.removeItem(PENDING_KEY);
+        localStorage.removeItem(PENDING_KEY);
+        localStorage.removeItem(CRASH_KEY);
+      } catch {}
     },
     clearAndExitSafeMode() {
       try {
+        sessionStorage.removeItem(PENDING_KEY);
         localStorage.removeItem(PENDING_KEY);
         localStorage.removeItem(CRASH_KEY);
         localStorage.removeItem(SAFE_KEY);

@@ -10,6 +10,41 @@
 </head>
 <body>
 
+<aside id="safe-mode-banner" class="safe-mode-banner hidden" role="status" aria-live="polite">
+  <div class="safe-mode-signal" aria-hidden="true"><i></i><span></span></div>
+  <div>
+    <strong>Recovery mode is active</strong>
+    <p>Core tools are available. Optional integrations are paused until you exit recovery mode.</p>
+  </div>
+  <div class="safe-mode-banner-actions">
+    <button id="safe-mode-open-health" class="secondary-btn" type="button">View diagnostics</button>
+    <button id="safe-mode-exit" type="button">Exit recovery mode</button>
+  </div>
+</aside>
+
+<section id="hq-launch" class="hq-launch" aria-label="Operation HQ launch sequence" aria-live="polite">
+  <div class="hq-launch-shutter hq-launch-shutter-top" aria-hidden="true"></div>
+  <div class="hq-launch-shutter hq-launch-shutter-bottom" aria-hidden="true"></div>
+  <div class="hq-launch-space" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+  <div class="hq-launch-volumetric" aria-hidden="true"><i></i><i></i><i></i></div>
+  <div class="hq-launch-aperture" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+  <div class="hq-launch-scan" aria-hidden="true"></div>
+  <div class="hq-launch-core" aria-hidden="true">
+    <span class="hq-launch-ring ring-a"></span><span class="hq-launch-ring ring-b"></span><span class="hq-launch-ring ring-c"></span>
+    <i class="hq-launch-reactor"></i><b class="hq-launch-sweep"></b>
+  </div>
+  <div class="hq-launch-copy">
+    <span class="hq-launch-eyebrow">Personal command environment</span>
+    <strong>OPERATION <em>HQ</em></strong>
+    <p id="hq-launch-stage">Establishing local core</p>
+    <div class="hq-launch-progress" aria-hidden="true"><span id="hq-launch-progress-fill"></span></div>
+    <div class="hq-launch-telemetry" aria-hidden="true"><span>LOCAL CORE</span><span>PRIVATE DATA</span><span>LIVE CONTEXT</span></div>
+  </div>
+  <div class="hq-launch-side-data hq-launch-side-left" aria-hidden="true"><span>STATE / LOCAL</span><i></i><b>CONTEXT BUS</b></div>
+  <div class="hq-launch-side-data hq-launch-side-right" aria-hidden="true"><span>RENDER / ADAPTIVE</span><i></i><b>VISUAL CORE</b></div>
+  <button id="hq-launch-skip" class="hq-launch-skip" type="button">Skip intro</button>
+</section>
+
 <div id="wallpaper-layer" aria-hidden="true">
   <img id="wallpaper-image" alt="" decoding="async" referrerpolicy="no-referrer">
 </div>
@@ -22,10 +57,14 @@
   <div class="cinematic-sweep"></div>
   <div class="cinematic-grain"></div>
 </div>
+<canvas id="hq-compositor-canvas" aria-hidden="true"></canvas>
 <div id="mode-transition" class="mode-transition" data-kind="theme" aria-hidden="true" role="status" aria-live="polite">
   <div class="mode-transition-grid"></div>
   <div class="mode-transition-ring"></div>
   <div class="mode-transition-scan"></div>
+  <div class="mode-transition-shards" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+  <div class="mode-transition-velocity" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+  <div class="mode-transition-aperture" aria-hidden="true"><i></i><i></i><i></i></div>
   <div class="mode-transition-copy"><span class="mode-transition-kicker">Operation state</span><strong class="mode-transition-title"></strong><small class="mode-transition-detail"></small></div>
 </div>
 <div id="daily-quote"></div>
@@ -280,7 +319,7 @@
 <div id="flyout-backdrop" class="hidden"></div>
 
 <section class="flyout panel wide nexus-panel" id="nexus-flyout" role="dialog" aria-modal="true" aria-hidden="true" inert>
-  <div class="panel-head nexus-panel-head"><div><span class="nexus-kicker">Local command router</span><h2>Nexus Core</h2></div><span id="nexus-engine-state" class="nexus-engine-state">Ready</span><button class="flyout-close"></button></div>
+  <div class="panel-head nexus-panel-head"><div><span class="nexus-kicker">Local command intelligence</span><h2>Nexus Core</h2></div><span id="nexus-engine-state" class="nexus-engine-state">Ready</span><button class="flyout-close"></button></div>
   <div class="nexus-cortex" aria-label="Live Operation HQ system status">
     <div class="nexus-core-visual" aria-hidden="true"><i></i><i></i><i></i><span>N</span></div>
     <div class="nexus-telemetry">
@@ -294,7 +333,7 @@
   <div class="nexus-context" id="nexus-context" aria-live="polite"></div>
   <form id="nexus-command-form" class="nexus-command-form">
     <span class="icon-inline" data-icon="terminal"></span>
-    <input id="nexus-command-input" type="text" autocomplete="off" spellcheck="false" placeholder="Try: open TikTok messages, start focus, clean tabs…" aria-label="Nexus command">
+    <input id="nexus-command-input" type="text" autocomplete="off" spellcheck="false" placeholder="Try: focus on Maths chapters 3–7 by Friday…" aria-label="Nexus command">
     <button id="nexus-command-run" type="submit">Run</button>
   </form>
   <div id="nexus-suggestions" class="nexus-suggestions" role="listbox" aria-label="Command suggestions" hidden></div>
@@ -305,6 +344,19 @@
     <div><span class="nexus-kicker">Review before action</span><strong id="nexus-plan-title"></strong><p id="nexus-plan-steps"></p></div>
     <div class="nexus-plan-actions"><button id="nexus-plan-cancel" class="secondary-btn">Cancel</button><button id="nexus-plan-run">Confirm</button></div>
   </div>
+  <form id="nexus-followup" class="nexus-followup" hidden>
+    <div><span class="nexus-kicker">One detail needed</span><strong id="nexus-followup-question">What should Nexus use?</strong></div>
+    <div class="nexus-followup-row"><input id="nexus-followup-input" type="text" maxlength="180" autocomplete="off" aria-label="Answer Nexus follow-up"><button id="nexus-followup-cancel" class="secondary-btn" type="button">Cancel</button><button type="submit">Continue</button></div>
+  </form>
+  <section id="nexus-resource-panel" class="nexus-resource-panel" hidden aria-live="polite">
+    <div class="nexus-resource-head"><div><span class="nexus-kicker">Your saved learning surface</span><strong id="nexus-resource-title">Matching resources</strong></div><span id="nexus-resource-count">0 found</span></div>
+    <div id="nexus-resource-results" class="nexus-resource-results"></div>
+  </section>
+  <section id="nexus-ai-panel" class="nexus-ai-panel" hidden aria-live="polite">
+    <div class="nexus-resource-head"><div><span class="nexus-kicker">On-device study sidecar</span><strong id="nexus-ai-title">Guidance</strong></div><button id="nexus-ai-copy" class="secondary-btn" type="button">Copy</button></div>
+    <div id="nexus-ai-output" class="nexus-ai-output"></div>
+    <small>Generated by the model loaded on this device. Check calculations against your textbook or teacher.</small>
+  </section>
   <div class="nexus-layout">
     <div class="nexus-section">
       <h3>Mission sequences</h3>
@@ -321,12 +373,15 @@
     <div class="nexus-section">
       <h3>Fast handoffs</h3>
       <div class="nexus-handoff-grid">
+        <button data-nexus-command="focus on Maths"><span class="icon-inline" data-icon="target"></span><span>Focus Maths</span><small>Plan + resources</small></button>
+        <button data-nexus-command="create a theme for HSIE study"><span class="icon-inline" data-icon="sparkles"></span><span>Study atmosphere</span><small>3 fresh options</small></button>
+        <button data-nexus-command="find Cambridge Maths"><span class="icon-inline" data-icon="search"></span><span>Find Cambridge</span><small>Your saved links</small></button>
         <button data-nexus-command="open Gmail"><span class="icon-inline" data-icon="mail"></span><span>Gmail</span><small>Read-only</small></button>
         <button data-nexus-command="open TikTok messages"><span class="icon-inline" data-icon="external-link"></span><span>TikTok</span><small>Open-only</small></button>
         <button data-nexus-command="open Instagram messages"><span class="icon-inline" data-icon="external-link"></span><span>Instagram</span><small>Open-only</small></button>
         <button data-nexus-command="open Discord messages"><span class="icon-inline" data-icon="message-circle"></span><span>Discord</span><small>Open-only</small></button>
-        <button data-nexus-command="open calendar"><span class="icon-inline" data-icon="calendar"></span><span>Calendar</span><small>Local</small></button>
-        <button data-nexus-command="clean tabs"><span class="icon-inline" data-icon="panels-top-left"></span><span>Tab review</span><small>Confirm first</small></button>
+        <button data-nexus-command="open calendar"><span class="icon-inline" data-icon="calendar"></span><span>Calendar</span><small>Timetable-aware</small></button>
+        <button data-nexus-command="clean tabs"><span class="icon-inline" data-icon="panels-top-left"></span><span>Browser review</span><small>Confirm first</small></button>
       </div>
     </div>
   </div>
@@ -363,6 +418,19 @@
 
 <section class="flyout panel" id="pomodoro-flyout" role="dialog" aria-modal="true" aria-hidden="true" inert>
   <div class="panel-head"><h2>Focus Timer</h2><button class="flyout-close"></button></div>
+  <div class="focus-mission-console">
+    <div class="focus-mission-copy"><span>Session target</span><strong id="focus-mission-readout">Name what you are moving forward</strong></div>
+    <div class="focus-mission-field">
+      <input id="focus-context-input" type="text" maxlength="160" autocomplete="off" placeholder="e.g. Maths · Cambridge chapter 7" aria-label="What are you focusing on?">
+      <button id="focus-theme-ideas" class="secondary-btn" type="button">Generate atmosphere</button>
+    </div>
+    <p>Operation HQ uses the subject, time of day and current visual environment to compose fresh, readable theme options. Nothing changes until you choose one.</p>
+  </div>
+  <section id="focus-theme-proposal" class="focus-theme-proposal hidden" aria-label="Generated focus atmosphere choices" aria-live="polite">
+    <header><div><span>Adaptive direction</span><strong id="focus-theme-heading">Three generated options</strong></div><button id="focus-theme-dismiss" class="icon-btn" type="button" aria-label="Dismiss theme suggestions">×</button></header>
+    <div id="focus-theme-options" class="focus-theme-options"></div>
+    <footer><span id="focus-theme-explanation">Choose an option to confirm and deploy it.</span><button id="focus-theme-regenerate" class="secondary-btn" type="button">Generate three more</button></footer>
+  </section>
   <div id="pomodoro-display">25:00</div>
   <div id="pomodoro-controls">
     <button id="pomo-start">Start</button>
@@ -574,7 +642,7 @@
           <label>Ends<input id="cal-event-end" type="time" aria-label="Event end time"></label>
         </div>
         <div class="cal-form-grid">
-          <label>Calendar<select id="cal-event-category" aria-label="Event calendar"><option value="school">School</option><option value="deadline">Deadline</option><option value="focus">Focus</option><option value="personal">Personal</option></select></label>
+          <label>Calendar<select id="cal-event-category" aria-label="Event calendar"><option value="school">School</option><option value="deadline">Deadline</option><option value="focus">Focus</option><option value="schedule">Timetable</option><option value="personal">Personal</option></select></label>
           <label>Priority<select id="cal-event-priority" aria-label="Event priority"><option value="normal">Normal</option><option value="high">High</option><option value="low">Low</option></select></label>
         </div>
         <label>Location<input id="cal-event-location" type="text" maxlength="180" placeholder="Optional place or link" aria-label="Event location"></label>
@@ -655,15 +723,22 @@
   <div id="inbox-count" class="inbox-count-banner">Checking Inbox…</div>
   <div id="forgotten-bookmark-card" class="hidden"></div>
   <div class="panel-actions" style="margin-bottom:8px;">
-    <button id="preview-bookmarks-btn">Preview</button>
-    <button id="sort-bookmarks-btn">Sort Now</button>
-    <button id="sort-inbox-btn">Sort Inbox Only</button>
-    <button id="refine-uncategorized-btn">Deep topic review (reads pages)</button>
-    <button id="undo-bookmarks-btn" disabled>Undo Last Sort</button>
+    <button id="preview-bookmarks-btn" data-bookmark-operation>Preview</button>
+    <button id="sort-bookmarks-btn" data-bookmark-operation>Sort + verify evidence</button>
+    <button id="sort-inbox-btn" data-bookmark-operation>Sort Inbox Only</button>
+    <button id="refine-uncategorized-btn" data-bookmark-operation>Resolve with page evidence</button>
+    <button id="undo-bookmarks-btn" data-bookmark-operation data-has-undo="false" disabled>Nothing to undo</button>
   </div>
+  <div id="bookmark-operation-state" class="bookmark-operation-state" role="status" aria-live="polite">Ready</div>
   <div id="bookmark-progress"><div id="bookmark-progress-bar"><div id="bookmark-progress-fill"></div></div><span id="bookmark-progress-label"></span></div>
-  <div id="bookmark-status">One rule: topic first, platform second. HQ scores the saved title and URL, uses a stable-domain fallback only when content has no clear signal, and sends ties or weak evidence to Review Queue instead of guessing. Preview explains uncertain items; Deep Review can read page metadata after permission; every applied move has exact-path undo.</div>
+  <div id="bookmark-status">Accuracy first: HQ files only strong topic matches. A link without enough evidence stays in its current folder until page evidence or your verified destination resolves it—there is no catch-all or Review Queue. Exact decisions are learned, and every successful move remains undoable.</div>
   <div id="bookmark-log" class="scroll-cap"></div>
+  <section id="bookmark-review-board" class="bookmark-review-board hidden" aria-labelledby="bookmark-review-heading">
+    <div class="bookmark-review-head"><div><span class="panel-kicker">Zero-wrong-placement gate</span><h3 id="bookmark-review-heading">Finish the sort</h3></div><span class="bookmark-review-badge"><strong id="bookmark-review-count">0</strong> decisions</span></div>
+    <p>These links were not moved because their topic could not be proven. Inspect when needed, confirm the correct destination, and HQ learns only that exact saved page. The sort is complete only when this count reaches zero.</p>
+    <div id="bookmark-review-list" class="bookmark-review-list"></div>
+    <div class="bookmark-decision-footer"><span>Selected suggestions still require your confirmation.</span><button id="bookmark-complete-decisions" data-bookmark-review-action type="button">Confirm selected destinations</button></div>
+  </section>
 </section>
 
 <section class="flyout panel" id="weather-flyout" role="dialog" aria-modal="true" aria-hidden="true" inert>
@@ -1207,15 +1282,28 @@
 
   <div class="settings-group" data-category="integrations">
     <h3>Local AI (offline, private, zero cost)</h3>
-    <p class="settings-note">Runs Llama 3.2 1B directly in this tab via WebGPU. It can summarize, explain, extract actions, make a quiz, critique a plan, and refine an imported assessment brief. Nothing is sent to an API. The first load downloads roughly 700MB–900MB and the model must be loaded once per fresh tab session.</p>
+    <p class="settings-note">Runs your chosen open model directly in this tab via WebGPU. It can work from text you provide or an explicit, provenance-labelled snapshot of the local HQ sources you choose. It advises, interprets and drafts; deterministic HQ code validates every action and still asks before mutations. Nothing is sent to an AI API. A model is downloaded only after you press Load.</p>
+    <label for="local-ai-profile">On-device model</label>
+    <select id="local-ai-profile" aria-label="Choose on-device AI model">
+      <option value="fast">Fast · Llama 3.2 1B — smallest everyday model</option>
+      <option value="balanced">Stronger · Qwen 2.5 3B — better planning</option>
+      <option value="math">Math · Qwen2 Math 1.5B — study specialist</option>
+    </select>
+    <p id="local-ai-profile-detail" class="settings-note"></p>
     <div id="local-ai-status" style="font-size:12px; color:var(--text-dim); margin-bottom:8px;"></div>
     <div id="local-ai-progress-bar" class="hidden" style="background:rgba(255,255,255,0.1); border-radius:4px; height:6px; margin-bottom:8px; overflow:hidden;">
       <div id="local-ai-progress-fill" style="background:var(--accent); height:100%; width:0%; transition:width 0.2s;"></div>
     </div>
-    <button id="local-ai-load-btn">Load Local AI</button>
+    <button id="local-ai-load-btn">Load selected Local AI</button>
     <div class="local-ai-lab">
       <div class="local-ai-lab-head"><span class="nexus-kicker">Native intelligence lab</span><button id="local-ai-cancel-btn" class="secondary-btn" disabled>Cancel</button></div>
       <select id="local-ai-mode" aria-label="Local AI operation">
+        <option value="brief">Build an executive HQ brief</option>
+        <option value="prioritize">Rank my next actions</option>
+        <option value="schedule">Draft a realistic schedule</option>
+        <option value="risk">Scan deadlines and blockers</option>
+        <option value="study">Build a focused study sprint</option>
+        <option value="connections">Find useful connections</option>
         <option value="actions">Turn text into actions</option>
         <option value="summarize">Summarize clearly</option>
         <option value="explain">Explain simply</option>
@@ -1223,6 +1311,20 @@
         <option value="critique">Critique my plan</option>
         <option value="rewrite">Rewrite for clarity</option>
       </select>
+      <fieldset class="local-ai-context" aria-describedby="local-ai-context-status">
+        <legend>Optional local context</legend>
+        <div class="local-ai-source-grid">
+          <label><input class="hq-toggle local-ai-source" type="checkbox" value="tasks" aria-label="Include Tasks in local AI context" checked> Tasks</label>
+          <label><input class="hq-toggle local-ai-source" type="checkbox" value="calendar" aria-label="Include Calendar in local AI context" checked> Calendar</label>
+          <label><input class="hq-toggle local-ai-source" type="checkbox" value="assignments" aria-label="Include Assignments in local AI context" checked> Assignments</label>
+          <label><input class="hq-toggle local-ai-source" type="checkbox" value="today" aria-label="Include Today in local AI context" checked> Today</label>
+          <label><input class="hq-toggle local-ai-source" type="checkbox" value="capture" aria-label="Include Capture inbox in local AI context"> Captures</label>
+          <label><input class="hq-toggle local-ai-source" type="checkbox" value="notes" aria-label="Include Notes in local AI context"> Notes</label>
+          <label><input class="hq-toggle local-ai-source" type="checkbox" value="gmail" aria-label="Include Gmail metadata in local AI context"> Gmail metadata</label>
+        </div>
+        <button id="local-ai-context-btn" class="secondary-btn" type="button">Assemble selected context</button>
+        <p id="local-ai-context-status" class="settings-note" role="status" aria-live="polite">No HQ data has been read for this prompt.</p>
+      </fieldset>
       <textarea id="local-ai-input" rows="6" maxlength="12000" aria-label="Text for local AI" placeholder="Paste a real brief, note, draft or plan…"></textarea>
       <button id="local-ai-run-btn" disabled>Run locally</button>
       <div id="local-ai-output" class="local-ai-output" role="status" aria-live="polite">Load Local AI to use the lab.</div>
@@ -1291,6 +1393,12 @@
       <button id="widget-order-reset" class="secondary-btn" type="button">Reset order</button>
     </div>
     <p class="settings-note" id="widget-order-status" role="status" aria-live="polite">Each widget keeps its data and behaviour when moved.</p>
+    <label for="ui-density-select">Information density</label>
+    <select id="ui-density-select" aria-label="Dashboard information density">
+      <option value="calm">Calm — larger spacing and quieter detail</option>
+      <option value="balanced">Balanced — designed default</option>
+      <option value="command">Command centre — more signal in less space</option>
+    </select>
     <label for="motion-profile-select">Motion direction</label>
     <select id="motion-profile-select" aria-label="Dashboard motion profile">
       <option value="auto">Adaptive — cinematic when the device can handle it</option>
@@ -1300,6 +1408,25 @@
     </select>
     <label><input type="checkbox" class="hq-toggle" id="motion-depth-toggle" aria-label="Enable pointer-responsive depth" checked> Pointer-responsive depth</label>
     <p class="settings-note" id="motion-profile-status" role="status">Motion always pauses in background tabs and respects reduced-motion.</p>
+    <label for="compositor-quality-select">Procedural atmosphere</label>
+    <select id="compositor-quality-select" aria-label="Procedural atmosphere quality">
+      <option value="auto">Adaptive — select and govern quality automatically</option>
+      <option value="ultra">Ultra — full-resolution 60 fps target</option>
+      <option value="balanced">Balanced — layered 45 fps target</option>
+      <option value="efficient">Efficient — lightweight 30 fps target</option>
+      <option value="off">Off — keep the CSS state choreography only</option>
+    </select>
+    <label><input type="checkbox" class="hq-toggle" id="compositor-adaptive-toggle" aria-label="Allow visual quality to adapt to measured performance" checked> Protect responsiveness using measured performance</label>
+    <button id="compositor-preview" class="secondary-btn" type="button">Preview energy field</button>
+    <p class="settings-note" id="compositor-status" role="status" aria-live="polite">Checking visual engine support…</p>
+    <label for="boot-sequence-select">Launch sequence</label>
+    <select id="boot-sequence-select" aria-label="Dashboard launch sequence">
+      <option value="full">Full cinematic — layered system launch</option>
+      <option value="compact">Compact — fast cinematic reveal</option>
+      <option value="off">Off — open immediately</option>
+    </select>
+    <button id="boot-sequence-preview" class="secondary-btn" type="button">Preview launch sequence</button>
+    <p class="settings-note">The progress line follows real extension startup stages. Reduced-motion always uses an instant, non-animated reveal.</p>
     <label><input type="checkbox" class="hq-toggle" id="pin-daily" aria-label="Pin Daily Non-Negotiables"> Pin Daily Non-Negotiables to main screen</label>
     <label><input type="checkbox" class="hq-toggle" id="pin-tasks" aria-label="Pin Operation HQ tasks"> Pin Operation HQ to main screen</label>
     <label style="margin-top:10px;"><input type="checkbox" class="hq-toggle" id="toggle-blur" aria-label="Blur wallpaper behind panels"> Blur wallpaper behind panels</label>
@@ -1336,7 +1463,7 @@
 
   <div class="settings-group" data-category="general">
     <h3>System Health</h3>
-    <p class="build-identity"><span>Loaded build</span><strong id="build-version">2.5.0 · Atomic Continuity</strong></p>
+    <p class="build-identity"><span>Loaded build</span><strong id="build-version">2.8.1 · Stability Pass</strong></p>
     <p id="boot-status" class="system-health" role="status" aria-live="polite">Starting Operation HQ…</p>
     <p id="safe-mode-status" class="settings-note"></p>
     <div class="system-health-actions">

@@ -45,8 +45,8 @@ const DeepWork = {
 
   // Accepts "youtube.com", "www.youtube.com", "https://youtube.com/watch?..."
   // — anything a person would naturally type or paste — and reduces it to
-  // a bare domain. Reuses Classifier's existing URL-parsing logic (rule 8)
-  // rather than re-implementing domain extraction here.
+  // a bare domain. This intentionally stays independent from the bookmark
+  // classifier, which is loaded only when its panel opens.
   //
   // Also rejects anything that isn't shaped like a real domain (no dot —
   // "youtube" instead of "youtube.com", a typo Classifier.domainOf() would
@@ -60,7 +60,12 @@ const DeepWork = {
     const trimmed = (raw || "").trim();
     if (!trimmed) return null;
     const withScheme = trimmed.includes("://") ? trimmed : `https://${trimmed}`;
-    const domain = Classifier.domainOf(withScheme);
+    let domain = "";
+    try {
+      domain = new URL(withScheme).hostname.toLowerCase().replace(/^www\./, "");
+    } catch (_) {
+      return null;
+    }
     const looksLikeADomain = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i.test(domain || "");
     return looksLikeADomain ? domain : null;
   },

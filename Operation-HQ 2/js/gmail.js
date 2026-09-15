@@ -99,7 +99,6 @@ const Gmail = {
       this.setConnectedUi(true);
       this.elements().oauthHelp.hidden = true;
     } catch (error) {
-      console.error("Gmail authorization failed:", error);
       await chrome.storage.local.remove("hq_gmail_connected");
       this.setConnectedUi(false);
       this.setStatus(this.diagnoseAuthError(error), "error");
@@ -114,6 +113,9 @@ const Gmail = {
   diagnoseAuthError(error) {
     const message = (error?.message || String(error)).trim();
     const lower = message.toLowerCase();
+    if (this.isAudienceError(error)) {
+      return "Google blocked this account because HQ Newtab is still in testing. Add the account under Google Auth Platform → Audience → Test users, then connect again.";
+    }
     if (lower.includes("bad client id") || lower.includes("oauth2 not granted or revoked")) {
       return "Google rejected this OAuth client. Create a Chrome Extension client tied to this exact extension ID.";
     }
@@ -375,7 +377,6 @@ const Gmail = {
       // returns to page one, avoiding an old page token being applied to a new query.
       await this.runSearch();
     } catch (error) {
-      console.error("Gmail refresh failed:", error);
       this.setStatus(this.diagnoseAuthError(error), "error");
     } finally {
       refresh.disabled = false;
@@ -449,6 +450,3 @@ const Gmail = {
     }
   }
 };
-    if (this.isAudienceError(error)) {
-      return "Google blocked this account because HQ Newtab is still in testing. Add the account under Google Auth Platform → Audience → Test users, then connect again.";
-    }

@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Operation HQ — New Tab",
-  "version": "2.5.0",
-  "description": "An atomic cinematic command centre with adaptive living widgets, safe calendar intelligence, Study OS and resilient browser tools.",
+  "version": "2.8.1",
+  "description": "A local-first personal command centre with an adaptive procedural compositor, provenance-grounded on-device AI, living widgets, Study OS and resilient browser tools.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2k6G9nn2pwTZpG/8QrPbB3vowwvR1x1owK2XIGxxNQchSl8i0Svf0o/YLiNC/W4FOxPjO7aMH5xF3ueLenIcNxRfZK1vAMDyQsLEK0bP+3Lw/BlD8+FqYSG/evnQWAIRIaYTqt8MF7ELs9j8qV4QhKlqxHQ4HrZyDh3AGIYpSJr9e18SBJEZikWiiZsvCpTX18TSH0mOGMtlSG89blRDrtJvB/BnGGDFakQZBUovmwKHYwvrn/pO2rmqFq7EJMWyNgtBMSp+f/S0lok83xzDC+0YsA91Ih1KxpVZPrm7J8pg9Dc/1X9D7XoMeLfsdMb7ITdbah1hRWtwmAUXzPE/BQIDAQAB",
   "chrome_url_overrides": {
     "newtab": "newtab.html"

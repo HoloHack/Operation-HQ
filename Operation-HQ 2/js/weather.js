@@ -31,6 +31,10 @@ const WEATHER_CODES = {
 const Weather = {
   CACHE_MS: 45 * 60 * 1000, // 45 min — weather doesn't need to be fetched every tab open
   LOCATION_REFRESH_MS: 6 * 60 * 60 * 1000,
+  _forecastRequest: null,
+  _forecastRetryAfter: 0,
+  _lastForecastError: null,
+  _lastLocationError: null,
 
   async settings() {
     const saved = await chrome.storage.local.get(["hq_weather_auto_location", "hq_weather_unit", "hq_weather_refresh"]);
@@ -58,9 +62,16 @@ const Weather = {
 
   async fetchWithTimeout(url, options = {}, timeoutMs = 10000) {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    let timedOut = false;
+    const timer = setTimeout(() => { timedOut = true; controller.abort("weather-timeout"); }, timeoutMs);
     try {
       return await fetch(url, { ...options, signal: controller.signal });
+    } catch (error) {
+      const wrapped = new Error(timedOut || error?.name === "AbortError"
+        ? "Weather service timed out"
+        : "Weather service is unreachable");
+      wrapped.code = timedOut || error?.name === "AbortError" ? "timeout" : "network";
+      throw wrapped;
     } finally {
       clearTimeout(timer);
     }
@@ -81,23 +92,33 @@ const Weather = {
       try {
         navigator.geolocation.getCurrentPosition(
           async (pos) => {
-            const loc = {
-              lat: pos.coords.latitude,
-              lon: pos.coords.longitude,
-              name: "Current location",
-              source: "automatic",
-              accuracy: Math.round(pos.coords.accuracy || 0),
-              updatedAt: Date.now(),
-            };
-            await chrome.storage.local.set({
-              hq_weather_location: loc,
-              hq_weather_auto_location: true,
-              hq_weather_geo_next_offer: 0,
-            });
-            resolve(loc);
+            try {
+              const loc = {
+                lat: pos.coords.latitude,
+                lon: pos.coords.longitude,
+                name: "Current location",
+                source: "automatic",
+                accuracy: Math.round(pos.coords.accuracy || 0),
+                updatedAt: Date.now(),
+              };
+              await chrome.storage.local.set({
+                hq_weather_location: loc,
+                hq_weather_auto_location: true,
+                hq_weather_geo_next_offer: 0,
+              });
+              this._lastLocationError = null;
+              resolve(loc);
+            } catch (error) {
+              this._lastLocationError = "Location was found, but Chrome could not save it.";
+              resolve(null);
+            }
           },
           (err) => {
-            console.warn("Geolocation denied or unavailable:", err?.message || err);
+            this._lastLocationError = err?.code === 1
+              ? "Location permission is blocked."
+              : err?.code === 3
+                ? "Location lookup timed out."
+                : "Location is temporarily unavailable.";
             resolve(null);
           },
           { enableHighAccuracy: false, maximumAge: 30 * 60 * 1000, timeout: 12000 }
@@ -109,7 +130,7 @@ const Weather = {
         // would simply hang forever — the UI would sit on "Requesting
         // location…" indefinitely with no fallback ever shown, which is
         // functionally identical to a silent failure from the user's side.
-        console.warn("Geolocation call threw synchronously:", e.message);
+        this._lastLocationError = "Chrome could not start location lookup.";
         resolve(null);
       }
     });
@@ -136,7 +157,7 @@ const Weather = {
       if (!hit) return null;
       return this.setLocationFromHit(hit);
     } catch (e) {
-      console.error("City geocode failed:", e);
+      this._lastLocationError = e?.message || "City lookup is temporarily unavailable.";
       return null;
     }
   },
@@ -153,7 +174,7 @@ const Weather = {
       const data = await res.json();
       return data.results || [];
     } catch (e) {
-      console.error("City search failed:", e);
+      this._lastLocationError = e?.message || "City search is temporarily unavailable.";
       return [];
     }
   },
@@ -165,6 +186,36 @@ const Weather = {
     return res.json();
   },
 
+  locationKey(loc) {
+    return `${Number(loc?.lat).toFixed(4)},${Number(loc?.lon).toFixed(4)}`;
+  },
+
+  async refreshForecast(loc) {
+    const key = this.locationKey(loc);
+    if (this._forecastRequest?.key === key) return this._forecastRequest.promise;
+    if (Date.now() < this._forecastRetryAfter) return null;
+    const promise = (async () => {
+      try {
+        const data = await this.fetchWeather(loc);
+        await chrome.storage.local.set({ hq_weather_cache: { data, locationKey:key, fetchedAt:Date.now() } });
+        this._lastForecastError = null;
+        this._forecastRetryAfter = 0;
+        document.dispatchEvent(new CustomEvent("hq:weather-updated"));
+        return data;
+      } catch (error) {
+        this._lastForecastError = error?.message || "Weather service is unavailable";
+        // One provider outage must not produce a fetch storm from the chip,
+        // detail panel, living widget and scheduler at the same time.
+        this._forecastRetryAfter = Date.now() + 5 * 60 * 1000;
+        return null;
+      } finally {
+        if (this._forecastRequest?.promise === promise) this._forecastRequest = null;
+      }
+    })();
+    this._forecastRequest = { key, promise };
+    return promise;
+  },
+
   async getCachedOrFetch() {
     const loc = await this.getLocation();
     if (!loc) return null;
@@ -172,17 +223,18 @@ const Weather = {
     const { refreshMinutes } = await this.settings();
     const maxAge = refreshMinutes * 60 * 1000;
     const { hq_weather_cache } = await chrome.storage.local.get("hq_weather_cache");
-    if (hq_weather_cache && Date.now() - hq_weather_cache.fetchedAt < maxAge) {
+    const key = this.locationKey(loc);
+    const cacheMatches = hq_weather_cache?.data && (!hq_weather_cache.locationKey || hq_weather_cache.locationKey === key);
+    if (cacheMatches && Date.now() - hq_weather_cache.fetchedAt < maxAge) {
       return hq_weather_cache.data;
     }
-    try {
-      const data = await this.fetchWeather(loc);
-      await chrome.storage.local.set({ hq_weather_cache: { data, fetchedAt: Date.now() } });
-      return data;
-    } catch (e) {
-      console.error("Weather fetch failed:", e);
-      return hq_weather_cache?.data || null;
+    if (cacheMatches) {
+      // Stale-while-revalidate: paint the last real forecast instantly and
+      // refresh once in the background instead of blocking every new tab.
+      void this.refreshForecast(loc);
+      return hq_weather_cache.data;
     }
+    return this.refreshForecast(loc);
   },
 
   async renderChip() {
@@ -197,7 +249,12 @@ const Weather = {
     }
     chip.classList.remove("weather-chip-empty");
     const data = await this.getCachedOrFetch();
-    if (!data) { tempEl.innerHTML = `${Icons.span("thermometer-sun")} —`; return; }
+    if (!data) {
+      tempEl.innerHTML = `${Icons.span("thermometer-sun")} —`;
+      chip.title = this._lastForecastError || "Weather will retry automatically";
+      return;
+    }
+    chip.title = "Weather";
     const info = this.codeInfo(data.current.weather_code);
     const { unit } = await this.settings();
     tempEl.innerHTML = `${Icons.span(info.icon)} ${this.formatTemperature(data.current.temperature_2m, unit)}`;
@@ -217,7 +274,10 @@ const Weather = {
     const source = document.getElementById("weather-source-badge");
     if (source) source.textContent = loc.source === "manual" ? "Manual" : "Automatic";
     const data = await this.getCachedOrFetch();
-    if (!data) { el.innerHTML = '<p class="settings-note">Couldn\'t load weather.</p>'; return; }
+    if (!data) {
+      el.innerHTML = `<p class="settings-note">${escapeHtml(this._lastForecastError || "The forecast service is temporarily unavailable")}. Your saved location is intact; HQ will retry automatically.</p>`;
+      return;
+    }
     const info = this.codeInfo(data.current.weather_code);
     const { unit } = await this.settings();
     const temp = this.formatTemperature(data.current.temperature_2m, unit);
@@ -241,7 +301,7 @@ const Weather = {
     settingsButton.classList.toggle("hidden", state !== "denied");
     el.dataset.state = state;
     if (!automatic) el.textContent = "Manual mode is active. Your typed city stays on this device.";
-    else if (state === "granted") el.textContent = "Automatic location is on. Coordinates stay on this device and are sent only to Open-Meteo for the forecast.";
+    else if (state === "granted") el.textContent = this._lastLocationError || "Automatic location is on. Coordinates stay on this device and are sent only to Open-Meteo for the forecast.";
     else if (state === "denied") el.textContent = "Location is blocked in Chrome or macOS. Open settings, allow Google Chrome, then refresh your location.";
     else if (state === "unavailable") el.textContent = "This device does not expose location. Switch off automatic location and choose a city.";
     else el.textContent = "Chrome will ask for location when the automatic refresh begins.";
@@ -262,14 +322,26 @@ const Weather = {
     document.getElementById("weather-auto-location").checked = preferences.automatic;
     document.getElementById("weather-unit").value = preferences.unit;
     document.getElementById("weather-refresh").value = String(preferences.refreshMinutes);
-    await this.renderPermissionState();
-
-    if (preferences.automatic) await this.refreshAutomaticLocation();
-    await this.renderChip();
-    await this.renderDetail();
+    await Promise.all([this.renderPermissionState(), this.renderChip(), this.renderDetail()]);
+    if (preferences.automatic) {
+      // Geolocation may take twelve seconds on a sleeping network/OS service.
+      // It refreshes after first paint and never blocks the new-tab boot.
+      setTimeout(async () => {
+        const before = await this.getLocation();
+        const loc = await this.refreshAutomaticLocation();
+        if (loc && (!before || loc.updatedAt !== before.updatedAt)) {
+          await Promise.all([this.renderChip(), this.renderDetail(), this.renderPermissionState()]);
+        } else if (!loc) await this.renderPermissionState();
+      }, 0);
+    }
     // weather-chip's click-to-open is handled by the shared dock system
     // (it has class="dock-btn") — just keep the data fresh in the background.
     PageScheduler.register("weather", 5 * 60 * 1000, () => Promise.all([this.renderChip(), this.renderDetail()]));
+    document.addEventListener("hq:weather-updated", () => {
+      this.renderChip();
+      this.renderDetail();
+      if (typeof LivingWidgets !== "undefined") LivingWidgets.queueRender();
+    });
     document.getElementById("weather-use-geo-btn").onclick = async () => {
       document.getElementById("weather-detail").innerHTML = '<p class="settings-note">Requesting location…</p>';
       const loc = await this.refreshAutomaticLocation({ force: true });

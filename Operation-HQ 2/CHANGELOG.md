@@ -1,5 +1,53 @@
 # Operation HQ changelog
 
+## 2.8.1 — Stability Pass
+
+- Fixed the browser parse error in Gmail by moving a misplaced audience-error return into `diagnoseAuthError`; the dependent “Gmail is not defined” failure is resolved at the same source.
+- Added a browser-classic runtime suite so top-level return statements and other browser-only parse errors cannot pass through Node's CommonJS wrapper unnoticed.
+- Replaced catch-all bookmark filing with a queue-free no-guess contract: low-confidence links remain in place, explicit decisions are learned only for a validated content-specific fingerprint, and every move remains locked, failure-safe and exactly undoable.
+- Kept user-created folders outside cleanup authority and expanded executable bookmark-tree mutation coverage for invalid learned paths, simultaneous operations and failed Chrome API calls.
+- Reduced the eager startup core from 43 scripts/501 KB to 28 scripts/365 KB. Optional feature modules and native-AI vendors load on first use; the compositor downshifts from measured frame rate and releases its screen-sized buffer while hidden.
+- Preserved exact non-contiguous Maths chapter lists, added a deterministic daily grind mission, and made focus startup independent of timetable capacity while leaving every schedule change review-first.
+- Corrected the 4K ultrawide gate, added cached recovery and optional configured alternate providers for suitable categories, and kept named-anime searches strict rather than substituting unrelated imagery.
+- Deduplicated Weather refreshes, added provider backoff and converted handled network failures into readable UI state.
+- Fixed focus order when Settings, command palette, reports, PIN dialogs and feature flyouts close, eliminating focused descendants under `aria-hidden`/`inert`; corrected the Safe Mode diagnostics route.
+- All six packaged suites pass with 71 JavaScript modules, 720 unique IDs, 26 named dialogs and a 28-script/365 KB startup budget. Target-device Chrome, provider/OAuth, WebGPU and visual-performance checks remain manual gates.
+
+## 2.8.0 — Context Engine
+
+- Fixed false recovery mode by moving the pending-boot marker from shared local storage to per-tab session storage; added visible exit and diagnostic controls.
+- Added deterministic command parsing for focus plans, subjects, chapter ranges, deadlines, durations, generated study atmospheres, saved-resource lookup, browser review and optional local study help.
+- Added precise command follow-ups, review-before-apply schedule plans, bookmark/tab/workspace resource results, and optional on-device model profiles for fast general help, balanced reasoning, and mathematics.
+- Added three fresh user-selectable theme proposals per focus mission. Generated palettes now alter colour, surface, shape, subject composition and one of four full-dashboard transition choreographies.
+- Projected the active Master Timetable into Calendar and added multi-day chapter planning over real flexible blocks without duplicating timetable data.
+- Strengthened bookmark classification with Mathematics/Science branches, deeper evidence rules, explicit page-metadata review, optional batched local-model classification and confidence-gated filing.
+- Strengthened every wallpaper channel with multi-page relevance, curated and broad rescue pools plus candidate-by-candidate 4K decode validation while retaining the last working image.
+- Reduced compositor and pointer overhead, corrected panel close placement, standardized input padding, preserved foreground click targets and added clipboard-failure handling.
+- Added a dedicated command-intelligence regression suite. All four packaged suites pass: static verification, concurrency/integrity, bookmark transactions and command parsing.
+
+## 2.7.0 — Apex Compositor
+
+- Added a WebGL2 procedural compositor with layered fields, grid/horizon/ribbon atmosphere, wallpaper-derived colour, widget topology, pointer response, and source-positioned state pulses.
+- Added measured adaptive quality, Auto/Ultra/Balanced/Efficient/Off modes, a live renderer status, preview, background pause, reduced-motion bypass, context-loss fallback, and safe CSS-only degradation.
+- Added independent widget drift variables so cinematic attitude, layout placement, hover depth, and click targets no longer compete for the same transform.
+- Expanded the real-stage boot film with volumetric beams, segmented aperture geometry, and truthful subsystem telemetry while preserving Skip, failsafe, Compact, Off, and reduced-motion paths.
+- Added explicit, provenance-labelled local context assembly for Tasks, Calendar, Assignments, Today, Captures, Notes, and read-only Gmail metadata.
+- Added executive brief, priority, schedule, risk, study, and connection modes to Native Intelligence; all output remains advisory and user-reviewed.
+- Fixed compositor frame-buffer accumulation, off-to-on initialization, motion-preference recovery, malformed preference normalization, and missing-context-module fallback.
+- Advanced storage to schema v10 and verification to 69 JavaScript modules and 693 unique IDs without adding permissions, OAuth scopes, write authority, tracking, or cloud dependencies.
+
+## 2.6.0 — Cinematic Intelligence
+
+- Added a visible full-screen boot film driven by real startup stages, with layered shutters, a reactor instrument, scanning, live progress, coordinated widget reveal, skip, failsafe, Full/Compact/Off settings, preview, and reduced-motion bypass.
+- Added balanced, calm, and command-centre information density plus consistent widget gutters, header/footer rhythm, reliable interactive stacking, larger targets, focus depth, and pointer contact feedback.
+- Expanded the fixed bookmark taxonomy and evidence vocabulary while preserving topic-first classification and one honest Review Queue for ambiguity.
+- Added a Review Board that lets the user file uncertain links into a curated destination and learn only the exact content fingerprint.
+- Made learned fingerprints content-specific for YouTube and Google documents; rejected learned paths outside the fixed taxonomy and all operational destinations.
+- Restricted full sorting to the Bookmark Bar, made deep review descendant-aware, and limited empty-folder cleanup to a verified registry of extension-created folders.
+- Serialized bookmark changes locally and across new-tab pages, disabled overlapping controls, logged inverse moves only after success, retained a bounded transaction stack, and prevented undo from overwriting later manual moves.
+- Added executable bookmark-tree mutation tests for user-folder preservation, invalid learning, failed moves, overlap, exact undo, and content fingerprint isolation.
+- Advanced the build to 2.6.0 without adding permissions, OAuth scopes, write authority, external services, or placeholder data.
+
 ## 2.5.0 — Atomic Continuity
 
 - Centralized `hq_context` mutation in the service worker with typed operations, current-state reads, serialized commits, and monotonic revisions.

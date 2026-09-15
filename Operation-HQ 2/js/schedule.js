@@ -595,6 +595,67 @@ const Schedule = {
     this.renderTaskPlan(date);
   },
 
+  chapterValues(chapters) {
+    if (Array.isArray(chapters?.values) && chapters.values.length) {
+      return [...new Set(chapters.values.map(Number).filter(Number.isFinite))].slice(0, 31);
+    }
+    if (!chapters || !Number.isFinite(Number(chapters.start)) || !Number.isFinite(Number(chapters.end))) return [];
+    const start = Number(chapters.start);
+    const end = Number(chapters.end);
+    if (end < start) return [];
+    return Array.from({ length:Math.min(31, end - start + 1) }, (_, index) => start + index);
+  },
+
+  async buildFocusedPlan({ title, subject, chapters, deadline, minutes = 25 } = {}) {
+    if (!this.active) throw new Error("Choose a timetable profile before building a focus plan.");
+    const cleanTitle = String(title || subject || "Focused study").replace(/\s+/g, " ").trim().slice(0, 160);
+    const safeMinutes = Math.max(10, Math.min(180, Math.round(Number(minutes) || 25)));
+    const start = new Date();
+    start.setHours(12, 0, 0, 0);
+    const finalDate = /^\d{4}-\d{2}-\d{2}$/.test(String(deadline || "")) ? new Date(`${deadline}T12:00:00`) : new Date(start);
+    if (Number.isNaN(finalDate.getTime()) || finalDate < start) throw new Error("Choose a deadline from today onward.");
+    const last = new Date(Math.min(finalDate.getTime(), start.getTime() + 21 * 86400000));
+    const chapterValues = this.chapterValues(chapters);
+    const chapterUnits = chapterValues.map(chapter => `${subject || "Study"} · Chapter ${chapter}`);
+    const matchingTasks = (typeof Tasks !== "undefined" ? Tasks.data : [])
+      .filter(task => !task.done && new RegExp(String(subject || "study").replace(/[^a-z0-9]+/gi, "|"), "i").test(`${task.text || ""} ${task.venture || ""}`))
+      .slice(0, 8)
+      .map(task => ({ label:task.text, taskId:task.id, priority:task.priority || "normal" }));
+    const units = chapterUnits.length
+      ? chapterUnits.map(label => ({ label, taskId:null, priority:"high" }))
+      : matchingTasks.length
+        ? matchingTasks
+        : Array.from({ length:6 }, (_, index) => ({ label:`${cleanTitle} · session ${index + 1}`, taskId:null, priority:"high" }));
+    const draft = [];
+    let unitIndex = 0;
+    for (let date = new Date(start); date <= last && draft.length < 10 && unitIndex < units.length; date = new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1, 12)) {
+      const dayKey = SCHEDULE_DAY_KEYS[date.getDay()];
+      const isToday = hqLocalDateKey(date) === hqLocalDateKey();
+      const nowMinutes = new Date().getHours() * 60 + new Date().getMinutes();
+      const phase = this.activePhase(this.active, date);
+      const slots = this.blocksFor(this.active, dayKey, date)
+        .filter(block => this.isFlexibleBlock(block) && (!isToday || this.toMinutes(block.e) > nowMinutes + 10))
+        .map(block => ({ ...block, availableStart:isToday ? Math.max(this.toMinutes(block.s), nowMinutes + 5) : this.toMinutes(block.s), end:this.toMinutes(block.e) }))
+        .filter(block => block.end - block.availableStart >= 10);
+      for (const slot of slots) {
+        if (unitIndex >= units.length || draft.length >= 10) break;
+        const unit = units[unitIndex++];
+        const duration = Math.min(safeMinutes, slot.end - slot.availableStart);
+        draft.push({
+          id:crypto.randomUUID(), taskId:unit.taskId, text:unit.label, venture:subject || "Study", priority:unit.priority,
+          dateKey:hqLocalDateKey(date), s:this.fromMinutes(slot.availableStart), e:this.fromMinutes(slot.availableStart + duration),
+          slot:slot.t,
+          reason:[`Nexus focus: ${cleanTitle}`, phase?.label, `deadline ${deadline}`].filter(Boolean).join(" · "),
+        });
+      }
+    }
+    this._planDraft = draft;
+    await chrome.storage.local.set({ hq_schedule_plan_draft_v1:draft });
+    this.renderTaskPlan(start);
+    Wallpaper?.toast?.(draft.length ? `${draft.length} timetable block${draft.length === 1 ? "" : "s"} drafted. Open Schedule to review before applying.` : "No flexible timetable blocks were available before that deadline.");
+    return draft;
+  },
+
   renderTaskPlan(date = this._planDraft[0]?.dateKey ? new Date(`${this._planDraft[0].dateKey}T12:00:00`) : new Date()) {
     const panel = document.getElementById("schedule-smart-plan");
     const list = document.getElementById("schedule-smart-plan-preview");
@@ -607,8 +668,17 @@ const Schedule = {
     }
     document.getElementById("schedule-apply-plan-btn").disabled = false;
     const total = this._planDraft.reduce((sum, item) => sum + this.toMinutes(item.e) - this.toMinutes(item.s), 0);
-    document.getElementById("schedule-plan-capacity").textContent = `${date.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" })} · ${total} min`;
-    list.innerHTML = this._planDraft.map(item => `<li><span>${escapeHtml(item.s)}–${escapeHtml(item.e)}</span><div><strong>${escapeHtml(item.text)}</strong><small>${escapeHtml(item.slot)} · ${escapeHtml(item.reason)}</small></div></li>`).join("");
+    const dates = [...new Set(this._planDraft.map(item => item.dateKey))];
+    const span = dates.length === 1
+      ? this.fromPlanDate(dates[0])
+      : `${this.fromPlanDate(dates[0])} → ${this.fromPlanDate(dates.at(-1))}`;
+    document.getElementById("schedule-plan-capacity").textContent = `${span} · ${total} min · ${this._planDraft.length} blocks`;
+    list.innerHTML = this._planDraft.map(item => `<li><span><b>${escapeHtml(this.fromPlanDate(item.dateKey))}</b>${escapeHtml(item.s)}–${escapeHtml(item.e)}</span><div><strong>${escapeHtml(item.text)}</strong><small>${escapeHtml(item.slot)} · ${escapeHtml(item.reason)}</small></div></li>`).join("");
+  },
+
+  fromPlanDate(dateKey) {
+    const date = new Date(`${dateKey}T12:00:00`);
+    return Number.isNaN(date.getTime()) ? String(dateKey || "") : date.toLocaleDateString([], { weekday:"short", month:"short", day:"numeric" });
   },
 
   async dismissTaskPlan() {
@@ -659,6 +729,7 @@ const Schedule = {
     }
     this.renderTodayView();
     this.renderEditor();
+    if (typeof Calendar !== "undefined" && Calendar._initPromise) void Calendar.render();
   },
 
   renderTodayView() {

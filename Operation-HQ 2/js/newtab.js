@@ -2,6 +2,95 @@
 
 const FOCUSABLE_SELECTOR = 'button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])';
 
+// A real launch surface, not a decorative timeout. Its progress is advanced
+// by actual bootstrap milestones below, and a hard failsafe guarantees it can
+// never trap the user if an unrelated provider takes too long.
+const BootCinematic = {
+  KEY: "hq_boot_sequence_v1",
+  mode: "full",
+  startedAt: 0,
+  finishing: false,
+  timers: [],
+
+  element() { return document.getElementById("hq-launch"); },
+  reduced() { return matchMedia("(prefers-reduced-motion: reduce)").matches; },
+  later(fn, delay) { const timer = setTimeout(fn, delay); this.timers.push(timer); return timer; },
+  clearTimers() { this.timers.forEach(clearTimeout); this.timers = []; },
+
+  stage(label, progress) {
+    const stage = document.getElementById("hq-launch-stage");
+    const fill = document.getElementById("hq-launch-progress-fill");
+    if (stage) stage.textContent = label;
+    if (fill) fill.style.width = `${Math.max(2, Math.min(100, Number(progress) || 0))}%`;
+    this.element()?.style.setProperty("--boot-progress", String(Math.max(0, Math.min(1, (Number(progress) || 0) / 100))));
+  },
+
+  async start() {
+    const launch = this.element();
+    if (!launch) return;
+    const saved = await chrome.storage.local.get(this.KEY);
+    this.mode = ["full", "compact", "off"].includes(saved[this.KEY]) ? saved[this.KEY] : "full";
+    document.body.dataset.bootSequence = this.mode;
+    document.getElementById("hq-launch-skip").onclick = () => this.complete(true);
+    if (this.mode === "off" || this.reduced()) { this.complete(true); return; }
+    this.startedAt = performance.now();
+    this.finishing = false;
+    launch.classList.remove("is-gone", "is-exiting");
+    launch.classList.add("is-active");
+    document.body.classList.add("boot-cinematic-active");
+    this.stage("Establishing local core", 4);
+    this.later(() => this.complete(false, true), this.mode === "full" ? 4600 : 2800);
+  },
+
+  complete(immediate = false, failsafe = false) {
+    const launch = this.element();
+    if (!launch || this.finishing) return;
+    this.finishing = true;
+    const minDuration = this.mode === "full" ? 2300 : 980;
+    const elapsed = this.startedAt ? performance.now() - this.startedAt : minDuration;
+    const wait = immediate ? 0 : Math.max(0, minDuration - elapsed);
+    this.later(() => {
+      this.stage(failsafe ? "Core ready · background services continuing" : "Command environment online", 100);
+      launch.classList.add("is-exiting");
+      document.body.classList.remove("boot-cinematic-active");
+      this.later(() => {
+        launch.classList.remove("is-active", "is-exiting");
+        launch.classList.add("is-gone");
+      }, immediate ? 80 : (this.mode === "full" ? 920 : 520));
+    }, wait);
+  },
+
+  bindSettings() {
+    const select = document.getElementById("boot-sequence-select");
+    const preview = document.getElementById("boot-sequence-preview");
+    if (!select || !preview) return;
+    select.value = this.mode;
+    preview.disabled = this.mode === "off";
+    select.onchange = async event => {
+      this.mode = event.target.value;
+      document.body.dataset.bootSequence = this.mode;
+      preview.disabled = this.mode === "off";
+      await chrome.storage.local.set({ [this.KEY]: this.mode });
+    };
+    preview.onclick = () => this.replay();
+  },
+
+  replay() {
+    if (this.mode === "off" || this.reduced()) return;
+    this.clearTimers();
+    this.finishing = false;
+    this.startedAt = performance.now();
+    const launch = this.element();
+    launch.classList.remove("is-gone", "is-exiting");
+    launch.classList.add("is-active");
+    document.body.classList.add("boot-cinematic-active");
+    this.stage("Replaying launch choreography", 8);
+    this.later(() => this.stage("Aligning context field", 42), this.mode === "full" ? 620 : 240);
+    this.later(() => this.stage("Deploying live instruments", 76), this.mode === "full" ? 1320 : 520);
+    this.later(() => this.complete(), this.mode === "full" ? 2200 : 850);
+  },
+};
+
 const BootDiagnostics = {
   issues: [],
   skipped: [],
@@ -61,20 +150,31 @@ const BootDiagnostics = {
 
 function wireRecoveryControls() {
   const safeMode = window.HQEarlyDiagnostics?.isSafeMode() === true;
-  if (safeMode) BootDiagnostics.skipped = Object.values(LazyFeatures.definitions).map(([label]) => label);
+  if (safeMode) BootDiagnostics.skipped = Object.entries(LazyFeatures.definitions).filter(([id]) => id !== "settings-drawer").map(([, [label]]) => label);
   document.body.classList.toggle("safe-mode", safeMode);
   const status = document.getElementById("safe-mode-status");
   const exit = document.getElementById("exit-safe-mode-btn");
+  const banner = document.getElementById("safe-mode-banner");
+  const bannerExit = document.getElementById("safe-mode-exit");
+  const openHealth = document.getElementById("safe-mode-open-health");
+  const leaveRecovery = () => {
+    window.HQEarlyDiagnostics?.clearAndExitSafeMode();
+    location.reload();
+  };
+  banner?.classList.toggle("hidden", !safeMode);
   if (status) status.textContent = safeMode
-    ? "Repeated incomplete startups were detected. Optional integrations are paused so core tools remain usable."
-    : "Crash recovery is armed. Early script and promise failures are included in copied diagnostics.";
+    ? "Recovery mode paused optional integrations after repeated same-tab incomplete startups. Use either exit button to return to the full dashboard."
+    : "Crash recovery is armed per tab. Opening multiple new tabs cannot trigger recovery mode.";
   if (exit) {
     exit.classList.toggle("hidden", !safeMode);
-    exit.onclick = () => {
-      window.HQEarlyDiagnostics?.clearAndExitSafeMode();
-      location.reload();
-    };
+    exit.onclick = leaveRecovery;
   }
+  if (bannerExit) bannerExit.onclick = leaveRecovery;
+  if (openHealth) openHealth.onclick = () => {
+    document.getElementById("settings-btn")?.click();
+    document.querySelector('.settings-tab[data-cat="general"]')?.click();
+    setTimeout(() => document.getElementById("safe-mode-status")?.scrollIntoView({ block: "center", behavior: "smooth" }), 80);
+  };
 }
 
 function focusableElements(root) {
@@ -137,24 +237,19 @@ const ScriptLoader = {
 // the first-use path below. A missing core file is recorded independently and
 // does not prevent later definitions from being attempted.
 const CORE_SCRIPTS = Object.freeze([
-  "js/notes-editor.js",
-  "js/local-ai.js",
-  "js/eleven-labs-client.js",
   "js/icons.js",
-  "js/research-link.js",
-  "js/spinner.js",
-  "js/exam-countdown.js",
   "js/storage-schema.js",
   "js/context-bus.js",
   "js/calendar-repository.js",
   "js/credential-vault.js",
   "js/page-scheduler.js",
   "js/mode-transitions.js",
+  "js/adaptive-themes.js",
   "js/cinematic-motion.js",
+  "js/ambient-compositor.js",
   "js/quotes.js",
   "js/tasks.js",
   "js/dailytasks.js",
-  "js/calendar.js",
   "js/schedule.js",
   "js/seed.js",
   "js/today.js",
@@ -162,17 +257,11 @@ const CORE_SCRIPTS = Object.freeze([
   "js/pomodoro.js",
   "js/focus-scenes.js",
   "js/weather.js",
-  "js/claude-client.js",
-  "js/daily-planner.js",
-  "js/completion-detection.js",
-  "js/integration-health.js",
   "js/activity-log.js",
   "js/sound.js",
-  "js/capture.js",
-  "js/research-nudge.js",
-  "js/backup-crypto.js",
   "js/professional-view.js",
   "js/deepwork.js",
+  "js/command-intelligence.js",
   "js/nexus.js",
   "js/command-palette.js",
   "js/living-widgets.js",
@@ -183,31 +272,43 @@ const CORE_SCRIPTS = Object.freeze([
 const LazyFeatures = {
   started: new Map(),
   definitions: {
-    "notes-flyout": ["Notes", () => NotesEditor.init(), ["js/lib/tiptap/tiptap-bundle.js"]],
-    "gmail-flyout": ["Gmail", () => Gmail.init(), ["js/mail-intelligence.js", "js/gmail.js"]],
+    "notes-flyout": ["Notes", async () => { await NotesEditor.init(); Capture.init(); }, ["js/research-link.js", "js/notes-editor.js", "js/capture.js", "js/lib/tiptap/tiptap-bundle.js"]],
+    "calendar-flyout": ["Calendar workspace", () => Calendar.init(), ["js/calendar.js"]],
+    "schedule-flyout": ["Schedule calendar surface", () => Calendar.init(), ["js/calendar.js"]],
+    "exam-countdown-flyout": ["Exam reverse planner", () => ExamCountdown.init(), ["js/exam-countdown.js"]],
+    "plan-flyout": ["Daily plan workspace", () => DailyPlanner.init(), ["js/spinner.js", "js/claude-client.js", "js/eleven-labs-client.js", "js/exam-countdown.js", "js/daily-planner.js"]],
+    "gmail-flyout": ["Gmail", async () => {
+      if (typeof Calendar === "undefined" || typeof Gmail === "undefined") {
+        throw new Error("The packaged Gmail modules did not finish loading. Reload the extension and try again.");
+      }
+      await Calendar.init();
+      await Gmail.init();
+    }, ["js/spinner.js", "js/calendar.js", "js/mail-intelligence.js", "js/gmail.js"]],
     "spotify-flyout": ["Spotify", async () => {
       await SpotifyUI.init();
       if (await SpotifyClient.isConnected()) await SpotifyPlayer.connect();
-    }, ["js/spotify-client.js", "js/spotify-player.js", "js/spotify-ui.js"]],
+    }, ["js/spinner.js", "js/spotify-client.js", "js/spotify-player.js", "js/spotify-ui.js"]],
     "stats-flyout": ["Weekly stats", () => WeeklyStats.init(), ["js/lib/chart.umd.min.js", "js/weekly-stats.js"]],
     "venture-dash-flyout": ["Venture dashboard", () => VentureDashboard.init(), ["js/lib/chart.umd.min.js", "js/venture-dashboard.js"]],
-    "radar-flyout": ["Idea radar", () => IdeaRadar.init(), ["js/idea-radar.js"]],
+    "radar-flyout": ["Idea radar", () => IdeaRadar.init(), ["js/spinner.js", "js/claude-client.js", "js/idea-radar.js"]],
     "optimizer-flyout": ["Browser workspaces", () => ChromeOptimizer.init(), ["js/classifier.js", "js/bookmarks.js", "js/workspaces.js", "js/chrome-optimizer.js"]],
-    "gleam-flyout": ["Gleam social confidence lab", () => GleamHQ.init(), ["js/gleam.js"]],
+    "gleam-flyout": ["Gleam social confidence lab", () => GleamHQ.init(), ["js/local-ai.js", "js/gleam.js"]],
     "bookmarks-flyout": ["Bookmark intelligence", async () => { await Bookmarks.init(); ForgottenBookmark.init(); }, ["js/classifier.js", "js/bookmarks.js", "js/forgotten-bookmark.js"]],
     "mods-flyout": ["Mods", () => Mods.init(), ["js/mods.js"]],
     "vault-flyout": ["Idea vault", () => IdeaVault.init(), ["js/idea-vault.js"]],
     "srs-flyout": ["Recall Lab", () => SRS.init(), ["js/srs.js"]],
     "assignments-flyout": ["Study OS, assessment intake and research pipeline", async () => {
+      await Calendar.init();
       await Assignments.init();
       await AssessmentIntake.init();
       await StudyOS.init();
-    }, ["js/assignments.js", "js/assessment-intake.js", "js/study-os.js"]],
+    }, ["js/local-ai.js", "js/exam-countdown.js", "js/calendar.js", "js/assignments.js", "js/assessment-intake.js", "js/study-os.js"]],
+    "settings-drawer": ["Advanced settings", () => initializeAdvancedSettings(), ["js/local-ai.js", "js/hq-intelligence.js", "js/research-link.js", "js/research-nudge.js", "js/backup-crypto.js", "js/integration-health.js"]],
   },
 
-  async ensure(panelId) {
+  async ensure(panelId, { allowInSafeMode = false } = {}) {
     if (!this.definitions[panelId]) return true;
-    if (window.HQEarlyDiagnostics?.isSafeMode()) {
+    if (window.HQEarlyDiagnostics?.isSafeMode() && !allowInSafeMode) {
       Wallpaper?.toast?.("That optional tool is paused in Safe Mode. Exit Safe Mode from Settings when you're ready to retry it.");
       return false;
     }
@@ -229,7 +330,7 @@ const LazyFeatures = {
 
 function applyStaticIcons() {
   const build = document.getElementById("build-version");
-  if (build) build.textContent = `${chrome.runtime.getManifest().version} · Atomic Continuity`;
+  if (build) build.textContent = `${chrome.runtime.getManifest().version} · Context Engine`;
   const map = {
     "settings-btn": "settings",
     "palette-btn": "search",
@@ -304,7 +405,8 @@ function applyStaticIcons() {
 }
 
 async function updateLockedToolBadges() {
-  const hasKey = await ClaudeClient.hasKey();
+  await CredentialVault.init();
+  const hasKey = !!(await CredentialVault.getSecret("hq_key_claude"));
   document.querySelectorAll(".dock-btn.locked-tool").forEach(btn => {
     btn.classList.toggle("needs-key", !hasKey);
     let badge = btn.querySelector(".lock-badge");
@@ -347,6 +449,15 @@ function wireLayoutSettings() {
     await chrome.storage.local.set({ hq_pin_tasks: e.target.checked });
     applyLayoutMode();
   };
+  document.getElementById("ui-density-select").onchange = async event => {
+    const density = ["calm", "balanced", "command"].includes(event.target.value) ? event.target.value : "balanced";
+    document.body.dataset.uiDensity = density;
+    await chrome.storage.local.set({ hq_ui_density_v1: density });
+    document.body.classList.remove("system-recompose");
+    void document.body.offsetWidth;
+    document.body.classList.add("system-recompose");
+    setTimeout(() => document.body.classList.remove("system-recompose"), 950);
+  };
 }
 
 function updateClock() {
@@ -370,7 +481,7 @@ function setGreeting() {
 }
 
 async function loadSettings() {
-  const s = await chrome.storage.local.get(["hq_accent", "hq_wallpaper_adaptive_colour", "hq_wallpaper_category", "hq_anime_scene", "hq_wallpaper_scene_v1", "hq_wallpaper_interval_value", "hq_wallpaper_interval_unit", "hq_custom_wallpapers", "hq_blur", "hq_sound_enabled", "hq_sound_volume", "hq_privacy_pin", "hq_auto_privacy_on_idle", "hq_layout_style", "hq_pin_daily", "hq_pin_tasks"]);
+  const s = await chrome.storage.local.get(["hq_accent", "hq_wallpaper_adaptive_colour", "hq_wallpaper_category", "hq_anime_scene", "hq_wallpaper_scene_v1", "hq_wallpaper_interval_value", "hq_wallpaper_interval_unit", "hq_custom_wallpapers", "hq_blur", "hq_sound_enabled", "hq_sound_volume", "hq_privacy_pin", "hq_auto_privacy_on_idle", "hq_layout_style", "hq_pin_daily", "hq_pin_tasks", "hq_ui_density_v1"]);
   setAccent(s.hq_accent || "#7c5cff");
   document.getElementById("wallpaper-category").value = s.hq_wallpaper_category || "gaming";
   document.getElementById("anime-scene").value = s.hq_anime_scene || "curated";
@@ -391,6 +502,9 @@ async function loadSettings() {
   document.getElementById("layout-style-select").value = s.hq_layout_style === "minimal" ? "living" : (s.hq_layout_style || "living");
   document.getElementById("pin-daily").checked = !!s.hq_pin_daily;
   document.getElementById("pin-tasks").checked = !!s.hq_pin_tasks;
+  const density = ["calm", "balanced", "command"].includes(s.hq_ui_density_v1) ? s.hq_ui_density_v1 : "balanced";
+  document.body.dataset.uiDensity = density;
+  document.getElementById("ui-density-select").value = density;
 
   const { hq_research_nudge_enabled } = await chrome.storage.local.get("hq_research_nudge_enabled");
   document.getElementById("toggle-research-nudge").checked = hq_research_nudge_enabled === true;
@@ -406,7 +520,7 @@ function syncWallpaperSceneControl(category, savedMap = {}) {
   select.value = channels[savedMap[category]] ? savedMap[category] : "curated";
 }
 
-function wireLocalAI() {
+async function wireLocalAI() {
   const btn = document.getElementById("local-ai-load-btn");
   const statusEl = document.getElementById("local-ai-status");
   const progressWrap = document.getElementById("local-ai-progress-bar");
@@ -416,7 +530,18 @@ function wireLocalAI() {
   const input = document.getElementById("local-ai-input");
   const output = document.getElementById("local-ai-output");
   const mode = document.getElementById("local-ai-mode");
+  const contextBtn = document.getElementById("local-ai-context-btn");
+  const profileSelect = document.getElementById("local-ai-profile");
+  const profileDetail = document.getElementById("local-ai-profile-detail");
   if (!btn) return;
+  await LocalAI.loadPreference();
+  if (profileSelect) profileSelect.value = LocalAI.profileId;
+
+  function renderProfile() {
+    const profile = LocalAI.profile();
+    if (profileDetail) profileDetail.textContent = `${profile.purpose} · first download ${profile.size}. Larger models need more memory and may be slower.`;
+  }
+  renderProfile();
 
   async function refreshStatus() {
     if (!LocalAI.isSupported()) {
@@ -427,19 +552,31 @@ function wireLocalAI() {
       return;
     }
     if (LocalAI.isLoadedThisSession()) {
-      statusEl.textContent = "Ready — local AI is active for this tab session.";
+      statusEl.textContent = `Ready — ${LocalAI.profile().label} is active for this tab session and available to Nexus.`;
       btn.classList.add("hidden");
+      if (profileSelect) profileSelect.disabled = true;
       runBtn.disabled = !input.value.trim();
       output.textContent = "Ready. Choose an operation and add real text.";
       return;
     }
     btn.classList.remove("hidden");
     const cached = await LocalAI.isModelCached();
-    statusEl.textContent = cached ? "Downloaded already, not loaded into this tab session yet." : "Not downloaded yet (~700MB–900MB, one-time).";
-    btn.textContent = cached ? "Load Local AI" : "Download & Load Local AI (~800MB)";
+    statusEl.textContent = cached ? `${LocalAI.profile().label} is downloaded already, but not loaded in this tab.` : `${LocalAI.profile().label} is not downloaded yet (${LocalAI.profile().size}, one-time).`;
+    btn.textContent = cached ? "Load selected Local AI" : `Download & load ${LocalAI.profile().label}`;
     btn.disabled = false;
     runBtn.disabled = true;
   }
+
+  if (profileSelect) profileSelect.onchange = async event => {
+    try {
+      await LocalAI.selectProfile(event.target.value);
+      renderProfile();
+      await refreshStatus();
+    } catch (error) {
+      event.target.value = LocalAI.profileId;
+      statusEl.textContent = error.message;
+    }
+  };
 
   btn.onclick = async () => {
     btn.disabled = true;
@@ -469,6 +606,25 @@ function wireLocalAI() {
     runBtn.disabled = !input.value.trim();
     output.textContent = "Generation cancelled. Your input is unchanged.";
   };
+  if (contextBtn && typeof HQIntelligence === "undefined") {
+    contextBtn.disabled = true;
+    const contextStatus = document.getElementById("local-ai-context-status");
+    if (contextStatus) contextStatus.textContent = "HQ context assembly is unavailable; the local AI text box still works with text you enter directly.";
+  } else if (contextBtn) contextBtn.onclick = async () => {
+    contextBtn.disabled = true;
+    const original = contextBtn.textContent;
+    contextBtn.textContent = "Assembling local evidence…";
+    try {
+      await HQIntelligence.assembleInto(input);
+      contextBtn.textContent = "Context assembled";
+      setTimeout(() => { contextBtn.textContent = original; contextBtn.disabled = false; }, 900);
+    } catch (error) {
+      const contextStatus = document.getElementById("local-ai-context-status");
+      if (contextStatus) contextStatus.textContent = error.message;
+      contextBtn.textContent = original;
+      contextBtn.disabled = false;
+    }
+  };
   runBtn.onclick = async () => {
     if (!input.value.trim()) return;
     runBtn.disabled = true;
@@ -488,6 +644,81 @@ function wireLocalAI() {
   refreshStatus();
 }
 
+let advancedSettingsInitialized = false;
+async function initializeAdvancedSettings() {
+  if (advancedSettingsInitialized) {
+    await IntegrationHealth.render();
+    return true;
+  }
+  wireResearchNudge();
+  wireDataBackup();
+  await Promise.all([wireLocalAI(), wireApiKeys()]);
+  advancedSettingsInitialized = true;
+  await IntegrationHealth.render();
+  return true;
+}
+
+let deferredSignalsWired = false;
+let completionFeaturePromise = null;
+
+async function renderCaptureBadge() {
+  const badge = document.getElementById("capture-count-badge");
+  if (!badge) return;
+  const { hq_capture_inbox = [] } = await chrome.storage.local.get("hq_capture_inbox");
+  const count = Array.isArray(hq_capture_inbox) ? hq_capture_inbox.length : 0;
+  badge.textContent = count ? String(count) : "";
+  badge.classList.toggle("hidden", count === 0);
+}
+
+async function activateCompletionDetection() {
+  if (typeof CompletionDetection !== "undefined") {
+    CompletionDetection.render();
+    return true;
+  }
+  if (!completionFeaturePromise) {
+    completionFeaturePromise = BootDiagnostics.run("Completion prompts", async () => {
+      await ScriptLoader.load("js/completion-detection.js");
+      CompletionDetection.init();
+      return true;
+    }).finally(() => { completionFeaturePromise = null; });
+  }
+  return completionFeaturePromise;
+}
+
+async function hydrateDeferredFeatures() {
+  if (window.HQEarlyDiagnostics?.isSafeMode()) return;
+  const saved = await chrome.storage.local.get(["hq_completion_prompts", "hq_research_nudge_enabled"]);
+  const jobs = [];
+  if (Array.isArray(saved.hq_completion_prompts) && saved.hq_completion_prompts.length) jobs.push(activateCompletionDetection());
+  if (saved.hq_research_nudge_enabled === true) {
+    jobs.push(BootDiagnostics.run("Research nudge", async () => {
+      await ScriptLoader.loadAll(["js/research-link.js", "js/research-nudge.js"]);
+      await ResearchNudge.render();
+      return true;
+    }));
+  }
+  await Promise.all(jobs);
+}
+
+function wireDeferredSignals() {
+  if (deferredSignalsWired) return;
+  deferredSignalsWired = true;
+  renderCaptureBadge().catch(error => console.warn("Capture badge unavailable:", error));
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== "local") return;
+    if (changes.hq_capture_inbox) renderCaptureBadge().catch(error => console.warn("Capture badge unavailable:", error));
+    if (Array.isArray(changes.hq_completion_prompts?.newValue) && changes.hq_completion_prompts.newValue.length) {
+      activateCompletionDetection().catch(error => console.warn("Completion prompts unavailable:", error));
+    }
+  });
+}
+
+function deferOptionalStartup() {
+  const run = () => hydrateDeferredFeatures().catch(error => console.warn("Deferred feature hydration skipped:", error));
+  if (typeof requestIdleCallback === "function") requestIdleCallback(run, { timeout: 1800 });
+  else setTimeout(run, 0);
+}
+
 function wireResearchNudge() {
   document.getElementById("toggle-research-nudge").onchange = async (e) => {
     await chrome.storage.local.set({ hq_research_nudge_enabled: e.target.checked });
@@ -501,27 +732,31 @@ function wireSettingsDrawer() {
   const opener = document.getElementById("settings-btn");
 
   const close = () => {
+    opener.focus();
     drawer.classList.add("hidden");
     backdrop.classList.add("hidden");
     drawer.setAttribute("aria-hidden", "true");
     drawer.inert = true;
     opener.setAttribute("aria-expanded", "false");
-    opener.focus();
   };
-  const open = () => {
+  const open = async () => {
     drawer.classList.remove("hidden");
     backdrop.classList.remove("hidden");
     drawer.removeAttribute("inert");
     drawer.inert = false;
     drawer.setAttribute("aria-hidden", "false");
     opener.setAttribute("aria-expanded", "true");
-    IntegrationHealth.render().catch(error => console.warn("Integration health unavailable:", error));
+    const ready = await LazyFeatures.ensure("settings-drawer", { allowInSafeMode:true });
+    if (ready && typeof IntegrationHealth !== "undefined") IntegrationHealth.render().catch(error => console.warn("Integration health unavailable:", error));
     requestAnimationFrame(() => drawer.querySelector(".settings-tab.active")?.focus());
   };
 
   opener.setAttribute("aria-controls", "settings-drawer");
   opener.setAttribute("aria-expanded", "false");
-  opener.onclick = open;
+  opener.onclick = () => open().catch(error => {
+    console.error("Settings could not finish loading:", error);
+    document.getElementById("boot-status").textContent = `Advanced settings could not load: ${error.message}`;
+  });
   document.getElementById("close-settings").onclick = close;
   backdrop.onclick = close;
   drawer.addEventListener("keydown", (event) => trapFocus(event, drawer));
@@ -575,6 +810,7 @@ function wireSettingsDrawer() {
 
   document.querySelectorAll(".swatch").forEach(sw => {
     sw.onclick = async () => {
+      if (typeof AdaptiveThemes !== "undefined") await AdaptiveThemes.deactivate();
       ModeTransitions?.play?.("theme", "Interface recalibrated", "Manual colour override");
       setAccent(sw.dataset.color);
       document.getElementById("wallpaper-adaptive-colour").checked = false;
@@ -607,6 +843,7 @@ function wireSettingsDrawer() {
     await Wallpaper.apply(true, false);
   };
   document.getElementById("wallpaper-adaptive-colour").onchange = async (e) => {
+    if (e.target.checked && typeof AdaptiveThemes !== "undefined") await AdaptiveThemes.deactivate();
     await chrome.storage.local.set({ hq_wallpaper_adaptive_colour: e.target.checked });
     if (e.target.checked) await Wallpaper.apply(false, false);
     else {
@@ -626,7 +863,7 @@ function wireSettingsDrawer() {
     const originalLabel = btn.textContent;
     btn.disabled = true;
     btn.classList.add("loading");
-    btn.innerHTML = Spinner.html(14) + "Shuffling…";
+    btn.innerHTML = Icons.span("loader-circle") + "Shuffling…";
     await Wallpaper.shuffleNow();
     btn.disabled = false;
     btn.classList.remove("loading");
@@ -742,6 +979,17 @@ function wireDock() {
   moreButton.onclick = () => setMoreOpen(moreTray.classList.contains("hidden"));
 
   function closeAll(restoreFocus = false) {
+    const focusedPanel = document.activeElement?.closest?.(".flyout");
+    const returnTarget = restoreFocus && activeTrigger?.isConnected && !activeTrigger.closest?.(".flyout")
+      ? activeTrigger
+      : null;
+    // Move focus before applying aria-hidden/inert. Chromium otherwise logs
+    // an accessibility error when a close button remains focused inside the
+    // panel being hidden.
+    if (focusedPanel) {
+      if (returnTarget && typeof returnTarget.focus === "function") returnTarget.focus();
+      else document.activeElement?.blur?.();
+    }
     document.querySelectorAll(".flyout").forEach(f => {
       f.classList.remove("open");
       f.classList.remove("panel-fullscreen");
@@ -761,7 +1009,7 @@ function wireDock() {
       b.setAttribute("aria-expanded", "false");
     });
     backdrop.classList.add("hidden");
-    if (restoreFocus && activeTrigger?.isConnected && typeof activeTrigger.focus === "function") activeTrigger.focus();
+    if (returnTarget && document.activeElement !== returnTarget && typeof returnTarget.focus === "function") returnTarget.focus();
     activeTrigger = null;
   }
 
@@ -845,7 +1093,8 @@ function wireDock() {
       }
       case "calendar-flyout": {
         const todayKey = hqLocalDateKey();
-        const n = (Calendar.events[todayKey] || []).length;
+        const { hq_calendar_events = {} } = await chrome.storage.local.get("hq_calendar_events");
+        const n = (hq_calendar_events[todayKey] || []).length;
         return `Today — ${n} event${n === 1 ? "" : "s"}`;
       }
       case "bookmarks-flyout":
@@ -1001,6 +1250,8 @@ function openPinModal(onSubmit) {
   input.focus();
 
   const cleanup = () => {
+    if (previousFocus instanceof HTMLElement) previousFocus.focus();
+    else document.activeElement?.blur?.();
     modal.classList.add("hidden");
     modal.setAttribute("inert", "");
     modal.setAttribute("aria-hidden", "true");
@@ -1008,7 +1259,6 @@ function openPinModal(onSubmit) {
     document.getElementById("pin-modal-submit").onclick = null;
     document.getElementById("pin-modal-cancel").onclick = null;
     modal.onkeydown = null;
-    if (previousFocus instanceof HTMLElement) previousFocus.focus();
   };
 
   document.getElementById("pin-modal-submit").onclick = () => { const v = input.value; cleanup(); onSubmit(v); };
@@ -1204,6 +1454,8 @@ function promptDecryptBackup(envelope) {
     input.focus();
 
     const cleanup = () => {
+      if (previousFocus instanceof HTMLElement) previousFocus.focus();
+      else document.activeElement?.blur?.();
       modal.classList.add("hidden");
       modal.setAttribute("inert", "");
       modal.setAttribute("aria-hidden", "true");
@@ -1211,7 +1463,6 @@ function promptDecryptBackup(envelope) {
       cancelBtn.onclick = null;
       input.onkeydown = null;
       modal.onkeydown = null;
-      if (previousFocus instanceof HTMLElement) previousFocus.focus();
     };
 
     const attempt = async () => {
@@ -1292,6 +1543,7 @@ async function wireApiKeys() {
 }
 
 async function boot() {
+  BootCinematic.stage("Calibrating the command surface", 48);
   await BootDiagnostics.run("Interface icons", () => applyStaticIcons());
   await BootDiagnostics.run("Recovery controls", () => wireRecoveryControls());
   await BootDiagnostics.run("Clock", () => { updateClock(); PageScheduler.register("clock", 1000, updateClock); });
@@ -1300,54 +1552,58 @@ async function boot() {
   await BootDiagnostics.run("Data migrations", () => StorageSchema.migrate());
   await BootDiagnostics.run("Context", () => ContextBus.init());
   await BootDiagnostics.run("Settings data", () => loadSettings());
+  await BootDiagnostics.run("Launch controls", () => BootCinematic.bindSettings());
   await BootDiagnostics.run("Cinematic motion", () => CinematicMotion.init());
+  await BootDiagnostics.run("Adaptive visual compositor", () => AmbientCompositor.init());
   await BootDiagnostics.run("Layout", () => applyLayoutMode());
   await BootDiagnostics.run("Daily quote", () => Quotes.render());
-  await BootDiagnostics.run("Research nudge", () => ResearchNudge.render());
   await BootDiagnostics.run("Settings drawer", () => wireSettingsDrawer());
   await BootDiagnostics.run("Wallpaper safety", () => wireWallpaperSafety());
-  await BootDiagnostics.run("Research controls", () => wireResearchNudge());
-  await BootDiagnostics.run("Local AI controls", () => wireLocalAI());
+  await BootDiagnostics.run("Deferred signals", () => wireDeferredSignals());
   await BootDiagnostics.run("Tool dock", () => wireDock());
   await BootDiagnostics.run("Zen mode", () => wireZenMode());
   await BootDiagnostics.run("Privacy mode", () => wirePrivacyMode());
   await BootDiagnostics.run("Layout controls", () => wireLayoutSettings());
   await BootDiagnostics.run("Task controls", () => wireTaskInput());
   await BootDiagnostics.run("Bookmark controls", () => wireBookmarkSorter());
-  await BootDiagnostics.run("Integration keys", () => wireApiKeys());
-  await BootDiagnostics.run("Data backup", () => wireDataBackup());
   await BootDiagnostics.run("Command palette", () => CommandPalette.init());
 
   await BootDiagnostics.run("Starter data", () => Seed.run());
   await BootDiagnostics.run("Tasks", () => Tasks.init());
   await BootDiagnostics.run("Daily tasks", () => DailyTasks.init());
-  requestAnimationFrame(() => document.body.classList.add("app-ready"));
-  await BootDiagnostics.run("Calendar", () => Calendar.init());
+  BootCinematic.stage("Synchronising your live context", 68);
   await BootDiagnostics.run("Schedule", () => Schedule.init());
   await BootDiagnostics.run("Wallpaper", async () => {
     const { unit } = await Wallpaper.getIntervalSetting();
-    await Wallpaper.apply(unit === "tab", false);
+    await Wallpaper.apply(unit === "tab", true, { deferNetwork:true });
   });
+  await BootDiagnostics.run("Adaptive study themes", () => AdaptiveThemes.init());
   await BootDiagnostics.run("Focus timer", () => Pomodoro.init());
   await BootDiagnostics.run("Focus scenes", () => FocusScenes.init());
   await BootDiagnostics.run("Today", () => Today.init());
-  await BootDiagnostics.run("Exam countdown", () => ExamCountdown.init());
-  await BootDiagnostics.run("Daily planner", () => DailyPlanner.init());
-  await BootDiagnostics.run("Completion detection", () => CompletionDetection.init());
   await BootDiagnostics.run("Weather", () => Weather.init());
-  await BootDiagnostics.run("Capture inbox", () => Capture.init());
   await BootDiagnostics.run("Professional view", () => ProfessionalView.init());
   await BootDiagnostics.run("Deep Work", () => DeepWork.init());
   await BootDiagnostics.run("Nexus Core", () => Nexus.init());
+  BootCinematic.stage("Deploying adaptive instruments", 90);
   await BootDiagnostics.run("Living widgets", () => LivingWidgets.init());
   await BootDiagnostics.run("Tool availability", () => updateLockedToolBadges());
+  requestAnimationFrame(() => {
+    document.body.classList.add("app-ready");
+    if (typeof AmbientCompositor !== "undefined") AmbientCompositor.signal({ x: innerWidth / 2, y: innerHeight / 2 }, 1);
+  });
   BootDiagnostics.render();
   window.HQEarlyDiagnostics?.markHealthy();
+  BootCinematic.complete();
+  deferOptionalStartup();
 }
 
 async function bootstrap() {
-  for (const path of CORE_SCRIPTS) {
+  await BootCinematic.start();
+  for (let index = 0; index < CORE_SCRIPTS.length; index += 1) {
+    const path = CORE_SCRIPTS[index];
     await BootDiagnostics.run(`Core definition · ${path}`, () => ScriptLoader.load(path));
+    BootCinematic.stage(`Loading ${path.split("/").pop().replace(".js", "").replace(/-/g, " ")}`, 6 + Math.round(((index + 1) / CORE_SCRIPTS.length) * 38));
   }
   await boot();
 }

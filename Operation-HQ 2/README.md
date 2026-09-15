@@ -1,5 +1,57 @@
 # Operation HQ — New Tab
 
+## Version 2.8.1 release highlights — Stability Pass
+
+- Fixed the exact Gmail startup failure reported in the console. A misplaced browser-level `return` prevented the whole Gmail module from loading, which then caused the secondary “Gmail is not defined” error. The code is now in the correct error handler.
+- Added a browser-style runtime grammar test across every classic script. This deliberately catches browser-only parse failures that Node's wrapped module check can miss.
+- Rebuilt bookmark ambiguity handling around a no-guess rule. Confident links file into the fixed topic taxonomy; uncertain links stay where they already are and appear in the accuracy gate for an exact user decision. No Review Queue or Uncategorized folder is created.
+- Added mutation coverage for managed-folder ownership, invalid learned destinations, failed moves, overlapping sort actions and exact undo. User-created folders are never cleanup targets.
+- Reduced the declared new-tab startup from the former 43-script/501 KB core to 28 core scripts/365 KB. Heavy features and models remain first-use loads, while hidden tabs release the full-size compositor buffer.
+- Made the exact command “Today I am going to grind Maths chapters 5, 7, 8 and 10” preserve those four chapters, offer matching saved resources, start a named 25-minute focus mission and generate three scheme choices. A timetable draft is applied only after review, and no available flex slot leaves the existing schedule untouched.
+- Hardened wallpaper recovery with corrected ultrawide admission, multi-page 4K candidate decoding, cached/offline recovery and optional Unsplash/Pexels recovery for suitable non-anime categories when the user has configured a key. Named anime never silently changes into unrelated stock imagery.
+- Deduplicated Weather requests, added a short provider backoff and changed network/time-out failures into readable panel states instead of raw DOM exceptions.
+- Fixed focus being left inside hidden Settings, command-palette, report, PIN and feature panels. Close controls now return focus before applying `aria-hidden`/`inert`, and Safe Mode diagnostics opens the correct Settings section.
+- Six automated suites pass: browser runtime, command intelligence, bookmark mutations, startup budget, static verification and data-integrity regression. They cover 71 JavaScript modules, 720 unique element IDs and 26 named dialogs. Real Chrome, OAuth/provider, WebGPU and target-monitor checks remain explicit manual gates.
+
+## Version 2.8 release highlights — Context Engine
+
+- Fixed the false Safe Mode loop at its source. Boot-failure detection is now scoped to the current tab instead of shared across simultaneous new tabs, and the visible recovery strip has one-click **Exit recovery** and **View diagnostics** actions.
+- Rebuilt Nexus around deterministic local command intelligence. It understands subjects, chapter ranges, dates, durations, resource searches, browser reviews, focus-plan requests, generated-theme requests, and study-help requests; it asks a precise follow-up when information is missing and previews consequential changes before applying them.
+- Connected Nexus to the person's own bookmarks, open tabs, saved workspaces, Tasks, Schedule, Calendar, Pomodoro, focus scenes, browser optimizer, exam/assignment surfaces, and optional on-device AI. Resource results are explicit choices, plans are review-first, and unknown language is never presented as a completed action.
+- Added three freshly generated study-atmosphere choices for each named focus mission. Maths, Science, Humanities, English, Technology, Languages, Creative work, and general work influence palette, geometry, environment, animation pacing, and one of four whole-interface transitions: prism, iris, velocity, or bloom. Nothing changes until the user picks an option.
+- Projected Master Timetable v8 into Calendar as a live layer. Month, Week, Agenda, selected-day detail, next-event logic, and the dashboard can now show the current rhythm without copying hundreds of timetable records into Calendar.
+- Added a focus-plan builder that spreads chapter work across genuine flexible timetable blocks up to a stated deadline. The resulting schedule remains a draft until **Apply**, and Nexus can then name and start the matching focus mission.
+- Strengthened bookmark sorting with dedicated Mathematics and Science destinations, broader title/phrase/domain evidence, page-metadata review after explicit permission, and optional batched on-device model classification for links that remain genuinely ambiguous. Medium-confidence model choices arrive prefilled for one-click review; low-confidence links stay visible instead of being guessed.
+- Hardened 4K wallpaper recovery. Named anime searches use scene aliases, multiple result pages, broad SFW rescue pools, candidate-by-candidate image decoding, and retained-last-image behavior; cars, gaming, space, scenic, and minimal channels now have the same multi-page recovery ladder.
+- Reduced motion lag by caching widget geometry, applying pointer depth only to the currently contacted card, downshifting sustained low-FPS rendering, simplifying duplicate ambient layers, and preserving a full Reduced Motion/Off path.
+- Standardized panel close targets and field breathing room, kept every widget control above decorative layers, and added blocked-clipboard feedback rather than an unhandled error.
+- The verifier, integrity suite, bookmark transaction suite, and command-intelligence suite pass with 71 JavaScript modules, 719 unique IDs, and 26 named dialogs. Real target-device Chrome, OAuth/provider, WebGPU, and visual/performance checks remain explicit manual gates.
+
+See `Operation-HQ-v2.8-Feature-Map-and-Request-Ledger.md` beside the packaged build for a plain-English feature tree and a request-by-request delivery ledger.
+
+## Version 2.7 release highlights — Apex Compositor
+
+- Added a native WebGL2 atmosphere engine behind the dashboard: procedural depth, wallpaper-derived colour, time/focus energy, widget-node connections, interaction pulses, and state-reactive network light. It is local, decorative, pointer-transparent, and does not store frames, cursor history, inferred emotion, or behavioural profiles.
+- Added Auto, Ultra, Balanced, Efficient, and Off compositor modes with an independent adaptive toggle, live resolution/FPS status, a visible preview, measured three-second performance samples, resolution step-down/recovery, hidden-tab pause, graphics-context recovery, and a complete reduced-motion bypass.
+- Added slow physical attitude to living widgets without taking ownership of their layout transform. Arrange mode and reduced motion cancel drift, active focus compresses it, and interactive children retain their foreground hit layer.
+- Expanded the launch film with volumetric beams, a segmented aperture, subsystem instrumentation, and a coordinated handoff into the live compositor. Every label names a real local subsystem; Skip, Compact, Off, reduced motion, and the hard non-blocking failsafe remain intact.
+- Rebuilt Native Intelligence input around explicit source selection. Tasks, Calendar, Assignments, Today, Captures, Notes, and Gmail metadata are read only after **Assemble selected context**; every included item has a source label and no action is applied automatically.
+- Added six grounded intelligence operations: executive brief, next-action priority, realistic schedule, risk scan, study sprint, and cross-source connections. The prior summarise/explain/quiz/critique/rewrite/action operations remain available.
+- Added schema v10 for bounded display preferences only. The release adds no Chrome permission, OAuth scope, Gmail write access, remote AI dependency, passive listener, tracking, or placeholder personal data.
+- The verifier, concurrency/integrity suite, and bookmark transaction suite pass with 69 JavaScript modules, 693 unique IDs, and 26 named dialogs. A real Chrome/device compositor and visual matrix remains an explicit manual gate.
+
+## Version 2.6 release highlights — Cinematic Intelligence
+
+- Replaced the pre-ready animation race with a visible, full-screen launch sequence tied to actual module-loading, context, and living-widget milestones. Layered shutters, reactor rings, scan passes, telemetry, real progress, a skip control, a hard non-blocking failsafe, and a coordinated post-ready widget reveal are included.
+- Added Full, Compact, and Off launch modes plus an in-settings Preview. System reduced-motion bypasses the moving sequence entirely.
+- Rebuilt bookmark sorting around a closed two-level taxonomy with broader topic/domain evidence, whole-Bookmark-Bar scope, descendant-aware Inbox/deep review, and a visible Review Board for items that cannot be classified honestly.
+- Corrected learned fingerprints so separate YouTube videos and Google documents cannot contaminate each other's category. Manual learning now rejects arbitrary roots, deep paths, Inbox, and Review Queue.
+- Added an extension-owned folder registry. Cleanup can remove only empty folders that Operation HQ created and whose path still matches; user-created empty folders are never candidates.
+- Added local and service-worker mutation locks, successful-move-only inverse transactions, a bounded undo stack, later-manual-move protection, safe source restoration, disabled operation controls, and exact audit outcomes.
+- Standardized per-widget optical gutters, header/footer rhythm, foreground interaction layers, larger launcher hit areas, pointer contact waves, focus-within depth, and calm/balanced/command-centre density settings.
+- Added a dedicated bookmark mutation suite covering unsafe learned paths, content-specific fingerprints, managed versus user folders, failed moves, overlapping operations, and exact undo. The standard verifier, integrity suite, and bookmark suite pass.
+- Added no permission, OAuth scope, Gmail write authority, external service, passive monitoring, fabricated personal data, or automatic destructive action.
+
 ## Version 2.5 release highlights — Atomic Continuity
 
 - Made the service worker the sole authority for shared context updates. Typed, sanitized patches are serialized against the latest stored revision, preventing simultaneous page/background changes from erasing each other.
@@ -89,7 +141,7 @@ See [GLEAM_GUIDE.md](GLEAM_GUIDE.md) for the exact operating loop and metric def
 - Added a local, read-only Gmail organiser with Urgent, School, Work, Venture, Social, Finance, Updates, and Personal lanes. Classification uses sender, subject, and Gmail labels only; every priority shows its reason, corrections stay local, and the original email always opens in Gmail.
 - Added reviewed Gmail actions for creating a local task, placing a local calendar reminder, recording a follow-up, or opening the relevant official social inbox. Operation HQ still cannot send, archive, delete, or modify email.
 - Integrated `shourya_master_timetable_v8.md` as a separate managed schedule profile with dated phases, job/tuition rhythm, current-phase context, and a review-first task-to-free-block planner with one-step undo.
-- Rebuilt bookmark decisions around per-link topic evidence. Variable platforms such as YouTube are never classified by domain alone; weak or conflicting links go to a visible Review Queue instead of being guessed.
+- Rebuilt bookmark decisions around per-link topic evidence. Variable platforms such as YouTube are never classified by domain alone; weak or conflicting links remain in their existing folder for an explicit accuracy-gate decision instead of being guessed.
 - Expanded Browser Workspaces with saved Chrome group identity, topic analysis, confirmed grouping, pinned-tab restoration, bookmark cross-reference, and Safe Sync that merges the current window while preserving saved-only tabs.
 - Expanded every non-anime wallpaper family into named 4K scene channels, including Nissan Skyline GTR R34/night JDM, supercars, deep space, cinematic scenery, cyber worlds, and minimal setups. The existing quality, safety, contrast, cache, and blocklist gates still apply.
 - Added the `tabGroups` Chrome permission for explicit workspace group capture and restore. Gmail remains `gmail.readonly`; no history permission or email-write scope was added.

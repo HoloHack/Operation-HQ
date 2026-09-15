@@ -28,7 +28,10 @@ const CommandPalette = {
       { label: "Toggle Zen Mode", hint: "Hide everything but the wallpaper", run: () => document.getElementById("zen-btn")?.click() },
       { label: "Toggle Deep Work", hint: "Block distracting sites (list managed in Settings)", run: () => document.getElementById("deepwork-btn")?.click() },
       { label: "Open Settings", hint: "", run: () => document.getElementById("settings-btn")?.click() },
-      { label: "Export Data", hint: "Download a full JSON backup", run: () => document.getElementById("export-data-btn")?.click() },
+      { label: "Export Data", hint: "Download a full JSON backup", run: async () => {
+        document.getElementById("settings-btn")?.click();
+        if (await LazyFeatures.ensure("settings-drawer", { allowInSafeMode:true })) document.getElementById("export-data-btn")?.click();
+      } },
       { label: "Shuffle Wallpaper", hint: "Fetch a new one now", run: () => document.getElementById("wallpaper-refresh-now")?.click() },
       { label: "Sort Bookmarks Now", hint: "Bulk-run the classifier", run: () => document.getElementById("sort-bookmarks-btn")?.click() },
     ];
@@ -122,12 +125,15 @@ const CommandPalette = {
   close() {
     this._open = false;
     const overlay = document.getElementById("command-palette");
+    // Return focus before hiding the focused dialog subtree. Doing this after
+    // aria-hidden makes Chromium reject the accessibility-state change.
+    if (this._previousFocus?.focus) this._previousFocus.focus();
+    else document.activeElement?.blur?.();
     overlay.classList.add("hidden");
     overlay.setAttribute("aria-hidden", "true");
     overlay.inert = true;
     document.getElementById("palette-input").setAttribute("aria-expanded", "false");
     document.getElementById("palette-btn").setAttribute("aria-expanded", "false");
-    if (this._previousFocus?.focus) this._previousFocus.focus();
     this._previousFocus = null;
   },
 

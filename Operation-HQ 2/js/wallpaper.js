@@ -12,16 +12,16 @@
 const CONTENT_EXCLUSIONS = "-ecchi -bikini -swimsuit -lingerie -cleavage";
 const CHARACTER_EXCLUSIONS = `-girl -woman -female ${CONTENT_EXCLUSIONS}`;
 const ANIME_SCENE_SOURCE = {
-  curated: { q: `anime action cinematic wallpaper ${CONTENT_EXCLUSIONS}` },
-  sukuna: { q: `Ryomen Sukuna Jujutsu Kaisen ${CONTENT_EXCLUSIONS}` },
-  gojo: { q: `Satoru Gojo Jujutsu Kaisen ${CONTENT_EXCLUSIONS}` },
-  "yuji-black-flash": { q: `Yuji Itadori black flash Jujutsu Kaisen ${CONTENT_EXCLUSIONS}` },
-  "luffy-gear-5": { q: `Monkey D Luffy Gear 5 One Piece ${CONTENT_EXCLUSIONS}` },
-  "luffy-gear-4": { q: `Monkey D Luffy Gear 4 One Piece ${CONTENT_EXCLUSIONS}` },
-  "luffy-gear-2": { q: `Monkey D Luffy Gear 2 One Piece ${CONTENT_EXCLUSIONS}` },
-  "observation-haki": { q: `One Piece observation haki Luffy ${CONTENT_EXCLUSIONS}` },
-  "demon-slayer": { q: `Demon Slayer Kimetsu no Yaiba cinematic ${CONTENT_EXCLUSIONS}` },
-  "cherry-blossom": { q: `anime cherry blossom scenery ${CONTENT_EXCLUSIONS}` },
+  curated: { label: "Anime cinema", q: `anime action cinematic wallpaper ${CONTENT_EXCLUSIONS}`, aliases: ["anime cinematic", "anime"] },
+  sukuna: { label: "Sukuna", q: `Ryomen Sukuna Jujutsu Kaisen ${CONTENT_EXCLUSIONS}`, aliases: ["Ryomen Sukuna", "Sukuna", "Jujutsu Kaisen"] },
+  gojo: { label: "Gojo", q: `Satoru Gojo Jujutsu Kaisen ${CONTENT_EXCLUSIONS}`, aliases: ["Satoru Gojo", "Gojo", "Jujutsu Kaisen"] },
+  "yuji-black-flash": { label: "Yuji · Black Flash", q: `Yuji Itadori black flash Jujutsu Kaisen ${CONTENT_EXCLUSIONS}`, aliases: ["Yuji Itadori black flash", "Yuji Itadori", "Jujutsu Kaisen"] },
+  "luffy-gear-5": { label: "Luffy · Gear 5", q: `Monkey D Luffy Gear 5 One Piece ${CONTENT_EXCLUSIONS}`, aliases: ["Luffy Gear 5", "Monkey D Luffy", "One Piece"] },
+  "luffy-gear-4": { label: "Luffy · Gear 4", q: `Monkey D Luffy Gear 4 One Piece ${CONTENT_EXCLUSIONS}`, aliases: ["Luffy Gear 4", "Monkey D Luffy", "One Piece"] },
+  "luffy-gear-2": { label: "Luffy · Gear 2", q: `Monkey D Luffy Gear 2 One Piece ${CONTENT_EXCLUSIONS}`, aliases: ["Luffy Gear 2", "Monkey D Luffy", "One Piece"] },
+  "observation-haki": { label: "Observation Haki", q: `One Piece observation haki Luffy ${CONTENT_EXCLUSIONS}`, aliases: ["Luffy observation haki", "Monkey D Luffy", "One Piece"] },
+  "demon-slayer": { label: "Demon Slayer", q: `Demon Slayer Kimetsu no Yaiba cinematic ${CONTENT_EXCLUSIONS}`, aliases: ["Demon Slayer", "Kimetsu no Yaiba", "anime"] },
+  "cherry-blossom": { label: "Cherry blossom", q: `anime cherry blossom scenery ${CONTENT_EXCLUSIONS}`, aliases: ["anime cherry blossom", "anime scenery", "anime"] },
 };
 const WALLPAPER_SCENE_SOURCE = {
   gaming: {
@@ -82,6 +82,14 @@ const CATEGORY_RESCUE_QUERY = {
   scenic: `landscape nature ${CHARACTER_EXCLUSIONS}`,
   minimal: `minimal architecture ${CHARACTER_EXCLUSIONS}`,
 };
+const CATEGORY_BROAD_QUERY = {
+  anime: "anime",
+  gaming: "cyberpunk",
+  cars: "cars",
+  space: "space",
+  scenic: "landscape",
+  minimal: "minimalism",
+};
 
 const HISTORY_LIMIT = 20;
 const BLOCKLIST_LIMIT = 500;
@@ -89,6 +97,7 @@ const FETCH_TIMEOUT_MS = 12000;
 const TOP_RANGE = "1M"; // top-voted wallpapers of the last month — quality/freshness balance
 const MIN_4K_WIDTH = 3840;
 const MIN_4K_HEIGHT = 2160;
+const OFFLINE_CACHE_NAME = "operation-hq-wallpapers-v2";
 
 const GRADIENT_FALLBACKS = [
   "linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)",
@@ -101,6 +110,7 @@ const UNIT_MINUTES = { hours: 60, days: 1440, weeks: 10080, months: 43200 };
 
 const Wallpaper = {
   _renderRequestId: 0,
+  _offlineObjectUrl: null,
 
   setStatus(message, state = "neutral") {
     const el = document.getElementById("wallpaper-status");
@@ -130,7 +140,11 @@ const Wallpaper = {
   is4KDimensions(width, height) {
     const w = Number(width || 0);
     const h = Number(height || 0);
-    return (w >= MIN_4K_WIDTH && h >= MIN_4K_HEIGHT) || (w >= 5120 && h >= 1440);
+    // 3840×2160 is UHD. 4K-width ultrawides commonly use a shorter
+    // 1440/1600px canvas; rejecting them after asking Wallhaven for
+    // `atleast=3840x1440` was the reason valid car/anime/gaming results were
+    // being reduced to an empty pool.
+    return w >= MIN_4K_WIDTH && h >= 1440;
   },
 
   qualityFilter(pool) {
@@ -207,6 +221,7 @@ const Wallpaper = {
       atleast: "3840x1440",
       ratios: "16x9,16x10,21x9,32x9",
     });
+    if (Number(cfg.page) > 1) params.set("page", String(Math.min(10, Math.max(1, Number(cfg.page)))));
     if ((cfg.sorting || "toplist") === "toplist") params.set("topRange", cfg.topRange || TOP_RANGE);
     if (keys.wallhaven) params.set("apikey", keys.wallhaven);
     const res = await this.fetchWithTimeout(`https://wallhaven.cc/api/v1/search?${params}`);
@@ -229,13 +244,13 @@ const Wallpaper = {
     const pick = list[Math.floor(Math.random() * (list.length || 1))];
     if (!pick) return null;
     await this.pushHistory(pick.id);
-    return { ...this.candidateMeta(pick), pool };
+    return { ...this.candidateMeta(pick), pool, provider:"wallhaven" };
   },
 
   async fetchWallhavenResilient(configs, keys) {
     const seen = new Set();
     const attempts = configs.filter(config => {
-      const signature = `${config.categories || "100"}|${config.sorting || "toplist"}|${config.topRange || TOP_RANGE}|${String(config.q || "").trim().toLowerCase()}`;
+      const signature = `${config.categories || "100"}|${config.sorting || "toplist"}|${config.topRange || TOP_RANGE}|${config.page || 1}|${String(config.q || "").trim().toLowerCase()}`;
       if (seen.has(signature)) return false;
       seen.add(signature);
       return true;
@@ -263,7 +278,11 @@ const Wallpaper = {
     }
     const url = `https://api.unsplash.com/photos/random?query=${encodeURIComponent(cfg.q)}&orientation=landscape&content_filter=high&count=6`;
     const res = await this.fetchWithTimeout(url, { headers: { Authorization: `Client-ID ${keys.unsplash}` } });
-    if (!res.ok) throw new Error(`Unsplash ${res.status}`);
+    if (!res.ok) {
+      const error = new Error(`Unsplash returned HTTP ${res.status}`);
+      error.code = res.status === 429 ? "rate-limit" : [401, 403].includes(res.status) ? "auth" : "provider";
+      throw error;
+    }
     const data = await res.json();
     const pool = await this.filterBlocked(Array.isArray(data) ? data : [data]);
     const hist = await this.getHistory();
@@ -272,7 +291,7 @@ const Wallpaper = {
     const pick = list[Math.floor(Math.random() * (list.length || 1))];
     if (!pick) return null;
     await this.pushHistory(pick.id);
-    return { ...this.candidateMeta(pick), pool };
+    return { ...this.candidateMeta(pick), pool, provider:"unsplash" };
   },
 
   async fetchPexels(cfg, keys) {
@@ -281,7 +300,11 @@ const Wallpaper = {
     }
     const url = `https://api.pexels.com/v1/search?query=${encodeURIComponent(cfg.q)}&orientation=landscape&per_page=20`;
     const res = await this.fetchWithTimeout(url, { headers: { Authorization: keys.pexels } });
-    if (!res.ok) throw new Error(`Pexels ${res.status}`);
+    if (!res.ok) {
+      const error = new Error(`Pexels returned HTTP ${res.status}`);
+      error.code = res.status === 429 ? "rate-limit" : [401, 403].includes(res.status) ? "auth" : "provider";
+      throw error;
+    }
     const data = await res.json();
     const hist = await this.getHistory();
     const pool = await this.filterBlocked(data.photos || []);
@@ -290,7 +313,27 @@ const Wallpaper = {
     const pick = list[Math.floor(Math.random() * (list.length || 1))];
     if (!pick) return null;
     await this.pushHistory(String(pick.id));
-    return { ...this.candidateMeta(pick), pool };
+    return { ...this.candidateMeta(pick), pool, provider:"pexels" };
+  },
+
+  async fetchPhotoFallback(category, cfg, keys) {
+    // Alternate providers are opt-in because each requires the person's own
+    // key. They are appropriate for photographic/CG categories, but not for a
+    // named anime scene where a generic stock photo would be a false match.
+    if (category === "anime") return null;
+    const attempts = [];
+    if (keys.unsplash) attempts.push(() => this.fetchUnsplash({ q:cfg.q, wallhavenQ:cfg.q }, keys));
+    if (keys.pexels) attempts.push(() => this.fetchPexels({ q:cfg.q, wallhavenQ:cfg.q }, keys));
+    for (const attempt of attempts) {
+      try {
+        const result = await attempt();
+        if (result) return { ...result, providerFallback:true };
+      } catch (_) {
+        // Continue to the next independently configured provider. The primary
+        // Wallhaven error is preserved if every configured source fails.
+      }
+    }
+    return null;
   },
 
   // Returns { url, thumb, pool } — pool is used to populate the widget thumbnails.
@@ -308,12 +351,28 @@ const Wallpaper = {
       const { hq_anime_scene = "curated" } = await chrome.storage.local.get("hq_anime_scene");
       const selected = ANIME_SCENE_SOURCE[hq_anime_scene] || ANIME_SCENE_SOURCE.curated;
       cfg = { ...CATEGORY_SOURCE.anime, q: selected.q };
-      return this.fetchWallhavenResilient([
-        cfg,
-        CATEGORY_SOURCE.anime,
-        { ...CATEGORY_SOURCE.anime, q: `anime scenery cinematic ${CONTENT_EXCLUSIONS}`, topRange: "1y" },
-        { ...CATEGORY_SOURCE.anime, q: CATEGORY_RESCUE_QUERY.anime, sorting: "relevance" },
-      ], keys);
+      // Community tags rarely match a long natural-language scene perfectly.
+      // Search the requested shot first, then shorter character/franchise
+      // aliases, a second results page, and finally the verified SFW anime
+      // channel. This preserves the 4K gate while preventing rare named
+      // scenes from collapsing to an error after one empty API response.
+      const exact = [selected.q, ...(selected.aliases || [])];
+      const attempts = exact.flatMap((q, index) => [
+        { ...CATEGORY_SOURCE.anime, q, sorting: "relevance", page: 1, requestedLabel: selected.label, exact: index < 2 },
+        { ...CATEGORY_SOURCE.anime, q, sorting: "relevance", page: 2, requestedLabel: selected.label, exact: index < 2 },
+      ]);
+      attempts.push(
+        { ...CATEGORY_SOURCE.anime, q: "anime cinematic", sorting: "toplist", topRange: "1y", requestedLabel: selected.label },
+        { ...CATEGORY_SOURCE.anime, q: "anime", sorting: "relevance", page: 1, requestedLabel: selected.label },
+        { ...CATEGORY_SOURCE.anime, q: "", sorting: "toplist", topRange: "1y", requestedLabel: selected.label },
+        { ...CATEGORY_SOURCE.anime, q: "", sorting: "toplist", topRange: "1y", page: 2, requestedLabel: selected.label },
+      );
+      const result = await this.fetchWallhavenResilient(attempts, keys);
+      if (result) {
+        result.requestedLabel = selected.label;
+        result.usedFallback = result.searchTier > 2;
+      }
+      return result;
     }
     const channels = WALLPAPER_SCENE_SOURCE[category];
     if (channels) {
@@ -321,12 +380,25 @@ const Wallpaper = {
       const sceneId = hq_wallpaper_scene_v1[category] || "curated";
       const selected = channels[sceneId] || channels.curated;
       const selectedConfig = { ...cfg, source: "wallhaven", q: selected.q, categories: "100", purity: "100", topRange: "1y" };
-      return this.fetchWallhavenResilient([
-        selectedConfig,
-        { ...selectedConfig, q: channels.curated.q },
-        { ...selectedConfig, q: CATEGORY_RESCUE_QUERY[category], topRange: "1y" },
-        { ...selectedConfig, q: CATEGORY_RESCUE_QUERY[category], sorting: "relevance" },
-      ], keys);
+      try {
+        const result = await this.fetchWallhavenResilient([
+          { ...selectedConfig, sorting:"relevance", page:1 },
+          { ...selectedConfig, sorting:"relevance", page:2 },
+          { ...selectedConfig, q: channels.curated.q, sorting:"relevance" },
+          { ...selectedConfig, q: CATEGORY_RESCUE_QUERY[category], topRange: "1y" },
+          { ...selectedConfig, q: CATEGORY_RESCUE_QUERY[category], sorting: "relevance" },
+          { ...selectedConfig, q: CATEGORY_BROAD_QUERY[category], sorting:"relevance", page:1 },
+          { ...selectedConfig, q: CATEGORY_BROAD_QUERY[category], sorting:"relevance", page:2 },
+          { ...selectedConfig, q:"", sorting:"toplist", topRange:"1y", page:1 },
+          { ...selectedConfig, q:"", sorting:"toplist", topRange:"1y", page:2 },
+        ], keys);
+        if (result) return result;
+      } catch (primaryError) {
+        const fallback = await this.fetchPhotoFallback(category, selected, keys);
+        if (fallback) return fallback;
+        throw primaryError;
+      }
+      return this.fetchPhotoFallback(category, selected, keys);
     }
     if (cfg.source === "wallhaven") return this.fetchWallhavenResilient([cfg], keys);
     if (cfg.source === "unsplash") return this.fetchUnsplash(cfg, keys);
@@ -348,11 +420,56 @@ const Wallpaper = {
       canvas.height = Math.round(bitmap.height * scale);
       const ctx = canvas.getContext("2d");
       ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-      const dataUrl = canvas.toDataURL("image/jpeg", 0.78);
-      await chrome.storage.local.set({ [`hq_wallpaper_offline_${category}`]: dataUrl });
+      bitmap.close?.();
+      if (typeof caches === "undefined" || typeof canvas.toBlob !== "function") return;
+      const cachedBlob = await new Promise(resolve => canvas.toBlob(resolve, "image/jpeg", 0.82));
+      if (!cachedBlob) return;
+      const cache = await caches.open(OFFLINE_CACHE_NAME);
+      await cache.put(this.offlineRequest(category), new Response(cachedBlob, { headers:{ "Content-Type":"image/jpeg" } }));
+      // Old builds stored a multi-megabyte base64 string in extension
+      // storage. Cache Storage keeps compressed bytes out of every settings
+      // read and avoids a duplicate base64 allocation on startup.
+      await chrome.storage.local.remove(`hq_wallpaper_offline_${category}`);
     } catch (e) {
-      console.warn("Offline wallpaper cache skipped:", e.message);
+      // Offline caching is an optimization. A cache quota or decoding failure
+      // must not pollute the extension error page or affect the live image.
     }
+  },
+
+  offlineRequest(category) {
+    return new Request(`https://operation-hq.invalid/offline-wallpaper/${encodeURIComponent(category)}`);
+  },
+
+  async readOffline(category) {
+    try {
+      if (typeof caches !== "undefined") {
+        const cached = await (await caches.open(OFFLINE_CACHE_NAME)).match(this.offlineRequest(category));
+        if (cached) {
+          const blob = await cached.blob();
+          if (this._offlineObjectUrl) URL.revokeObjectURL(this._offlineObjectUrl);
+          this._offlineObjectUrl = URL.createObjectURL(blob);
+          return this._offlineObjectUrl;
+        }
+      }
+    } catch (_) {}
+    // One-time compatibility path for an offline image written by v2.7.x.
+    const legacyKey = `hq_wallpaper_offline_${category}`;
+    const legacy = await chrome.storage.local.get(legacyKey);
+    return legacy[legacyKey] || null;
+  },
+
+  async deleteOffline(category) {
+    try {
+      if (typeof caches !== "undefined") {
+        const cache = await caches.open(OFFLINE_CACHE_NAME);
+        await cache.delete(this.offlineRequest(category));
+      }
+    } catch (_) {}
+    if (this._offlineObjectUrl) {
+      URL.revokeObjectURL(this._offlineObjectUrl);
+      this._offlineObjectUrl = null;
+    }
+    await chrome.storage.local.remove(`hq_wallpaper_offline_${category}`);
   },
 
   gradientFor() {
@@ -420,6 +537,10 @@ const Wallpaper = {
 
     const requestId = ++this._renderRequestId;
     if (isGradient) {
+      if (this._offlineObjectUrl) {
+        URL.revokeObjectURL(this._offlineObjectUrl);
+        this._offlineObjectUrl = null;
+      }
       image.classList.remove("ready");
       image.removeAttribute("src");
       layer.style.backgroundImage = cssUrlOrGradient;
@@ -444,6 +565,10 @@ const Wallpaper = {
           return;
         }
         image.src = url;
+        if (this._offlineObjectUrl && url !== this._offlineObjectUrl) {
+          URL.revokeObjectURL(this._offlineObjectUrl);
+          this._offlineObjectUrl = null;
+        }
         image.classList.add("ready");
         layer.style.backgroundImage = "none";
         layer.classList.remove("loading");
@@ -498,7 +623,7 @@ const Wallpaper = {
     const next = [...blocked.filter(key => key !== hq_wallpaper_current.key), hq_wallpaper_current.key].slice(-BLOCKLIST_LIMIT);
     const category = hq_wallpaper_current.category || "gaming";
     await chrome.storage.local.set({ hq_wallpaper_blocklist: next, hq_wallpaper_cached: null, hq_wallpaper_current: null });
-    await chrome.storage.local.remove(`hq_wallpaper_offline_${category}`);
+    await this.deleteOffline(category);
     this.toast("Hidden. That wallpaper won't appear again on this device.");
     await this.refreshSafetyControls();
     await this.apply(true, false);
@@ -510,25 +635,35 @@ const Wallpaper = {
     this.toast("Hidden wallpapers restored.");
   },
 
-  async apply(forceNew = false, silent = true) {
+  async apply(forceNew = false, silent = true, { deferNetwork = false } = {}) {
     const { hq_wallpaper_category } = await chrome.storage.local.get("hq_wallpaper_category");
     const category = hq_wallpaper_category || "gaming";
     await this.applyStoredPalette(category);
-    const offlineKey = `hq_wallpaper_offline_${category}`;
-    const s = await chrome.storage.local.get([offlineKey, "hq_wallpaper_cached", "hq_wallpaper_cached_category", "hq_wallpaper_current"]);
-    const offlineCopy = s[offlineKey];
+    const s = await chrome.storage.local.get(["hq_wallpaper_cached", "hq_wallpaper_cached_category", "hq_wallpaper_current"]);
     const blocked = new Set(await this.getBlocklist());
     const cachedIsBlocked = s.hq_wallpaper_current?.key && blocked.has(s.hq_wallpaper_current.key);
     const sameCategoryCached = s.hq_wallpaper_cached_category === category && !cachedIsBlocked ? s.hq_wallpaper_cached : null;
-    const safeOfflineCopy = cachedIsBlocked ? null : offlineCopy;
+    let safeOfflineCopy = !cachedIsBlocked && !sameCategoryCached ? await this.readOffline(category) : null;
 
     // Always paint a known-good background immediately. Previously a forced
     // refresh skipped both cache and offline fallback, leaving a blank page
     // for the whole network request—and permanently blank when that request
     // failed. The refresh now happens on top of a visible background.
     const immediate = sameCategoryCached || safeOfflineCopy;
-    const immediateRendered = immediate ? await this.setBackground(immediate) : false;
+    let immediateRendered = immediate ? await this.setBackground(immediate) : false;
+    if (!immediateRendered && sameCategoryCached && !cachedIsBlocked) {
+      safeOfflineCopy = await this.readOffline(category);
+      if (safeOfflineCopy) immediateRendered = await this.setBackground(safeOfflineCopy);
+    }
     if (!immediateRendered) await this.setBackground(this.gradientFor(), true);
+
+    if (deferNetwork) {
+      setTimeout(() => this.apply(true, true).catch(error => {
+        this.setStatus(`${error.message}. The last working background remains active.`, "error");
+      }), 0);
+      this.setStatus(immediateRendered ? `Showing cached ${category} wallpaper while a new one loads.` : `Preparing a new ${category} wallpaper…`, "loading");
+      return;
+    }
 
     if (!forceNew && sameCategoryCached && immediateRendered) {
       this.setStatus(`Showing cached ${category} wallpaper.`, "success");
@@ -539,18 +674,32 @@ const Wallpaper = {
       this.setStatus(`Loading a new ${category} wallpaper…`, "loading");
       const result = await this.fetchRandom(category);
       if (result?.url) {
-        const rendered = await this.setBackground(result.url);
-        if (!rendered) throw new Error("Wallpaper image could not be decoded");
-        await chrome.storage.local.set({ hq_wallpaper_cached: result.url, hq_wallpaper_cached_category: category });
-        await this.rememberCurrent(result, category);
-        this.cacheOffline(category, result.url);
+        // A CDN item can disappear between search and display. Try other
+        // verified results from the same response before declaring the whole
+        // provider broken.
+        const candidates = [result, ...(result.pool || []).map(item => this.candidateMeta(item)).filter(Boolean)]
+          .filter((item, index, list) => item?.url && list.findIndex(other => other.url === item.url) === index)
+          .slice(0, 6);
+        let displayed = null;
+        for (const candidate of candidates) {
+          if (await this.setBackground(candidate.url)) { displayed = candidate; break; }
+        }
+        if (!displayed) throw new Error("Verified images were found, but their hosts could not be decoded");
+        const remembered = { ...result, ...displayed };
+        await chrome.storage.local.set({ hq_wallpaper_cached: displayed.url, hq_wallpaper_cached_category: category });
+        await this.rememberCurrent(remembered, category);
+        this.cacheOffline(category, displayed.url);
         const searchNote = result.searchTier > 1 ? ` · recovered on search tier ${result.searchTier}` : "";
-        this.setStatus(`Showing verified 4K ${category} wallpaper${searchNote}.`, "success");
+        const fallbackNote = result.usedFallback && result.requestedLabel
+          ? ` Requested ${result.requestedLabel}; showing the closest verified 4K anime result.`
+          : result.providerFallback
+            ? ` Wallhaven was unavailable; recovered through ${result.provider}.`
+          : "";
+        this.setStatus(`Showing verified 4K-class ${category} wallpaper${searchNote}.${fallbackNote}`, "success");
         return;
       }
       throw new Error(category === "custom" ? "No valid custom wallpaper URLs are saved" : "Wallpaper provider returned no usable images");
     } catch (e) {
-      console.warn("Wallpaper refresh unavailable; retained fallback:", e.message);
       this.setStatus(`${e.message}. The last working background remains active.`, "error");
       if (!silent) {
         this.toast(e.message || "Couldn't load a new wallpaper. The last working background is still active.");

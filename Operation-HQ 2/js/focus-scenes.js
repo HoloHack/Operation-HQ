@@ -44,6 +44,7 @@ const FocusScenes = {
   async deploy() {
     const scene = this.scenes[this.selected];
     if (!scene) return;
+    if (typeof AdaptiveThemes !== "undefined") await AdaptiveThemes.deactivate();
     const state = await chrome.storage.local.get(["hq_accent", "hq_wallpaper_category", "hq_active_focus_scene", "hq_active_mod"]);
     if (!this.active) this.previous = { accent: state.hq_accent || "#7c5cff", wallpaper: state.hq_wallpaper_category || "gaming", activeMod: state.hq_active_mod || null, deepWork: !!DeepWork.active };
     this.active = this.selected;

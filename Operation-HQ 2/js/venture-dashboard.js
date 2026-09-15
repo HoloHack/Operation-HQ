@@ -340,11 +340,12 @@ const VentureDashboard = {
   closeReport() {
     const modal = document.getElementById("venture-report-modal");
     if (!modal) return;
+    if (this._reportPreviousFocus instanceof HTMLElement) this._reportPreviousFocus.focus();
+    else document.activeElement?.blur?.();
     modal.classList.add("hidden");
     modal.setAttribute("inert", "");
     modal.setAttribute("aria-hidden", "true");
     modal.onkeydown = null;
-    if (this._reportPreviousFocus instanceof HTMLElement) this._reportPreviousFocus.focus();
     this._reportPreviousFocus = null;
   },
 };

@@ -11,7 +11,7 @@ const pass = (message) => console.log(`✓ ${message}`);
 
 const manifest = JSON.parse(read("manifest.json"));
 assert.equal(manifest.manifest_version, 3);
-assert.equal(manifest.version, "2.5.0");
+assert.equal(manifest.version, "2.8.1");
 const extensionHex = createHash("sha256").update(Buffer.from(manifest.key, "base64")).digest("hex").slice(0, 32);
 const extensionId = [...extensionHex].map(char => String.fromCharCode(97 + parseInt(char, 16))).join("");
 assert.equal(extensionId, "cbgepkbfmcahdpahipkdeahppfbggjok", "Manifest key changed the OAuth-bound extension ID");
@@ -119,6 +119,7 @@ const migrationState = {
   hq_gleam_v1: "malformed",
   hq_notes_document_v2: "malformed",
   hq_calendar_details_v2: [],
+  hq_compositor_settings_v1: "malformed",
 };
 const migrationContext = vm.createContext({
   chrome: { storage: { local: {
@@ -129,7 +130,7 @@ const migrationContext = vm.createContext({
 vm.runInContext(read("js/storage-schema.js"), migrationContext, { filename: "storage-schema.js" });
 const StorageSchema = vm.runInContext("StorageSchema", migrationContext);
 await StorageSchema.migrate();
-assert.equal(migrationState.hq_schema_version, 9);
+assert.equal(migrationState.hq_schema_version, 10);
 assert.equal(migrationState.hq_tasks[0].id, "keep-me", "Migration replaced real task data");
 assert.equal(JSON.stringify(migrationState.hq_custom_wallpapers), "[]");
 assert.equal(migrationState.hq_sound_volume, 1);
@@ -146,6 +147,9 @@ assert.equal(JSON.stringify(migrationState.hq_research_sources_v1), "[]");
 assert.equal(JSON.stringify(migrationState.hq_srs_cards), "[]");
 assert.equal(migrationState.hq_study_preferences_v1.missionMinutes, 25);
 assert.equal(migrationState.hq_srs_settings_v2.sessionLimit, 20);
+assert.equal(migrationState.hq_compositor_settings_v1.quality, "auto");
+assert.equal(migrationState.hq_compositor_settings_v1.adaptive, true);
+assert.equal(StorageSchema.migrations[10]({ hq_compositor_settings_v1: { quality: "auto", adaptive: true, enabled: false } }).hq_compositor_settings_v1.enabled, true, "Non-Off compositor quality must not remain stuck disabled");
 pass("Versioned storage migrations preserve real data and repair malformed settings");
 
 const notesStorage = {};
@@ -278,7 +282,13 @@ assert.deepEqual(Array.from(LivingWidgetUnit.normalizeOrder(["briefing", "focus"
 pass("Reactive living-widget canvas, customization, and Cinema clearing contracts");
 
 const cinematicSource = read("js/cinematic-motion.js");
+const compositorSource = read("js/ambient-compositor.js");
+const newtabSource = read("js/newtab.js");
 assert(html.includes('id="cinematic-field"'), "Layered cinematic field is missing");
+assert(html.includes('id="hq-launch"') && html.includes('id="boot-sequence-select"') && html.includes('id="boot-sequence-preview"'), "Visible launch sequence or its controls are missing");
+assert(newtabSource.includes("const BootCinematic") && newtabSource.includes("BootCinematic.stage") && newtabSource.includes("BootCinematic.complete"), "Launch sequence is not wired to real bootstrap milestones");
+assert(newtabSource.indexOf('document.body.classList.add("app-ready")') > newtabSource.indexOf('BootDiagnostics.run("Living widgets"'), "Widget reveal begins before the living surface is ready");
+assert(read("css/style.css").includes("@keyframes hq-core-deploy") && read("css/style.css").includes("hq-launch-failsafe"), "Launch choreography or its non-blocking failsafe is missing");
 assert(html.includes('id="motion-profile-select"'), "Motion profile control is missing");
 assert(cinematicSource.includes('requestAnimationFrame(() => this.paintPointer())'), "Pointer depth must be animation-frame throttled");
 assert(cinematicSource.includes('document.addEventListener("visibilitychange"'), "Motion must pause in background tabs");
@@ -286,7 +296,15 @@ assert(cinematicSource.includes('prefers-reduced-motion: reduce'), "Motion engin
 assert(cinematicSource.includes('navigator.hardwareConcurrency') && cinematicSource.includes('navigator.deviceMemory'), "Adaptive motion needs a device capability gate");
 assert(cinematicSource.includes("initialized: false") && cinematicSource.includes("if (this.initialized) return"), "Motion controls can be wired more than once");
 assert(read("css/style.css").includes('body.motion-suspended *') && read("css/style.css").includes('Cinematic Motion Engine v1'), "Cinematic CSS performance contract is missing");
-pass("Adaptive cinematic motion, layered widget depth, and background-pause contracts");
+assert(html.includes('id="hq-compositor-canvas"') && html.includes('id="compositor-quality-select"') && html.includes('id="compositor-adaptive-toggle"'), "Procedural compositor surface or controls are missing");
+assert(newtabSource.includes('"js/ambient-compositor.js"') && newtabSource.includes('BootDiagnostics.run("Adaptive visual compositor"'), "Procedural compositor is not inside the recoverable bootstrap");
+assert(compositorSource.includes('getContext("webgl2"') && compositorSource.includes("fragmentSource") && compositorSource.includes("uNodes[7]"), "WebGL compositor or widget-node field is missing");
+assert(compositorSource.includes("samplePerformance(time)") && compositorSource.includes("this.renderScale = Math.max"), "Compositor lacks measured adaptive-quality governance");
+assert(compositorSource.includes('document.addEventListener("visibilitychange"') && compositorSource.includes("webglcontextlost"), "Compositor lifecycle recovery is incomplete");
+assert(compositorSource.includes("clear(this.gl.COLOR_BUFFER_BIT)") && compositorSource.includes("this.startRenderer()"), "Compositor must clear every frame and support late safe initialization");
+assert(compositorSource.includes('motionPreference.addEventListener?.("change"'), "Compositor does not recover when the operating-system motion preference changes");
+assert(read("css/style.css").includes('#hq-compositor-canvas') && read("css/style.css").includes('@media(prefers-reduced-motion:reduce)'), "Compositor styling or reduced-motion fallback is missing");
+pass("Adaptive cinematic motion, procedural compositor, widget depth, and background-pause contracts");
 
 const panelShellSource = read("js/newtab.js");
 assert(panelShellSource.includes("window.HQPanels = Object.freeze") && panelShellSource.includes("async function requestOpen"), "Widget and dock panel routes are not centralized");
@@ -438,10 +456,41 @@ assert.equal(extractedAssessment.dueDate, "2026-08-18");
 assert.equal(extractedAssessment.subject, "Science");
 assert(extractedAssessment.requirements.length >= 2 && extractedAssessment.steps.length >= 5, "Assessment extraction did not produce actionable grounded steps");
 const localAiSource = read("js/local-ai.js");
+const intelligenceSource = read("js/hq-intelligence.js");
 assert(localAiSource.includes("async assist(mode, text)") && localAiSource.includes("async analyzeAssessment"), "Native AI lacks the expanded productivity operations");
 assert(localAiSource.includes("cancelActive()") && localAiSource.includes("interruptGenerate"), "Native AI generation needs cancellation");
-assert(html.includes('id="local-ai-mode"') && html.includes('id="local-ai-output"'), "Native Intelligence Lab is missing");
-pass("Optional local assessment intake, grounded extraction, focus launch, and cancellable native AI contracts");
+assert(html.includes('id="local-ai-mode"') && html.includes('id="local-ai-output"') && html.includes('id="local-ai-context-btn"'), "Native Intelligence Lab or explicit context control is missing");
+for (const mode of ["brief", "prioritize", "schedule", "risk", "study", "connections"]) {
+  assert(localAiSource.includes(`${mode}:`), `Native AI is missing the ${mode} operation`);
+}
+assert(intelligenceSource.includes("user-selected on-device sources") && intelligenceSource.includes("Evidence labels"), "Local intelligence context lacks explicit provenance language");
+assert(!intelligenceSource.includes("fetch("), "Local context assembly must not contact a network provider");
+const intelligenceState = {
+  hq_tasks: [{ id: "task-a", text: "Finish science report", priority: "high", dueAt: Date.UTC(2026, 8, 18), done: false }],
+  hq_calendar_events: { "2026-09-18": ["16:00–17:00 Maths tuition"] },
+  hq_calendar_details_v2: {},
+  hq_assignments_v1: [{ id: "assignment-a", title: "Science report", subject: "Science", dueDate: "2026-09-18", priority: "high", done: false, steps: [] }],
+  hq_notes: "Private note that must remain excluded unless selected",
+};
+const intelligenceContext = vm.createContext({
+  chrome: { storage: { local: { async get(keys) { return Object.fromEntries(keys.map(key => [key, intelligenceState[key]])); } } } },
+  Date,
+  console,
+});
+vm.runInContext(intelligenceSource, intelligenceContext, { filename: "hq-intelligence.js" });
+const HQIntelligenceUnit = vm.runInContext("HQIntelligence", intelligenceContext);
+const assembled = await HQIntelligenceUnit.collect(["tasks", "calendar", "assignments"]);
+assert(assembled.text.includes("[tasks:task-a]") && assembled.text.includes("[calendar:2026-09-18-0]") && assembled.text.includes("[assignments:assignment-a]"), "Selected local context lost provenance labels");
+assert(!assembled.text.includes("Private note"), "Unselected Notes leaked into local AI context");
+const notesOnly = await HQIntelligenceUnit.collect(["notes", "unknown-source"]);
+assert(notesOnly.text.includes("[notes:document]") && !notesOnly.text.includes("[tasks:"), "Explicit source selection was not enforced");
+assert.deepEqual(Array.from(notesOnly.selected), ["notes"], "Unknown context sources must be ignored");
+intelligenceState.hq_notes = "x".repeat(20000);
+intelligenceState.hq_tasks = Array.from({ length: 40 }, (_, index) => ({ id: `bulk-${index}`, text: `Priority evidence ${index} ${"x".repeat(220)}`, priority: "high", done: false }));
+HQIntelligenceUnit.MAX_CONTEXT = 1000;
+const boundedContext = await HQIntelligenceUnit.collect(["tasks", "notes"]);
+assert(boundedContext.text.length <= HQIntelligenceUnit.MAX_CONTEXT && boundedContext.truncated, "Local context cap is not enforced");
+pass("Optional local assessment intake, provenance-grounded HQ context, and cancellable native AI contracts");
 
 const gleamSource = read("js/gleam.js");
 assert(html.includes('id="gleam-flyout"') && html.includes('class="dock-btn gleam-dock-btn"'), "Gleam app or its progressively disclosed launcher is missing");
@@ -668,12 +717,22 @@ const aiVideo = Classifier.classify({ title: "Build an AI agent with a large lan
 assert.deepEqual(Array.from(aiVideo.path), ["Coding & Dev", "AI Tools"]);
 const unknownVideo = Classifier.classify({ title: "Watch this", url: "https://youtube.com/watch?v=other" }, {}, []);
 assert.equal(unknownVideo.source, "needs-content", "Ambiguous YouTube content must not be forced into Entertainment");
-assert.equal(unknownVideo.path[1], "Review Queue", "Low-confidence bookmarks need one deterministic review destination");
+assert.equal(unknownVideo.path, null, "Low-confidence bookmarks must not be moved to a guessed destination");
+assert.equal(Object.values(Classifier.MANAGED_SUBFOLDERS).flat().includes("Review Queue"), false, "The retired Review Queue must not be creatable");
 const mixedPlatform = Classifier.classify({ title: "Calculus tutorial for exam revision", url: "https://youtube.com/watch?v=math" }, {}, []);
 assert.equal(mixedPlatform.path[0], "School & Academics", "Topic must beat platform for variable-content sites");
+assert.deepEqual(Array.from(Classifier.classify({ title:"Cambridge Maths chapter 5 quadratics", url:"https://youtube.com/watch?v=maths" }, {}, []).path), ["School & Academics","Mathematics"]);
+assert.deepEqual(Array.from(Classifier.classify({ title:"Year 10 Chemistry reactions", url:"https://youtube.com/watch?v=science" }, {}, []).path), ["School & Academics","Science"]);
+assert.deepEqual(Array.from(Classifier.classify({ title:"Python functions explained", url:"https://youtube.com/watch?v=code" }, {}, []).path), ["Coding & Dev","Docs & References"]);
 assert(read("js/bookmarks.js").includes("Same-site clustering is intentionally retired"), "Platform-only bookmark folders are still enabled");
+assert(read("js/bookmarks.js").includes("cleanupManagedEmptyFolders") && !read("js/bookmarks.js").includes("cleanupEmptyFolders("), "Bookmark cleanup is not restricted to the managed registry");
+assert(read("js/bookmarks.js").includes("runExclusive") && read("js/bookmarks.js").includes("moveAndRecord"), "Bookmark mutations lack an operation lock or success-only inverse log");
+assert(read("js/background.js").includes('message?.type !== "hq:bookmarks:lock"') && read("js/bookmarks.js").includes('type: "hq:bookmarks:lock"'), "Bookmark mutation lock does not span separate new-tab pages");
+assert(read("js/bookmarks.js").includes("[tree[0].children[0]]"), "Full bookmark sorting can escape the Bookmark Bar root");
+assert(read("js/background.js").includes("Classifier.normalizePath(path, { allowOperational: false })"), "Manual bookmark learning can escape the curated taxonomy");
+assert(html.includes('id="bookmark-review-board"') && html.includes("Zero-wrong-placement gate"), "Uncertain bookmarks lack an explicit accuracy gate");
 assert(read("js/workspaces.js").includes("saved-only tab") && read("js/workspaces.js").includes("restoreGroups"), "Workspace sync must preserve saved-only tabs and tab groups");
-pass("Topic-first bookmarks, single Review Queue, and loss-resistant workspace cross-references");
+pass("Topic-first bookmarks, zero catch-all placement, and loss-resistant workspace cross-references");
 
 const allProjectJs = jsFiles.map(file => read(path.join("js", file))).join("\n");
 assert(allProjectJs.includes("escapeAttribute(pick.url)"), "Bookmark href escaping regressed");

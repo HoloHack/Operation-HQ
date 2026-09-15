@@ -10,6 +10,9 @@ const CinematicMotion = {
   frame: 0,
   pendingPointer: null,
   observer: null,
+  geometryObserver: null,
+  widgetGeometry: [],
+  activeDepthWidget: null,
   previousStates: new WeakMap(),
   initialized: false,
 
@@ -50,25 +53,39 @@ const CinematicMotion = {
       widget.prepend(frame);
       this.previousStates.set(widget, widget.dataset.state || "idle");
     });
+    this.measureWidgets();
+  },
+
+  measureWidgets() {
+    this.widgetGeometry = [...document.querySelectorAll(".living-widget:not(.widget-disabled)")].map(widget => {
+      const rect = widget.getBoundingClientRect();
+      return { widget, left: rect.left, top: rect.top, width: rect.width, height: rect.height, cx: rect.left + rect.width / 2, cy: rect.top + rect.height / 2 };
+    });
   },
 
   queuePointer(event) {
     if (!document.body.classList.contains("motion-depth") || document.hidden) return;
-    this.pendingPointer = { x: event.clientX, y: event.clientY };
+    this.pendingPointer = { x: event.clientX, y: event.clientY, widget:event.target.closest?.(".living-widget:not(.widget-disabled)") || null };
     if (!this.frame) this.frame = requestAnimationFrame(() => this.paintPointer());
   },
 
   paintPointer() {
     this.frame = 0;
     if (!this.pendingPointer) return;
-    const { x, y } = this.pendingPointer;
+    const { x, y, widget:targetWidget } = this.pendingPointer;
     this.pendingPointer = null;
     document.documentElement.style.setProperty("--pointer-x", `${(x / innerWidth * 100).toFixed(2)}%`);
     document.documentElement.style.setProperty("--pointer-y", `${(y / innerHeight * 100).toFixed(2)}%`);
-    document.querySelectorAll(".living-widget:not(.widget-disabled)").forEach(widget => {
-      const rect = widget.getBoundingClientRect();
-      const dx = Math.max(-1, Math.min(1, (x - (rect.left + rect.width / 2)) / Math.max(1, rect.width / 2)));
-      const dy = Math.max(-1, Math.min(1, (y - (rect.top + rect.height / 2)) / Math.max(1, rect.height / 2)));
+    // Widget bounds are cached by ResizeObserver. Reading every card's layout
+    // on every pointer frame forced synchronous layout and was the main cause
+    // of the occasional stutter visible in the smoke recording.
+    if (this.activeDepthWidget && this.activeDepthWidget !== targetWidget) this.resetDepth(this.activeDepthWidget);
+    this.activeDepthWidget = targetWidget;
+    const geometry = this.widgetGeometry.find(item => item.widget === targetWidget);
+    if (!geometry) return;
+    [geometry].forEach(({ widget, width, height, cx, cy }) => {
+      const dx = Math.max(-1, Math.min(1, (x - cx) / Math.max(1, width / 2)));
+      const dy = Math.max(-1, Math.min(1, (y - cy) / Math.max(1, height / 2)));
       const distance = Math.hypot(dx, dy);
       const influence = Math.max(0, 1 - distance / 2.1);
       widget.style.setProperty("--widget-tilt-x", `${(-dy * 2.8 * influence).toFixed(2)}deg`);
@@ -80,10 +97,12 @@ const CinematicMotion = {
     });
   },
 
-  resetDepth() {
-    document.querySelectorAll(".living-widget").forEach(widget => {
+  resetDepth(target = null) {
+    const widgets = target ? [target] : document.querySelectorAll(".living-widget");
+    widgets.forEach(widget => {
       ["--widget-tilt-x", "--widget-tilt-y", "--widget-shift-x", "--widget-shift-y"].forEach(name => widget.style.removeProperty(name));
     });
+    if (!target || target === this.activeDepthWidget) this.activeDepthWidget = null;
   },
 
   announceState(widget) {
@@ -104,6 +123,7 @@ const CinematicMotion = {
 
   signalWave(widget, state) {
     if (this.reduced() || document.hidden || this.resolvedProfile === "calm") return;
+    if (typeof AmbientCompositor !== "undefined") AmbientCompositor.signal(widget, ["attention", "critical", "running"].includes(state) ? 1 : 0.72);
     const field = document.getElementById("cinematic-field");
     if (!field) return;
     const rect = widget.getBoundingClientRect();
@@ -122,6 +142,25 @@ const CinematicMotion = {
     this.observer?.disconnect();
     this.observer = new MutationObserver(records => records.forEach(record => this.announceState(record.target)));
     document.querySelectorAll(".living-widget").forEach(widget => this.observer.observe(widget, { attributes: true, attributeFilter: ["data-state"] }));
+  },
+
+  bindTactileFeedback() {
+    document.addEventListener("pointerdown", event => {
+      const widget = event.target.closest?.(".living-widget");
+      if (!widget || document.body.classList.contains("widget-arrange-mode")) return;
+      const rect = widget.getBoundingClientRect();
+      const ripple = document.createElement("span");
+      ripple.className = "widget-touch-ripple";
+      ripple.setAttribute("aria-hidden", "true");
+      ripple.style.left = `${event.clientX - rect.left}px`;
+      ripple.style.top = `${event.clientY - rect.top}px`;
+      widget.append(ripple);
+      ripple.addEventListener("animationend", () => ripple.remove(), { once: true });
+      widget.classList.remove("widget-contact");
+      void widget.offsetWidth;
+      widget.classList.add("widget-contact");
+      setTimeout(() => widget.classList.remove("widget-contact"), 360);
+    }, { passive: true });
   },
 
   bootSequence() {
@@ -161,7 +200,12 @@ const CinematicMotion = {
     this.decorateWidgets();
     this.applyProfile();
     this.bindControls();
+    this.bindTactileFeedback();
     this.watchState();
+    this.geometryObserver = new ResizeObserver(() => this.measureWidgets());
+    document.querySelectorAll(".living-widget").forEach(widget => this.geometryObserver.observe(widget));
+    window.addEventListener("resize", () => this.measureWidgets(), { passive: true });
+    document.getElementById("widget-canvas")?.addEventListener("scroll", () => this.measureWidgets(), { passive: true });
     window.addEventListener("pointermove", event => this.queuePointer(event), { passive: true });
     document.documentElement.addEventListener("pointerleave", () => this.resetDepth());
     document.addEventListener("visibilitychange", () => {
@@ -175,6 +219,8 @@ const CinematicMotion = {
       this.applyProfile();
       if (this.reduced()) this.resetDepth();
     });
-    this.bootSequence();
+    // The initial launch is orchestrated by BootCinematic after real modules
+    // report ready. bootSequence remains available for an explicit motion-
+    // profile preview, avoiding the old invisible pre-ready animation race.
   },
 };

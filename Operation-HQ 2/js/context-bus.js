@@ -38,6 +38,7 @@ const ContextBus = {
       activeTaskText: null,
       activeVenture: null,
       pomodoroRunning: false,
+      focusLabel: null,
       idle: false,              // mirrors chrome.idle, written by background.js
       tasksOpen: 0,
       tasksDoneToday: 0,
@@ -81,7 +82,7 @@ const ContextBus = {
   sanitizePartial(partial) {
     const source = partial && typeof partial === "object" && !Array.isArray(partial) ? partial : {};
     const allowed = {};
-    const nullableStrings = ["activeTaskId", "activeTaskText", "activeVenture", "currentScheduleBlock"];
+    const nullableStrings = ["activeTaskId", "activeTaskText", "activeVenture", "currentScheduleBlock", "focusLabel"];
     const booleans = ["deepWork", "pomodoroRunning", "idle"];
     const counts = ["tasksOpen", "tasksDoneToday"];
     if (["normal", "zen", "privacy", "lockdown"].includes(source.mode)) allowed.mode = source.mode;

@@ -71,7 +71,16 @@ const Today = {
     const todayKey = this.dateKey(today);
     const tomorrow = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
     const tomorrowKey = this.dateKey(tomorrow);
-    const { hq_followups = [], hq_focus_interruptions = [], hq_current_focus_task = null, hq_assignments_v1 = [] } = await chrome.storage.local.get(["hq_followups", "hq_focus_interruptions", "hq_current_focus_task", "hq_assignments_v1"]);
+    const {
+      hq_followups = [],
+      hq_focus_interruptions = [],
+      hq_current_focus_task = null,
+      hq_assignments_v1 = [],
+      hq_calendar_events = {},
+    } = await chrome.storage.local.get(["hq_followups", "hq_focus_interruptions", "hq_current_focus_task", "hq_assignments_v1", "hq_calendar_events"]);
+    const calendarEvents = hq_calendar_events && typeof hq_calendar_events === "object" && !Array.isArray(hq_calendar_events)
+      ? hq_calendar_events
+      : {};
     const openAssignments = (Array.isArray(hq_assignments_v1) ? hq_assignments_v1 : []).filter(item => !item.done && item.dueDate).sort((a,b) => String(a.dueDate).localeCompare(String(b.dueDate)));
     const block = this.currentScheduleBlock();
     const activeTask = Tasks.data.find(task => task.id === ContextBus?.get()?.activeTaskId && !task.done);
@@ -94,7 +103,7 @@ const Today = {
 
     const allIncompleteDaily = DailyTasks.activeTemplates().filter(template => !DailyTasks.isTemplateDone(template.id));
     const allOpenTasks = Tasks.data.filter(task => !task.done);
-    const allEvents = Calendar.events[todayKey] || [];
+    const allEvents = calendarEvents[todayKey] || [];
     const incompleteDaily = allIncompleteDaily.slice(0, 4);
     const openTasks = allOpenTasks.slice(0, 5);
     const events = allEvents.slice(0, 3);
@@ -112,7 +121,7 @@ const Today = {
     ];
     document.getElementById("today-waiting").innerHTML = waiting.join("") || this.empty("No follow-ups or parked interruptions.");
 
-    const tomorrowEvents = (Calendar.events[tomorrowKey] || []).map(event => this.item(event, "Calendar · tomorrow"));
+    const tomorrowEvents = (calendarEvents[tomorrowKey] || []).map(event => this.item(event, "Calendar · tomorrow"));
     const tomorrowDay = SCHEDULE_DAY_KEYS[tomorrow.getDay()];
     const tomorrowBlocks = Schedule?.active ? Schedule.blocksFor(Schedule.active, tomorrowDay, tomorrow).slice(0, 5).map(item => this.item(item.t, `${item.s}–${item.e} · schedule`)) : [];
     const tomorrowAssignments = openAssignments.filter(item => item.dueDate === tomorrowKey).map(item => this.item(item.title, `${item.subject} · assignment due`));
@@ -158,6 +167,7 @@ const Today = {
       Tasks.add(text, undefined, null);
       this.showUndo("Added to Tasks.", async () => { Tasks.data = before; await Tasks.save(); });
     } else if (destination === "note") {
+      if (!(await LazyFeatures.ensure("notes-flyout"))) throw new Error("Notes are unavailable while optional tools are paused.");
       const receipt = await NotesEditor.appendExternal(text, "today-capture");
       this.showUndo("Added to Notes.", () => NotesEditor.restoreSnapshot(receipt));
     } else if (destination === "followup") {
@@ -169,8 +179,12 @@ const Today = {
       const key = hqLocalDateKey();
       const result = await CalendarRepository.addLegacy(key, text, { dedupe: false });
       CalendarRepository.syncCalendar(result);
-      Calendar.render().catch(error => console.warn("Calendar refresh after capture failed:", error));
-      this.showUndo("Added to today’s Calendar.", async () => { const undone = await CalendarRepository.undo(result.inverse); CalendarRepository.syncCalendar(undone); Calendar.render(); });
+      if (typeof Calendar !== "undefined") Calendar.render().catch(error => console.warn("Calendar refresh after capture failed:", error));
+      this.showUndo("Added to today’s Calendar.", async () => {
+        const undone = await CalendarRepository.undo(result.inverse);
+        CalendarRepository.syncCalendar(undone);
+        if (typeof Calendar !== "undefined") await Calendar.render();
+      });
     }
     await this.render();
   },

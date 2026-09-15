@@ -12,6 +12,26 @@ importScripts("claude-client.js");
 importScripts("daily-planner.js");
 importScripts("idea-radar.js");
 
+// One cross-page bookmark mutation lease. New-tab pages keep their own local
+// guard too, while this worker prevents two separate HQ tabs from interleaving
+// sorts and overwriting each other's inverse transaction.
+let bookmarkOperationLock = null;
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type !== "hq:bookmarks:lock") return false;
+  const now = Date.now();
+  if (bookmarkOperationLock && now - bookmarkOperationLock.acquiredAt > 120000) bookmarkOperationLock = null;
+  if (message.action === "acquire") {
+    if (!bookmarkOperationLock || bookmarkOperationLock.token === message.token) {
+      bookmarkOperationLock = { token: message.token, label: message.label || "Bookmark operation", acquiredAt: now };
+      sendResponse({ granted: true });
+    } else sendResponse({ granted: false, label: bookmarkOperationLock.label });
+  } else if (message.action === "release") {
+    if (bookmarkOperationLock?.token === message.token) bookmarkOperationLock = null;
+    sendResponse({ released: !bookmarkOperationLock });
+  }
+  return false;
+});
+
 // The service worker is the sole Context Bus writer. Every tab sends a
 // narrow patch here; commits are serialized inside ContextBus and merge
 // against the newest persisted revision before writing.
@@ -32,7 +52,41 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 });
 
 const INBOX_NAME = "Inbox";
+const BOOKMARK_MANAGED_KEY = "hq_bookmark_managed_folders_v2";
+const BOOKMARK_DECISIONS_KEY = "hq_bookmark_decisions_v1";
 const selfMovedIds = new Set(); // bookmark IDs we just moved ourselves — ignore the resulting onMoved event
+let bookmarkDecisionWrite = Promise.resolve();
+
+function updateBookmarkDecisions(mutator) {
+  bookmarkDecisionWrite = bookmarkDecisionWrite.catch(() => {}).then(async () => {
+    const saved = await chrome.storage.local.get(BOOKMARK_DECISIONS_KEY);
+    const current = Array.isArray(saved[BOOKMARK_DECISIONS_KEY]) ? saved[BOOKMARK_DECISIONS_KEY] : [];
+    const next = mutator(current).filter(item => item?.bm?.id && item?.bm?.url).slice(-250);
+    await chrome.storage.local.set({ [BOOKMARK_DECISIONS_KEY]:next });
+  });
+  return bookmarkDecisionWrite;
+}
+
+function markBookmarkDecision(bookmark, result) {
+  return updateBookmarkDecisions(current => [
+    ...current.filter(item => String(item.bm.id) !== String(bookmark.id)),
+    {
+      bm:{ id:String(bookmark.id), title:String(bookmark.title || "").slice(0,500), url:String(bookmark.url || "").slice(0,3000), parentId:String(bookmark.parentId || ""), sourcePath:Array.isArray(bookmark.sourcePath) ? bookmark.sourcePath.slice(0,12) : [] },
+      reasons:(result?.reasons || ["more topic evidence needed"]).map(String).slice(0,6),
+      suggestedPath:Classifier.normalizePath(result?.path, { allowOperational:false }),
+      candidates:(result?.candidates || []).slice(0,3),
+      createdAt:Date.now(),
+    },
+  ]);
+}
+
+function clearBookmarkDecision(id) {
+  return updateBookmarkDecisions(current => current.filter(item => String(item.bm.id) !== String(id)));
+}
+
+function bulkBookmarkOperationActive(value) {
+  return Boolean(value && typeof value === "object" && Number(value.expiresAt) > Date.now());
+}
 
 async function recordBackgroundError(label, error) {
   const message = String(error?.message || error || "Unknown error").slice(0, 500);
@@ -190,15 +244,40 @@ async function getBarId() {
   return tree[0].children[0].id;
 }
 
+async function bookmarkFolderPath(parentId, barId) {
+  if (!parentId || parentId === barId) return [];
+  const path = [];
+  let currentId = parentId;
+  for (let depth = 0; depth < 12 && currentId && currentId !== barId; depth += 1) {
+    try {
+      const [node] = await chrome.bookmarks.get(currentId);
+      if (!node || node.url) break;
+      path.unshift(node.title);
+      currentId = node.parentId;
+    } catch { break; }
+  }
+  return path;
+}
+
 async function getOrCreateFolderPath(pathArr, barId) {
+  const isInbox = Array.isArray(pathArr) && pathArr.length === 1 && pathArr[0] === INBOX_NAME;
+  const path = isInbox ? [INBOX_NAME] : Classifier.normalizePath(pathArr);
+  if (!path) throw new Error("Blocked an invalid bookmark destination.");
   let parentId = barId;
-  for (const name of pathArr) {
+  for (let index = 0; index < path.length; index += 1) {
+    const name = path[index];
     const children = await chrome.bookmarks.getChildren(parentId);
     const existing = children.find(c => !c.url && c.title.toLowerCase() === name.toLowerCase());
     if (existing) parentId = existing.id;
     else {
       const created = await chrome.bookmarks.create({ parentId, title: name });
       parentId = created.id;
+      if (!isInbox) {
+        const saved = await chrome.storage.local.get(BOOKMARK_MANAGED_KEY);
+        const registry = Array.isArray(saved[BOOKMARK_MANAGED_KEY]) ? saved[BOOKMARK_MANAGED_KEY] : [];
+        const entry = { id: created.id, parentId: created.parentId, title: created.title, path: path.slice(0, index + 1), createdAt: Date.now() };
+        await chrome.storage.local.set({ [BOOKMARK_MANAGED_KEY]: [...registry.filter(item => item.id !== created.id), entry].slice(-120) });
+      }
     }
   }
   return parentId;
@@ -210,7 +289,8 @@ async function scanLegitFolders(barId) {
   const legit = [];
   for (const root of roots) {
     const subs = await chrome.bookmarks.getChildren(root.id);
-    subs.filter(s => !s.url).forEach(s => legit.push({ title: s.title, parentTitle: root.title }));
+    subs.filter(s => !s.url && Classifier.isManagedPath([root.title, s.title], { allowOperational:false }))
+      .forEach(s => legit.push({ title: s.title, parentTitle: root.title }));
   }
   return legit;
 }
@@ -227,22 +307,26 @@ chrome.bookmarks.onCreated.addListener(safely("Bookmark auto-sort", async (id, b
 
   const { hq_realtime_sort_enabled } = await chrome.storage.local.get("hq_realtime_sort_enabled");
   if (hq_realtime_sort_enabled === false) return; // user disabled it in settings
+  const { hq_bulk_sort_active } = await chrome.storage.local.get("hq_bulk_sort_active");
+  if (bulkBookmarkOperationActive(hq_bulk_sort_active)) return; // a deliberate bulk transaction owns mutation order
 
   if (Classifier.shouldNeverSort(bookmark.title)) return;
 
   const barId = await getBarId();
   const { hq_learned_domains } = await chrome.storage.local.get("hq_learned_domains");
   const legitFolders = await scanLegitFolders(barId);
-  const result = Classifier.classify(bookmark, hq_learned_domains || {}, legitFolders);
+  const bookmarkWithPath = { ...bookmark, sourcePath:await bookmarkFolderPath(bookmark.parentId, barId) };
+  const result = Classifier.classify(bookmarkWithPath, hq_learned_domains || {}, legitFolders);
 
   if (result.path && result.confidence === "high") {
     const targetParent = await getOrCreateFolderPath(result.path, barId);
-    await moveSelf(id, targetParent);
+    if (String(targetParent) !== String(bookmark.parentId)) await moveSelf(id, targetParent);
+    await clearBookmarkDecision(id);
   } else {
-    // low confidence — real-time sort is conservative: park it in Inbox
-    // rather than guess, since a wrong auto-file is worse than a short wait.
-    const inboxId = await getOrCreateFolderPath([INBOX_NAME], barId);
-    if (bookmark.parentId !== inboxId) await moveSelf(id, inboxId);
+    // No fake catch-all and no surprise move. The next Bookmark Intelligence
+    // view exposes the unresolved destination while the link stays exactly
+    // where the person saved it.
+    await markBookmarkDecision({ ...bookmarkWithPath, id }, result);
   }
 }));
 
@@ -250,7 +334,7 @@ chrome.bookmarks.onCreated.addListener(safely("Bookmark auto-sort", async (id, b
 chrome.bookmarks.onMoved.addListener(safely("Bookmark learning", async (id, moveInfo) => {
   if (selfMovedIds.has(id)) { selfMovedIds.delete(id); return; } // our own real-time move
   const { hq_bulk_sort_active } = await chrome.storage.local.get("hq_bulk_sort_active");
-  if (hq_bulk_sort_active) return; // ignore moves happening during a bulk sort/undo run
+  if (bulkBookmarkOperationActive(hq_bulk_sort_active)) return; // ignore moves happening during a current bulk transaction
 
   let bm;
   try { [bm] = await chrome.bookmarks.get(id); } catch { return; }
@@ -269,14 +353,25 @@ chrome.bookmarks.onMoved.addListener(safely("Bookmark learning", async (id, move
   }
   if (!path.length) return; // moved to bar root, not a meaningful category
 
+  // Manual learning is intentionally limited to the same curated taxonomy
+  // as automatic sorting. Dragging into a personal folder, a deep hierarchy,
+  // Inbox, or Review Queue must never become an executable future rule.
+  const validatedPath = Classifier.normalizePath(path, { allowOperational: false });
+  if (!validatedPath) return;
+
   const domain = Classifier.domainOf(bm.url);
   const { hq_learned_domains } = await chrome.storage.local.get("hq_learned_domains");
   const map = hq_learned_domains || {};
   // Learn the specific site/path fingerprint, never a whole platform. A
   // GitHub AI repo, YouTube maths lesson and TikTok message handoff can all
   // coexist without one correction poisoning every future link.
-  map[Classifier.fingerprint(bm)] = path;
+  map[Classifier.fingerprint(bm)] = validatedPath;
   await chrome.storage.local.set({ hq_learned_domains: map });
+  await clearBookmarkDecision(id);
+}));
+
+chrome.bookmarks.onRemoved.addListener(safely("Bookmark decision cleanup", async id => {
+  await clearBookmarkDecision(id);
 }));
 
 // --- Idea Radar weekly auto-check (opt-in) ---

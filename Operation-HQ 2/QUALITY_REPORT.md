@@ -1,10 +1,86 @@
-# Operation HQ 2.5 — Atomic Continuity Review
+# Operation HQ 2.8.1 — Stability Pass Review
+
+## Resolved in 2.8.1
+
+- **Gmail console failures:** the `Illegal return statement` was a real browser parse failure caused by a stray top-level return. It is now inside the Gmail error-diagnosis method, so the module defines normally and no longer triggers the dependent `Gmail is not defined` error.
+- **Browser-runtime test gap:** a new suite parses every classic extension script with browser semantics, loads Gmail in a minimal browser-like context and exercises the reported provider/focus paths. This closes the blind spot created by Node's CommonJS wrapper.
+- **Bookmark correctness:** the sorter no longer invents a catch-all destination. Only high-confidence, taxonomy-valid evidence moves a link; uncertain items remain exactly where they were and can receive an exact learned decision through the accuracy gate. Locks, result-aware writes and exact undo protect the tree.
+- **Startup cost:** the declared core is 28 scripts and 365,510 source bytes, down 27.1% from the prior 43-script/501,347-byte core. Large editors, charts, integrations and local models stay demand-loaded, and a hidden tab releases the compositor's screen-sized drawing buffer.
+- **Exact Maths workflow:** non-contiguous chapters such as 5, 7, 8 and 10 are preserved as four chapters. Focus can start even if no timetable profile or flexible block exists; schedule changes still require a separate reviewed Apply.
+- **Wallpaper and Weather:** wallpaper decoding accepts true 4K-class ultrawides, retries several candidates/pages, keeps cache/last-good/gradient recovery and may use configured alternate providers only for suitable categories. Weather refreshes are shared, backed off after failure and reported as readable status instead of raw DOM exceptions.
+- **Panel accessibility and layout:** focus is returned or blurred before a panel becomes hidden/inert. The rule now covers feature flyouts, Settings, the command palette, reports and credential dialogs; close controls remain inside the panel header.
+- **Verification:** browser runtime, command intelligence, bookmark mutation, startup budget, static verification and integrity suites all pass. The verifier reports 71 JavaScript modules, 720 unique IDs and 26 named dialogs.
+
+## Supplied audit reconciliation
+
+| Finding | Resolution in this build |
+|---|---|
+| User folders removed | Cleanup is limited to an ownership registry and revalidates the empty live path before deletion. |
+| Invalid learned bookmark path | Learned and executable destinations must match the fixed taxonomy; operational and arbitrary paths are rejected. |
+| Overlapping bookmark actions | An in-page guard plus a service-worker lease serializes tree mutations across new tabs. |
+| Unhandled bookmark failure | Chrome API failures are recorded as failures and never added to the undo stack. |
+| Missing mutation tests | The executable mutable-tree suite covers ownership, invalid paths, overlap, failure and exact undo. |
+| Shared context lost updates | The service worker is the serialized context authority with typed patches and revisions. |
+| Calendar snapshot overwrite | Event-level repository transactions and exact inverses preserve unrelated later changes. |
+| Night plan written to today | Tomorrow is prepared separately and promoted only after local date rollover. |
+| Mobile Calendar clipping | Month view retains seven in-bounds columns and dense week content scrolls intentionally. |
+| Persistent plaintext keys | Provider secrets migrate to session storage and legacy persistent copies are removed. |
+| Every module eager at startup | Two HTML entry scripts bootstrap a 28-script core; optional modules and vendors load on first use. |
+
+These fixes are verified in the packaged test harness. They are not a substitute for the real-Chrome gates below.
+
+## Resolved in 2.8
+
+- **Safe Mode:** the recording's blocked dashboard was a real false-positive caused by two new tabs sharing one incomplete-boot marker. Recovery detection is now tab-local, with visible exit and diagnostics controls.
+- **Wallpaper reliability:** anime and every other channel now use multiple exact, alias, curated and broad result pools, multiple pages, up to six decoded candidates and last-known-good retention. A provider outage or empty third-party result can still occur, but it no longer destroys the current wallpaper or stops recovery attempts early.
+- **Cinematic study schemes:** a named focus mission produces three new choices rather than selecting a hidden preset. Palette, surface, geometry, subject treatment and prism, iris, velocity or bloom transition choreography change together only after confirmation.
+- **Command intelligence:** Nexus can collect missing details, search the person's own saved resources, preview multi-day focus plans, start a named focus session, route browser review and use an explicitly loaded on-device model for guided explanation, quiz or work checking.
+- **Calendar and timetable:** the active Master Timetable is a live Calendar layer in Month, Week, Agenda, selected-day and next-event views; flexible blocks power review-first chapter planning.
+- **Bookmarks:** rules now distinguish Mathematics, Science, interdisciplinary STEM and other topic branches; Deep Review can add page metadata and optional local-model evidence without letting a platform domain decide the subject.
+- **Interaction quality:** widget geometry is cached, only the active card receives pointer depth, low sustained frame rate steps rendering down, controls remain above effects, close buttons stay inside their panels, and common fields have consistent breathing room.
+- **Verification:** 71 packaged JavaScript modules parse; 720 static IDs are unique; 26 dialogs remain named and safely closed initially; browser-runtime, command-intelligence, bookmark, startup-budget, static and integrity suites pass.
+
+## Manual release gates still open
+
+- Load the unpacked extension in the target Chrome profile and test 1920×1080, 200% zoom, keyboard-only, Reduced Motion and several simultaneous new tabs.
+- Exercise real Wallhaven responses across each channel; provider availability and catalogue relevance cannot be proven by an offline or simulated test.
+- Exercise Gmail reconnect/revoke and the optional local WebGPU models on the actual device. The extension does not inherit ChatGPT plugins or cloud accounts.
+- Judge generated palettes and transition pacing on the intended monitor. Automated checks can prove containment, fallbacks and reduced-motion parity, but not subjective visual taste.
 
 ## Release outcome
 
-This build closes the seven supplied integrity, responsive, security, startup and efficiency findings without weakening the Study OS or prior features. Shared state and Calendar now have single-writer authorities; next-day plans use the intended date; provider secrets are session-only; optional tools start on demand; passive page work pauses while hidden; and cinematic state feedback adapts without blocking interaction. It adds no permission, OAuth scope, account, passive monitoring, Gmail write access, scraping, or cloud data flow. Static and executable simulation gates pass; real Chrome/device validation remains a required manual release gate rather than a result this runner can honestly claim.
+This build adds a native adaptive visual compositor and provenance-grounded local intelligence without weakening the reliability work delivered in 2.6. The procedural field responds to factual UI state, uses measured runtime performance to govern its own cost, pauses in hidden tabs, clears every rendered frame, fails back to CSS, and never intercepts input. Native Intelligence reads only the local sources the user checks and only after an explicit assembly click; evidence is labelled and output remains advisory. It adds no permission, OAuth scope, account, passive monitoring, Gmail write access, scraping, remote AI call, or cloud data flow. The standard, concurrency/integrity, and bookmark-tree suites pass; a real Chrome/device visual gate remains open because this runner has no browser executable.
 
-## Resolved in 2.5
+## Resolved in 2.7
+
+- **Procedural depth:** one pointer-transparent WebGL2 canvas composes local noise, ribbons, horizon light, a focus grid, widget-node topology, and bounded interaction pulses behind the readability scrim.
+- **Factual adaptation:** time energy, focus/deep-work state, visible attention states, and sampled wallpaper colours affect the field. No emotion, intent, personality, or fabricated activity is inferred.
+- **Runtime governance:** Auto selects from device capability and data-saving state; three-second measured FPS windows lower or cautiously restore internal resolution. Ultra, Balanced, Efficient, and Off remain manual choices.
+- **Lifecycle safety:** the compositor pauses when the page is hidden, clears its frame buffer before every draw, recovers from Off or a later reduced-motion change, reports context loss, and leaves the CSS motion layer usable when WebGL2 fails.
+- **Widget physicality:** drift uses independent CSS variables and is suppressed during arrangement or reduced motion. Buttons, links, inputs, and selects remain above all decorative layers with explicit pointer authority.
+- **Launch composition:** volumetric beams, segmented aperture geometry, and subsystem labels extend the existing launch sequence without changing its real progress, skip, compact, off, failsafe, or accessibility contracts.
+- **Private intelligence:** source checkboxes default to operational data only; Notes, Captures, and Gmail metadata are opt-in. Evidence lines carry stable collection labels and context size is bounded before local generation.
+- **Useful operations:** executive brief, priority ordering, schedule draft, risk scan, study sprint, and cross-source connection prompts distinguish evidence from inference and never claim to apply changes.
+- **Review evidence:** 69 JavaScript modules parse; 693 IDs are unique; all 26 panels retain accessible dialog contracts; the document tag stack is balanced; standard, integrity, and bookmark suites pass.
+- **No authority expansion:** schema v10 stores only compositor quality/adaptation choices. There is no new permission, OAuth scope, email write path, network service, passive listener, or persisted interaction history.
+
+## Retained and reverified from 2.6
+
+### Resolved in 2.6
+
+- **Bookmark accuracy:** expanded curated evidence routes coding, study, design, business, reading, entertainment, social, finance, gaming, productivity, travel, and tool content without creating one folder per site. Unknown or conflicting content remains explicit.
+- **Correction loop:** Preview exposes the destination distribution and Review Board; Deep Review reads permitted page metadata in bounded batches; File + learn records a content-specific correction.
+- **Fingerprint integrity:** YouTube video IDs and Google document IDs are part of learned fingerprints. One video/document correction cannot become a platform-wide rule.
+- **Taxonomy safety:** learned and executable paths must match the fixed one- or two-level vocabulary. Inbox, Review Queue, arbitrary user folders, and deeper paths cannot become learned rules.
+- **Folder ownership:** only newly created folders enter the managed registry. Cleanup revalidates the live path and emptiness before removing a registered folder; unregistered folders are never touched.
+- **Transaction safety:** one local guard plus a service-worker lease blocks overlapping actions across different new-tab pages. Buttons reflect the busy state, failures are not logged as undoable, and each operation keeps a separate bounded inverse transaction.
+- **Exact undo:** only bookmarks still at the transaction destination are restored. A later manual re-file wins, missing personal hierarchies are not invented, and managed/Inbox sources are recreated only through validated paths.
+- **Chrome-root safety:** Full Sort is scoped to the Bookmark Bar and cannot pull items from Other Bookmarks or mobile roots.
+- **Visible launch:** the boot layer follows actual bootstrap milestones, stays visible for the selected minimum choreography, has an explicit skip, and cannot permanently cover the page if startup stalls.
+- **Widget ergonomics:** shared spatial tokens, per-instrument gutters, stable header/footer rhythm, topmost interactive children, larger launch controls, focus-within response, contact waves, and three density modes improve both appearance and hit reliability.
+- **Review evidence:** all 67 JavaScript modules parse; 686 IDs remain unique; 26 dialogs remain named/inert; the standard verifier, concurrency/integrity suite, and in-memory bookmark mutation suite pass.
+
+## Retained and reverified from 2.5
 
 - **Context integrity:** extension pages send typed context operations to the service worker. The authority re-reads the latest state, serializes commits, increments a revision, and notifies subscribers after persistence.
 - **Calendar integrity:** every writer uses one repository. Structured occurrences and plain entries receive stable IDs, concurrent operations are serialized, and undo applies an exact inverse rather than restoring a stale object.
@@ -30,7 +106,7 @@ This build closes the seven supplied integrity, responsive, security, startup an
 - **Layout repairs:** explicit slot maps remove the existing Schedule/Assessment and Focus-layout overlaps at desktop/tablet widths; visibility settings retain precedence.
 - **Input and motion polish:** module fields use comfortable padding and placeholders; time, actual weather, and active focus tune the cinematic attitude; duplicate motion initialization is guarded; reduced motion remains authoritative.
 - **Stale-build diagnosis:** System Health displays the manifest version and copied diagnostics include it, making it possible to distinguish the current package from an old unpacked folder.
-- **Supplied-console triage:** the listed preload warnings identify unrelated website origins and are not emitted by this extension. No packaged file contains an illegal top-level `return`; all current scripts parse. If an old `newtab.html:0` record remains, confirm System Health says `2.5.0 · Atomic Continuity`, clear saved diagnostics, then reproduce once to capture the current source and line.
+- **Supplied-console triage:** the listed preload warnings identify unrelated website origins and are not emitted by this extension. No packaged file contains an illegal top-level `return`; all current scripts parse. If an old `newtab.html:0` record remains, confirm System Health says `2.6.0 · Cinematic Intelligence`, clear saved diagnostics, then reproduce once to capture the current source and line.
 - **Review evidence:** 67 JavaScript modules parse, 674 IDs are unique, 26 dialogs are named/inert, and wallpaper fallback, staged recovery, routing, arrangement normalization, CSS balance, responsive behavior, storage migrations, security boundaries, and accessibility contracts pass.
 
 ## Retained and reverified from 2.3
@@ -110,7 +186,7 @@ This build closes the seven supplied integrity, responsive, security, startup an
 - **No fake folders:** Gmail categories are virtual local views. The extension does not claim to create or move Gmail labels because it intentionally lacks write access.
 - **Timetable integration:** the supplied v8 phases and weekly rhythm are represented in a dedicated profile. Existing profiles remain intact; manually refreshing the managed profile warns before replacing edits.
 - **Reviewed planning:** open tasks are scored from explicit priority, deadline, age, and current timetable phase, then fitted into flexible schedule blocks. Nothing reaches the calendar until Apply; the whole application can be undone.
-- **Bookmark certainty:** every link receives topic evidence before platform defaults. Exact URL fingerprints retain manual corrections; variable-platform domains cannot poison future links; low confidence routes to Review Queue.
+- **Bookmark certainty:** every link receives topic evidence before platform defaults. Exact URL fingerprints retain manual corrections; variable-platform domains cannot poison future links; low-confidence items remain in place for an explicit accuracy-gate decision.
 - **Workspace continuity:** saved-only tabs survive Safe Sync, duplicates normalize tracking fragments, pinned/group state restores in a separate window, bookmark creation re-checks the live tree, and group changes require preview and confirmation.
 - **Wallpaper specificity:** anime and every general category now expose named, SFW, landscape, ranked 4K channels while retaining decode validation, cached recovery, adaptive contrast, and the blocklist.
 - **Permission diff:** `tabGroups` was added for explicit group capture/restore. `history` remains absent and Gmail remains `gmail.readonly`.
@@ -189,8 +265,8 @@ This build closes the seven supplied integrity, responsive, security, startup an
 - manifest parsing, Manifest V3, the new-tab override, and Gmail scope boundaries;
 - unique element IDs, packaged asset references, and absence of inline event handlers;
 - dialog names and safe initial focus state;
-- syntax for all 64 JavaScript and module files;
-- 674 unique IDs, accessible form controls, and 26 named inert dialogs;
+- syntax for all 69 JavaScript and module files;
+- 693 unique IDs, accessible form controls, and 26 named inert dialogs;
 - deterministic OAuth extension-ID and exact Client-ID contracts;
 - literal DOM-reference resolution with seven explicitly runtime-created controls;
 - early diagnostics order, lazy WebLLM loading, background rejection guards, and network timeout contracts;
@@ -225,8 +301,10 @@ These are not safely reproducible in a static or mocked runner and should be che
 6. **Device location:** reload the unpacked extension to accept the new geolocation permission, then confirm macOS Location Services allows Google Chrome and that Weather reports Automatic.
 7. **Assessment Intake:** click Connect download history and confirm Chrome asks contextually; import one real TXT/DOCX brief, verify the extracted deadline against the source, Accept it, confirm the Assignment and Calendar entry, then test Undo Intake. Grant/forget folder access separately if automatic content reading is wanted.
 8. **Gleam visual and input smoke test:** open More → Gleam, complete onboarding, run one lesson and one simulation, start a field mission, type part of a reflection, switch sections and return, then confirm the draft survived. Check desktop, narrow window, 200% zoom, keyboard-only navigation, and operating-system reduced motion.
-9. **Build identity and widget routing:** confirm Settings → General → System Health reads `2.5.0 · Atomic Continuity`; click every visible widget launcher, reorder compatible widgets from Settings → Appearance, reload, and confirm the order and visibility persist without overlap.
+9. **Build identity, widgets and compositor:** confirm Settings → General → System Health reads `2.8.1 · Stability Pass`; click every visible widget launcher, reorder compatible widgets, reload, and confirm order/visibility persist. Test Auto, Ultra, Balanced, Efficient and Off; confirm measured status appears, Off stops motion, and returning to Auto restarts without a page reload.
 10. **Atomic multi-tab continuity:** keep two HQ tabs open, add different calendar items and change different dashboard states, then confirm both changes survive in both tabs; undo one calendar action and verify the other tab's later item remains.
 11. **Session credentials:** connect one key-based provider, confirm it works during the session, fully quit Chrome, reopen it, and confirm Operation HQ asks for the key again without exposing a stale credential.
+
+12. **Visual performance matrix:** run 1920×1080, a narrow window, 200% zoom, keyboard-only, operating-system reduced motion, background/foreground, and a forced WebGL context loss. This runner includes the Playwright package but no browser executable; its attempted browser download timed out, so this gate is not represented as passed.
 
 The build deliberately describes these as manual integration checks rather than claiming they passed without the required browser profile, credentials, hardware, and external service state.

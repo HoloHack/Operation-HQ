@@ -2,7 +2,7 @@
 // Every future data-shape change must be added as a numbered migration.
 const StorageSchema = {
   KEY: "hq_schema_version",
-  CURRENT: 9,
+  CURRENT: 10,
 
   migrations: {
     // Establish honest empty collections without replacing existing data.
@@ -120,6 +120,24 @@ const StorageSchema = {
       for (const key of ["hq_calendar_undo_v2", "hq_assignment_plan_undo_v1", "hq_schedule_plan_undo_v1"]) {
         const undo = state[key];
         if (undo != null && !Array.isArray(undo?.inverse)) patch[key] = null;
+      }
+      return patch;
+    },
+
+    // Adaptive visual compositor preferences are bounded and reversible. The
+    // renderer never stores frames, wallpaper pixels, pointer history, or
+    // inferred emotion; only these explicit display preferences persist.
+    10(state) {
+      const patch = {};
+      const compositor = state.hq_compositor_settings_v1;
+      if (compositor != null && (!compositor || typeof compositor !== "object" || Array.isArray(compositor))) {
+        patch.hq_compositor_settings_v1 = { quality: "auto", adaptive: true, enabled: true };
+      } else if (compositor) {
+        patch.hq_compositor_settings_v1 = {
+          quality: ["auto", "ultra", "balanced", "efficient", "off"].includes(compositor.quality) ? compositor.quality : "auto",
+          adaptive: compositor.adaptive !== false,
+          enabled: compositor.quality !== "off",
+        };
       }
       return patch;
     },

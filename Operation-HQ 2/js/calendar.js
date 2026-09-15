@@ -22,6 +22,7 @@ const Calendar = {
     school: { label: "School", color: "#55d6ff" },
     deadline: { label: "Deadline", color: "#ff6b86" },
     focus: { label: "Focus", color: "#a78bfa" },
+    schedule: { label: "Timetable", color: "#f4bf5f" },
     personal: { label: "Personal", color: "#4eddb7" },
   },
 
@@ -100,8 +101,39 @@ const Calendar = {
   scheduleLabelFor(date) {
     if (typeof Schedule === "undefined" || !Schedule.active) return null;
     const dayKey = SCHEDULE_DAY_KEYS[date.getDay()];
-    if (!Schedule.dayHasAlt(Schedule.active, dayKey)) return null;
-    return Schedule.isAltWeek(Schedule.active, date) ? Schedule.active.altLabel : null;
+    const blocks = Schedule.blocksFor(Schedule.active, dayKey, date);
+    if (!blocks.length) return null;
+    const profile = Schedule.active.masterVersion === 8 ? "Master v8" : Schedule.active.name;
+    const alternate = Schedule.dayHasAlt(Schedule.active, dayKey) && Schedule.isAltWeek(Schedule.active, date) ? ` · ${Schedule.active.altLabel}` : "";
+    return `${profile} · ${blocks.length} blocks${alternate}`;
+  },
+
+  scheduleRecordsForDate(dateKey, { applyFilter = true } = {}) {
+    if (typeof Schedule === "undefined" || !Schedule.active || !this.validDateKey(dateKey)) return [];
+    const date = this.fromKey(dateKey);
+    const dayKey = SCHEDULE_DAY_KEYS[date.getDay()];
+    const query = applyFilter ? this._query : "";
+    return Schedule.blocksFor(Schedule.active, dayKey, date).map((block, index) => ({
+      id:`schedule-${dateKey}-${index}`,
+      title:block.phasePriority || block.t,
+      originalTitle:block.t,
+      date:dateKey,
+      occurrenceDate:dateKey,
+      start:block.s,
+      end:block.e,
+      allDay:false,
+      category:"schedule",
+      priority:block.phasePriority ? "high" : "normal",
+      notes:block.d || "",
+      legacy:false,
+      scheduleBlock:true,
+      scheduleIndex:index,
+    })).filter(event => !query || [event.title,event.originalTitle,event.notes,"schedule","timetable"].some(value => String(value || "").toLocaleLowerCase().includes(query)));
+  },
+
+  combinedRecordsForDate(dateKey, options = {}) {
+    return [...this.recordsForDate(dateKey, options), ...this.scheduleRecordsForDate(dateKey, options)]
+      .sort((a,b) => String(a.start || "99:99").localeCompare(String(b.start || "99:99")) || String(a.title).localeCompare(String(b.title)));
   },
 
   validDetails(value) {
@@ -259,7 +291,7 @@ const Calendar = {
     const currentMinutes = now.getHours() * 60 + now.getMinutes();
     for (let offset = 0; offset <= 60; offset += 1) {
       const key = this.dateKey(this.addDays(this.fromKey(today), offset));
-      const candidates = this.recordsForDate(key, { applyFilter: false }).filter(event => {
+      const candidates = this.combinedRecordsForDate(key, { applyFilter: false }).filter(event => {
         if (offset > 0 || event.allDay || !event.start) return true;
         return this.minutes(event.end || event.start) > currentMinutes;
       });
@@ -294,7 +326,8 @@ const Calendar = {
     });
 
     const todayEvents = this.recordsForDate(this.dateKey(), { applyFilter: false });
-    this.el("cal-today-stat").textContent = `${todayEvents.length} today`;
+    const todaySchedule = this.scheduleRecordsForDate(this.dateKey(), { applyFilter:false });
+    this.el("cal-today-stat").textContent = `${todayEvents.length} event${todayEvents.length === 1 ? "" : "s"} · ${todaySchedule.length} timetable blocks`;
     const conflicts = this.conflictCount();
     this.el("cal-conflict-stat").textContent = conflicts ? `${conflicts} conflict${conflicts === 1 ? "" : "s"}` : "No conflicts";
     this.el("cal-conflict-stat").dataset.state = conflicts ? "attention" : "clear";
@@ -319,7 +352,7 @@ const Calendar = {
   eventHtml(event, compact = false) {
     const category = this.categories[event.category] || this.categories.personal;
     const time = event.allDay || !event.start ? "" : this.formatTime(event.start);
-    return `<button class="cal-event-chip ${compact ? "compact" : ""}" type="button" data-event-id="${escapeAttribute(event.id)}" data-event-date="${escapeAttribute(event.occurrenceDate)}" ${event.legacy ? `data-legacy-index="${event.legacyIndex}"` : ""} style="--event-color:${category.color}" title="${escapeAttribute(event.title)}"><span>${time ? `${escapeHtml(time)} · ` : ""}${escapeHtml(event.title)}</span>${event.priority === "high" ? '<i aria-label="High priority">!</i>' : ""}</button>`;
+    return `<button class="cal-event-chip ${compact ? "compact" : ""} ${event.scheduleBlock ? "schedule" : ""}" type="button" data-event-id="${escapeAttribute(event.id)}" data-event-date="${escapeAttribute(event.occurrenceDate)}" ${event.legacy ? `data-legacy-index="${event.legacyIndex}"` : ""} ${event.scheduleBlock ? 'data-schedule-block="true"' : ""} style="--event-color:${category.color}" title="${escapeAttribute(event.scheduleBlock && event.originalTitle !== event.title ? `${event.originalTitle} · ${event.title}` : event.title)}"><span>${time ? `${escapeHtml(time)} · ` : ""}${escapeHtml(event.title)}</span>${event.priority === "high" ? '<i aria-label="High priority">!</i>' : ""}</button>`;
   },
 
   bindRenderedEvents(container) {
@@ -330,6 +363,15 @@ const Calendar = {
     });
     container.querySelectorAll(".cal-event-chip").forEach(button => button.onclick = event => {
       event.stopPropagation();
+      if (button.dataset.scheduleBlock === "true") {
+        this.selectedDate = button.dataset.eventDate;
+        if (typeof Schedule !== "undefined") {
+          Schedule._viewDay = SCHEDULE_DAY_KEYS[this.fromKey(button.dataset.eventDate).getDay()];
+          Schedule.render();
+        }
+        document.querySelector('.dock-btn[data-panel="schedule-flyout"]')?.click();
+        return;
+      }
       const record = button.dataset.legacyIndex == null
         ? this.details[button.dataset.eventId]
         : { legacy: true, id: button.dataset.eventId, legacyId: button.dataset.eventId, date: button.dataset.eventDate, legacyIndex: Number(button.dataset.legacyIndex), title: this.events[button.dataset.eventDate]?.[Number(button.dataset.legacyIndex)] || "" };
@@ -376,7 +418,7 @@ const Calendar = {
     for (let offset = 0; offset < 7; offset += 1) {
       const date = this.addDays(start, offset);
       const key = this.dateKey(date);
-      const events = this.recordsForDate(key);
+      const events = this.combinedRecordsForDate(key);
       html += `<section class="cal-week-column ${key === today ? "today" : ""} ${key === this.selectedDate ? "selected" : ""}">
         <button class="cal-date-hit cal-week-head" type="button" data-date="${key}"><small>${date.toLocaleDateString([], { weekday: "short" })}</small><strong>${date.getDate()}</strong></button>
         ${this.holidays[key] ? `<p class="cal-holiday">${escapeHtml(this.holidays[key])}</p>` : ""}
@@ -398,9 +440,13 @@ const Calendar = {
       const date = this.addDays(start, offset);
       const key = this.dateKey(date);
       const events = this.recordsForDate(key);
-      if (!events.length) continue;
+      const schedule = this.scheduleRecordsForDate(key);
+      if (!events.length && !schedule.length) continue;
       visibleDays += 1;
-      html += `<section class="cal-agenda-day"><button class="cal-date-hit cal-agenda-date" type="button" data-date="${key}"><strong>${date.toLocaleDateString([], { weekday: "short", day: "numeric" })}</strong><span>${date.toLocaleDateString([], { month: "long" })}</span></button><div>${events.map(event => this.eventHtml(event)).join("")}</div></section>`;
+      const first = schedule[0];
+      const last = schedule.at(-1);
+      const scheduleSummary = schedule.length ? `<button class="cal-date-hit cal-agenda-rhythm" type="button" data-date="${key}"><strong>${escapeHtml(Schedule.active.masterVersion === 8 ? "Master v8" : Schedule.active.name)} · ${schedule.length} blocks</strong><span>${escapeHtml(this.formatTime(first.start))}–${escapeHtml(this.formatTime(last.end))} · open full day</span></button>` : "";
+      html += `<section class="cal-agenda-day"><button class="cal-date-hit cal-agenda-date" type="button" data-date="${key}"><strong>${date.toLocaleDateString([], { weekday: "short", day: "numeric" })}</strong><span>${date.toLocaleDateString([], { month: "long" })}</span></button><div>${scheduleSummary}${events.map(event => this.eventHtml(event)).join("")}</div></section>`;
     }
     if (!visibleDays) html += '<div class="calendar-empty"><strong>Your runway is clear.</strong><span>No events match this 30-day view.</span></div>';
     html += "</div>";
@@ -421,9 +467,11 @@ const Calendar = {
 
   renderSelected() {
     if (!this.selectedDate) this.selectedDate = this.dateKey();
-    const events = this.recordsForDate(this.selectedDate);
+    const events = this.combinedRecordsForDate(this.selectedDate);
+    const scheduleCount = events.filter(event => event.scheduleBlock).length;
+    const personalCount = events.length - scheduleCount;
     this.el("cal-selected-label").textContent = this.formatDate(this.selectedDate, { weekday: "long", day: "numeric", month: "long" });
-    this.el("cal-selected-summary").textContent = events.length ? `${events.length} commitment${events.length === 1 ? "" : "s"}` : "Open day";
+    this.el("cal-selected-summary").textContent = events.length ? [scheduleCount ? `${scheduleCount} timetable` : "", personalCount ? `${personalCount} event${personalCount === 1 ? "" : "s"}` : ""].filter(Boolean).join(" · ") : "Open day";
     const list = this.el("cal-day-events");
     list.innerHTML = events.length ? events.map(event => this.eventHtml(event)).join("") : '<div class="calendar-empty compact"><strong>No events</strong><span>Protect this space or add a clear commitment.</span></div>';
     this.bindRenderedEvents(list);

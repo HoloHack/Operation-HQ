@@ -9,6 +9,7 @@
 const Nexus = {
   selectedMission: null,
   pendingPlan: null,
+  pendingFollowup: null,
   suggestionIndex: -1,
   suggestions: [],
 
@@ -48,6 +49,21 @@ const Nexus = {
     this.setResult(`${label} opened in its official web app. Nexus does not read or send messages there.`);
   },
 
+  async openSavedResource(resource) {
+    if (!resource?.url) return;
+    if (resource.tabId) {
+      try {
+        const tab = await chrome.tabs.get(resource.tabId);
+        await chrome.tabs.update(resource.tabId, { active: true });
+        if (tab.windowId != null) await chrome.windows.update(tab.windowId, { focused: true });
+        this.setResult(`Switched to ${resource.title}.`);
+        return;
+      } catch {}
+    }
+    await chrome.tabs.create({ url: resource.url });
+    this.setResult(`Opened ${resource.title} from your saved resources.`);
+  },
+
   setResult(message, state = "Ready") {
     const result = document.getElementById("nexus-result");
     const engineState = document.getElementById("nexus-engine-state");
@@ -68,6 +84,7 @@ const Nexus = {
     parts.push(`${c.tasksOpen || 0} open task${c.tasksOpen === 1 ? "" : "s"}`);
     if (c.activeTaskText) parts.push(`Tracking: ${c.activeTaskText}`);
     if (c.currentScheduleBlock) parts.push(`Now: ${c.currentScheduleBlock}`);
+    if (c.focusLabel) parts.push(`Focus: ${c.focusLabel}`);
     if (c.pomodoroRunning) parts.push("Focus timer running");
     return parts.join(" · ");
   },
@@ -81,7 +98,9 @@ const Nexus = {
       "nexus-telemetry-mode": mode[0]?.toUpperCase() + mode.slice(1),
       "nexus-telemetry-workload": `${c.tasksOpen || 0} open`,
       "nexus-telemetry-timeline": c.currentScheduleBlock || (c.pomodoroRunning ? "Focus active" : "Open time"),
-      "nexus-telemetry-authority": "Local first",
+      "nexus-telemetry-authority": typeof LocalAI !== "undefined" && LocalAI.isLoadedThisSession()
+        ? `On-device · ${LocalAI.profile().label.replace(/^[^·]+·\s*/, "")}`
+        : "Deterministic · local",
     };
     Object.entries(values).forEach(([id, value]) => { const target = document.getElementById(id); if (target) target.textContent = value; });
   },
@@ -95,6 +114,224 @@ const Nexus = {
     const recent = [command, ...hq_nexus_recent.filter(item => item !== command)].slice(0, 5);
     await chrome.storage.local.set({ hq_nexus_recent: recent });
     this.renderRecents(recent);
+  },
+
+  askFollowup({ question, placeholder = "Type the missing detail…", resume }) {
+    const form = document.getElementById("nexus-followup");
+    const input = document.getElementById("nexus-followup-input");
+    this.pendingFollowup = typeof resume === "function" ? resume : null;
+    document.getElementById("nexus-followup-question").textContent = question;
+    input.value = "";
+    input.placeholder = placeholder;
+    form.hidden = false;
+    this.setResult("I need one precise detail before I can build a safe plan.", "Needs input");
+    requestAnimationFrame(() => input.focus());
+  },
+
+  cancelFollowup() {
+    this.pendingFollowup = null;
+    document.getElementById("nexus-followup").hidden = true;
+    this.setResult("Cancelled. Nothing was changed.");
+  },
+
+  async submitFollowup(value) {
+    const clean = String(value || "").replace(/\s+/g, " ").trim();
+    if (!clean || !this.pendingFollowup) return;
+    const resume = this.pendingFollowup;
+    this.pendingFollowup = null;
+    document.getElementById("nexus-followup").hidden = true;
+    await resume(clean);
+  },
+
+  renderResources(resources = [], query = "") {
+    const panel = document.getElementById("nexus-resource-panel");
+    const results = document.getElementById("nexus-resource-results");
+    const count = document.getElementById("nexus-resource-count");
+    const title = document.getElementById("nexus-resource-title");
+    if (!panel || !results) return;
+    panel.hidden = false;
+    title.textContent = query ? `Matches for “${query}”` : "Matching resources";
+    count.textContent = `${resources.length} found`;
+    results.replaceChildren();
+    if (!resources.length) {
+      const empty = document.createElement("p");
+      empty.className = "nexus-resource-empty";
+      empty.textContent = "No confident match was found in bookmarks, open tabs, or saved workspaces. Nexus did not guess or open an unrelated page.";
+      results.append(empty);
+      return;
+    }
+    resources.forEach(resource => {
+      const row = document.createElement("article");
+      row.className = "nexus-resource";
+      const body = document.createElement("div");
+      const strong = document.createElement("strong");
+      strong.textContent = resource.title;
+      const small = document.createElement("small");
+      small.textContent = [...resource.sources, resource.context].filter(Boolean).join(" · ");
+      body.append(strong, small);
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = resource.tabId ? "Switch to tab" : "Open";
+      button.onclick = () => this.openSavedResource(resource).catch(error => this.setResult(error.message, "Action failed"));
+      row.append(body, button);
+      results.append(row);
+    });
+  },
+
+  focusLabel(parsed) {
+    const subject = parsed.subject?.label || "Study";
+    const values = parsed.chapters?.values || [];
+    const chapterList = values.length > 1
+      ? `${values.slice(0,-1).join(", ")} and ${values.at(-1)}`
+      : values.length === 1
+        ? String(values[0])
+        : parsed.chapters
+          ? `${parsed.chapters.start}${parsed.chapters.end === parsed.chapters.start ? "" : `–${parsed.chapters.end}`}`
+          : "";
+    const chapters = chapterList ? ` · chapter${values.length === 1 || parsed.chapters?.start === parsed.chapters?.end ? "" : "s"} ${chapterList}` : "";
+    return `${subject}${chapters}`;
+  },
+
+  async handleIntelligentIntent(parsed, originalCommand) {
+    if (!parsed) return false;
+    const engine = HQCommandEngine;
+    if (parsed.intent === "study-help") {
+      if (!parsed.query) {
+        this.askFollowup({ question:"What exact question or concept should I help with?", placeholder:"Paste the problem or name the concept", resume:answer => this.runCommand(`${originalCommand} ${answer}`) });
+        return true;
+      }
+      if (typeof LocalAI === "undefined" || !LocalAI.isLoadedThisSession()) {
+        document.getElementById("settings-btn")?.click();
+        document.querySelector('.settings-tab[data-cat="integrations"]')?.click();
+        this.setResult("Choose and load an on-device model in Native Intelligence, then run that command again. For Maths, the Maths profile is the best fit.", "Model needed");
+        return true;
+      }
+      await this.remember(originalCommand);
+      this.setResult(`Working locally with ${LocalAI.profile().label}…`, "Working");
+      const output = await LocalAI.assist(parsed.mode || "explain", parsed.query);
+      const panel = document.getElementById("nexus-ai-panel");
+      document.getElementById("nexus-ai-title").textContent = `${parsed.subject?.label || "Study"} · ${parsed.mode === "quiz" ? "active-recall quiz" : parsed.mode === "critique" ? "work check" : "guided explanation"}`;
+      document.getElementById("nexus-ai-output").textContent = output;
+      panel.hidden = false;
+      document.getElementById("nexus-command-trace").textContent = `Processed on this device · ${LocalAI.profile().label} · no cloud prompt sent`;
+      this.setResult("Guidance is ready below.");
+      return true;
+    }
+    if (parsed.intent === "browser-review") {
+      await this.remember(originalCommand);
+      this.traceCapability({ label:"Browser intelligence", scope:"Tabs, groups, workspaces and bookmarks", confirmation:"review" }, originalCommand);
+      this.openPanel("optimizer-flyout", "Opened Browser Intelligence. Duplicate and topic-group suggestions remain a preview until you choose an action.");
+      return true;
+    }
+    if (parsed.intent === "find-resource") {
+      await this.remember(originalCommand);
+      const resources = await engine.savedResources(parsed.query);
+      this.renderResources(resources, parsed.query);
+      document.getElementById("nexus-command-trace").textContent = `Searched your bookmarks · open tabs · saved workspaces · “${parsed.query}”`;
+      this.setResult(resources.length ? "Choose the exact saved resource to open." : "No confident saved-resource match was found.", resources.length ? "Ready" : "Needs input");
+      return true;
+    }
+    if (parsed.intent === "generated-theme") {
+      const label = parsed.topic || parsed.subject?.label || "Focused work";
+      await this.remember(originalCommand);
+      this.openPanel("pomodoro-flyout", "Generated three fresh study atmospheres. Nothing changes until you choose one.");
+      await Pomodoro.setMission(label, { suggestTheme:false });
+      AdaptiveThemes.propose(label, { regenerate:true });
+      document.getElementById("nexus-command-trace").textContent = `Generated locally from subject · time · current environment · “${label}”`;
+      return true;
+    }
+    if (parsed.intent !== "focus-plan") return false;
+
+    if (!parsed.subject) {
+      this.askFollowup({ question:"Which subject should become the main priority?", placeholder:"For example: Maths", resume:answer => this.runCommand(`${originalCommand} ${answer}`) });
+      return true;
+    }
+    if (/\bchapters?\b/i.test(originalCommand) && !parsed.chapters) {
+      this.askFollowup({ question:"Which chapter or chapter range?", placeholder:"For example: chapters 3 to 7", resume:answer => this.runCommand(`${originalCommand} ${answer}`) });
+      return true;
+    }
+    if (parsed.buildsDraft && !parsed.deadline) {
+      this.askFollowup({ question:"By when must this focus plan be finished?", placeholder:"For example: Friday, tomorrow, or 2026-09-18", resume:answer => this.runCommand(`${originalCommand} by ${answer}`) });
+      return true;
+    }
+
+    const label = this.focusLabel(parsed);
+    const duration = parsed.duration || 25;
+    const chapterQuery = parsed.chapters?.values?.length
+      ? `chapters ${parsed.chapters.values.join(" ")}`
+      : parsed.chapters
+        ? `chapter ${parsed.chapters.start}${parsed.chapters.end === parsed.chapters.start ? "" : ` to ${parsed.chapters.end}`}`
+        : "";
+    const resourceQuery = ["Cambridge", parsed.subject.label, chapterQuery].filter(Boolean).join(" ");
+    const resources = await engine.savedResources(resourceQuery);
+    this.renderResources(resources, resourceQuery);
+    await this.remember(originalCommand);
+    document.getElementById("nexus-command-trace").textContent = `Understood focus plan · ${label} · ${parsed.deadline?.label || "this session"} · review first`;
+    const canDraftSchedule = parsed.buildsDraft && typeof Schedule !== "undefined" && !!Schedule.active;
+    const planningStep = canDraftSchedule
+      ? `Draft only the requested chapter sessions through ${parsed.deadline.label}; the calendar will still require a separate Apply action.`
+      : parsed.buildsDraft
+        ? "Prepare the exact focus mission now. The timetable draft will be skipped if no active profile is available; no unrelated schedule entry will be changed."
+      : "Leave the rest of your timetable unchanged.";
+    return this.previewPlan({
+      title: `Launch ${label}`,
+      steps: `Set the focus target and ${duration}-minute timer. ${planningStep} Generate three new visual schemes for you to choose from. ${resources.length ? `Keep ${resources.length} matching saved resource${resources.length === 1 ? "" : "s"} ready below.` : "No unrelated resource will be opened."}`,
+      run: async () => {
+        let scheduleMessage = parsed.buildsDraft ? "No timetable profile was available, so your existing schedule was left unchanged." : "Your timetable was left unchanged.";
+        if (canDraftSchedule) {
+          try {
+            const draft = await Schedule.buildFocusedPlan({ title:label, subject:parsed.subject.label, chapters:parsed.chapters, deadline:parsed.deadline.key, minutes:duration });
+            scheduleMessage = draft.length
+              ? `${draft.length} exact chapter block${draft.length === 1 ? " is" : "s are"} waiting in Schedule for review.`
+              : "No genuine flexible block was available before the deadline, so no calendar change was proposed.";
+          } catch (error) {
+            scheduleMessage = "The timetable draft could not be prepared, so the existing schedule was left unchanged.";
+            window.HQEarlyDiagnostics?.record?.("focus-plan", error?.message || error, "js/nexus.js");
+          }
+        }
+        this.openPanel("pomodoro-flyout", `${label} is prepared. ${scheduleMessage} Choose one of the three generated atmospheres.`);
+        await Pomodoro.setMission(label, { suggestTheme:false });
+        Pomodoro.setMinutes(duration);
+        AdaptiveThemes.propose(label, { regenerate:true });
+        if (!Pomodoro.running) await Pomodoro.toggle();
+      },
+    });
+  },
+
+  async tryLocalModel(command) {
+    if (typeof LocalAI === "undefined" || !LocalAI.isLoadedThisSession()) return false;
+    const capabilities = this.capabilityRegistry();
+    const interpretation = await LocalAI.interpretCommand(command, capabilities.map(item => item.id));
+    if (interpretation.needsClarification && interpretation.question) {
+      this.askFollowup({ question:String(interpretation.question).slice(0,180), resume:answer => this.runCommand(`${command} ${answer}`) });
+      return true;
+    }
+    const capability = capabilities.find(item => item.id === interpretation.intent);
+    if (capability) {
+      await this.remember(command);
+      this.traceCapability({ ...capability, label:`On-device interpretation → ${capability.label}` }, command);
+      await capability.run();
+      return true;
+    }
+    const subject = HQCommandEngine.subjectFor(String(interpretation.topic || command).toLowerCase());
+    const chapters = Number.isFinite(Number(interpretation.chapterStart))
+      ? { start:Number(interpretation.chapterStart), end:Number(interpretation.chapterEnd || interpretation.chapterStart) }
+      : null;
+    if (["focus-plan","find-resource","generated-theme","browser-review","study-help"].includes(interpretation.intent)) {
+      return this.handleIntelligentIntent({
+        intent:interpretation.intent,
+        text:command,
+        subject,
+        chapters,
+        duration:Number(interpretation.durationMinutes) || null,
+        deadline:HQCommandEngine.deadlineFor(`by ${interpretation.deadline || ""}`),
+        query:interpretation.query || HQCommandEngine.resourceQuery(command,subject,chapters),
+        topic:interpretation.topic || subject?.label || command,
+        changesSchedule:/\b(reschedule|replan|prioriti[sz]e|move|change)\b/.test(command),
+        buildsDraft:/\b(reschedule|replan|prioriti[sz]e|move|change|grind|practice|complete|finish|work through)\b/.test(command),
+      }, command);
+    }
+    return false;
   },
 
   renderRecents(recent = []) {
@@ -288,6 +525,9 @@ const Nexus = {
         return this.setResult("Deep Work is already disabled.");
       }
 
+      const intelligentIntent = typeof HQCommandEngine !== "undefined" ? HQCommandEngine.parse(command) : null;
+      if (intelligentIntent && await this.handleIntelligentIntent(intelligentIntent, command)) return;
+
       // Named services precede generic message terms in registry order.
       const capability = this.capabilityRegistry().find(item => item.match.test(command));
       if (capability) {
@@ -296,7 +536,9 @@ const Nexus = {
         return await capability.run();
       }
 
-      this.setResult("I couldn't match that safely. Try Gmail, calendar, notes, focus, tabs, bookmarks, study, ventures, schedules, stats, settings, or a named message service.", "No match");
+      if (await this.tryLocalModel(command)) return;
+
+      this.setResult("I couldn't map that safely. Try a subject focus plan, a saved-resource search, Gmail, calendar, notes, tabs, bookmarks, study, ventures, schedules, stats, settings, or a named message service. If the optional local model is loaded, Nexus also uses it to interpret unfamiliar wording.", "No match");
     } catch (error) {
       console.error("Nexus command failed:", error);
       this.setResult("That action could not be completed. Nothing else was changed.", "Action failed");
@@ -385,6 +627,21 @@ const Nexus = {
     document.getElementById("nexus-mission-run").onclick = () => this.runMission();
     document.getElementById("nexus-plan-run").onclick = () => this.confirmPlan();
     document.getElementById("nexus-plan-cancel").onclick = () => this.cancelPlan();
+    document.getElementById("nexus-followup").addEventListener("submit", event => {
+      event.preventDefault();
+      this.submitFollowup(document.getElementById("nexus-followup-input").value);
+    });
+    document.getElementById("nexus-followup-cancel").onclick = () => this.cancelFollowup();
+    document.getElementById("nexus-ai-copy").onclick = async () => {
+      const text = document.getElementById("nexus-ai-output").textContent;
+      if (!text) return;
+      try {
+        await navigator.clipboard.writeText(text);
+        this.setResult("Study guidance copied.");
+      } catch {
+        this.setResult("Clipboard access was blocked. Select the guidance text and copy it manually.", "Copy blocked");
+      }
+    };
     const { hq_nexus_recent = [] } = await chrome.storage.local.get("hq_nexus_recent");
     this.renderRecents(Array.isArray(hq_nexus_recent) ? hq_nexus_recent : []);
     document.getElementById("nexus-clear-recents").onclick = async () => {
