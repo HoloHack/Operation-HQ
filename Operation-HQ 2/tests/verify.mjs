@@ -474,7 +474,7 @@ const intelligenceState = {
 };
 const intelligenceContext = vm.createContext({
   chrome: { storage: { local: { async get(keys) { return Object.fromEntries(keys.map(key => [key, intelligenceState[key]])); } } } },
-  Date,
+  Date: class extends Date { constructor(...args) { super(...(args.length ? args : [2026, 8, 15, 12])); } },
   console,
 });
 vm.runInContext(intelligenceSource, intelligenceContext, { filename: "hq-intelligence.js" });
@@ -727,7 +727,7 @@ assert.deepEqual(Array.from(Classifier.classify({ title:"Python functions explai
 assert(read("js/bookmarks.js").includes("Same-site clustering is intentionally retired"), "Platform-only bookmark folders are still enabled");
 assert(read("js/bookmarks.js").includes("cleanupManagedEmptyFolders") && !read("js/bookmarks.js").includes("cleanupEmptyFolders("), "Bookmark cleanup is not restricted to the managed registry");
 assert(read("js/bookmarks.js").includes("runExclusive") && read("js/bookmarks.js").includes("moveAndRecord"), "Bookmark mutations lack an operation lock or success-only inverse log");
-assert(read("js/background.js").includes('message?.type !== "hq:bookmarks:lock"') && read("js/bookmarks.js").includes('type: "hq:bookmarks:lock"'), "Bookmark mutation lock does not span separate new-tab pages");
+assert(read("js/background.js").includes('navigator.locks.request("hq-bookmark-mutations"') && read("js/bookmarks.js").includes('navigator.locks.request("hq-bookmark-mutations"'), "Bookmark mutations must share one browser-managed lock");
 assert(read("js/bookmarks.js").includes("[tree[0].children[0]]"), "Full bookmark sorting can escape the Bookmark Bar root");
 assert(read("js/background.js").includes("Classifier.normalizePath(path, { allowOperational: false })"), "Manual bookmark learning can escape the curated taxonomy");
 assert(html.includes('id="bookmark-review-board"') && html.includes("Zero-wrong-placement gate"), "Uncertain bookmarks lack an explicit accuracy gate");

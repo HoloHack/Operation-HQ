@@ -41,9 +41,9 @@ const chrome = {
   storage: { local: {
     async get(keys) {
       const names = Array.isArray(keys) ? keys : typeof keys === "string" ? [keys] : Object.keys(keys || {});
-      return Object.fromEntries(names.map(key => [key, storage[key]]));
+      return Object.fromEntries(names.map(key => [key, structuredClone(storage[key])]));
     },
-    async set(values) { Object.assign(storage, values); },
+    async set(values) { Object.assign(storage, structuredClone(values)); },
   } },
   bookmarks: {
     async getTree() { return [treeNode("0")]; },
@@ -60,7 +60,7 @@ const chrome = {
   },
 };
 
-const context = vm.createContext({ chrome, URL, Set, Map, AbortController, DOMParser: class {}, fetch, crypto: webcrypto, console, setTimeout, clearTimeout });
+const context = vm.createContext({ navigator, chrome, URL, Set, Map, AbortController, DOMParser: class {}, fetch, crypto: webcrypto, console, setTimeout, clearTimeout });
 vm.runInContext(source("classifier.js"), context, { filename: "classifier.js" });
 vm.runInContext(source("bookmarks.js"), context, { filename: "bookmarks.js" });
 const Classifier = vm.runInContext("Classifier", context);
@@ -183,8 +183,8 @@ add({ id:"legacy-utilities", parentId:"1", title:"Utilities & Misc" });
 add({ id:"legacy-queue", parentId:"legacy-utilities", title:"Review Queue" });
 add({ id:"legacy-ambiguous", parentId:"legacy-queue", title:"Watch this", url:"https://youtube.com/watch?v=legacy" });
 await Bookmarks.applySort();
-assert.equal(nodes.get("legacy-ambiguous").parentId, "1", "A legacy-held ambiguous link must be released to the Bookmark Bar");
-assert.equal(nodes.has("legacy-queue"), false, "The retired Review Queue folder must be removed after evacuation");
+assert.equal(nodes.get("legacy-ambiguous").parentId, "legacy-queue", "A name alone cannot prove HQ owns a legacy folder");
+assert.equal(nodes.has("legacy-queue"), true, "Unregistered legacy folders must be preserved");
 assert.deepEqual(Array.from(storage[Bookmarks.DECISIONS_KEY], item => item.bm.id), ["legacy-ambiguous"]);
 
 // Exact undo restores only bookmarks still at the transaction destination.

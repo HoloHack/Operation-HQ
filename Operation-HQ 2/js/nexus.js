@@ -37,11 +37,10 @@ const Nexus = {
     return document.querySelector(`.dock-btn[data-panel="${panelId}"]`);
   },
 
-  openPanel(panelId, message) {
-    const button = this.panelButton(panelId);
-    if (!button) throw new Error(`Panel not available: ${panelId}`);
-    button.click();
+  async openPanel(panelId, message) {
+    if (!window.HQPanels?.open || !(await window.HQPanels.open(panelId))) throw new Error(`Panel not available: ${panelId}. Check Safe Mode or retry loading it.`);
     this.setResult(message || "Opened.");
+    return true;
   },
 
   async openUrl(url, label) {
@@ -220,7 +219,7 @@ const Nexus = {
     if (parsed.intent === "browser-review") {
       await this.remember(originalCommand);
       this.traceCapability({ label:"Browser intelligence", scope:"Tabs, groups, workspaces and bookmarks", confirmation:"review" }, originalCommand);
-      this.openPanel("optimizer-flyout", "Opened Browser Intelligence. Duplicate and topic-group suggestions remain a preview until you choose an action.");
+      await this.openPanel("optimizer-flyout", "Opened Browser Intelligence. Duplicate and topic-group suggestions remain a preview until you choose an action.");
       return true;
     }
     if (parsed.intent === "find-resource") {
@@ -234,7 +233,7 @@ const Nexus = {
     if (parsed.intent === "generated-theme") {
       const label = parsed.topic || parsed.subject?.label || "Focused work";
       await this.remember(originalCommand);
-      this.openPanel("pomodoro-flyout", "Generated three fresh study atmospheres. Nothing changes until you choose one.");
+      await this.openPanel("pomodoro-flyout", "Generated three fresh study atmospheres. Nothing changes until you choose one.");
       await Pomodoro.setMission(label, { suggestTheme:false });
       AdaptiveThemes.propose(label, { regenerate:true });
       document.getElementById("nexus-command-trace").textContent = `Generated locally from subject · time · current environment · “${label}”`;
@@ -247,11 +246,11 @@ const Nexus = {
       return true;
     }
     if (/\bchapters?\b/i.test(originalCommand) && !parsed.chapters) {
-      this.askFollowup({ question:"Which chapter or chapter range?", placeholder:"For example: chapters 3 to 7", resume:answer => this.runCommand(`${originalCommand} ${answer}`) });
+      this.askFollowup({ question:"Which chapter or chapter range?", placeholder:"For example: chapters 3 to 7", resume:answer => this.handleIntelligentIntent({ ...parsed, chapters:engine.chapterRange(`chapters ${String(answer).replace(/^\s*chapters?\s*/i, "")}`) }, originalCommand) });
       return true;
     }
     if (parsed.buildsDraft && !parsed.deadline) {
-      this.askFollowup({ question:"By when must this focus plan be finished?", placeholder:"For example: Friday, tomorrow, or 2026-09-18", resume:answer => this.runCommand(`${originalCommand} by ${answer}`) });
+      this.askFollowup({ question:"By when must this focus plan be finished?", placeholder:"For example: Friday, tomorrow, or 2026-10-02", resume:answer => this.handleIntelligentIntent({ ...parsed, deadline:engine.deadlineFor(`by ${answer}`) }, originalCommand) });
       return true;
     }
 
@@ -289,7 +288,7 @@ const Nexus = {
             window.HQEarlyDiagnostics?.record?.("focus-plan", error?.message || error, "js/nexus.js");
           }
         }
-        this.openPanel("pomodoro-flyout", `${label} is prepared. ${scheduleMessage} Choose one of the three generated atmospheres.`);
+        await this.openPanel("pomodoro-flyout", `${label} is prepared. ${scheduleMessage} Choose one of the three generated atmospheres.`);
         await Pomodoro.setMission(label, { suggestTheme:false });
         Pomodoro.setMinutes(duration);
         AdaptiveThemes.propose(label, { regenerate:true });
@@ -371,10 +370,10 @@ const Nexus = {
       { id:"workspaces", label:"Workspaces", aliases:["open workspaces","browser session","tab set"], scope:"Chrome tabs", confirmation:"restore opens new window", match:/\b(workspace|workspaces|browser session|tab set)\b/, run:() => this.openPanel("optimizer-flyout","Opened Browser Workspaces. Restoring creates a separate window and keeps this session intact.") },
       { id:"tabs", label:"Tab review", aliases:["clean tabs","duplicate tabs","tab optimiser"], scope:"Chrome tabs", confirmation:"review", match:/\b(tab|tabs|duplicate|optimizer|clean)\b/, run:() => this.openPanel("optimizer-flyout","Opened Tab Review. Nexus will not close tabs without your confirmation.") },
       { id:"bookmarks", label:"Bookmarks", aliases:["open bookmarks","sort bookmarks","saved pages"], scope:"Chrome bookmarks", confirmation:"review", match:/\b(bookmark|bookmarks|saved page)\b/, run:() => this.openPanel("bookmarks-flyout","Opened bookmarks.") },
-      { id:"research-library", label:"Research pipeline", aliases:["open research","show sources","research library","source cards"], scope:"User-entered local source metadata", confirmation:"none", match:/\b(research|sources?|citations?|references?)\b/, run:async() => { this.openPanel("assignments-flyout","Opened Study OS. Choose Research to inspect source provenance and notes."); setTimeout(() => StudyOS?.showView?.("research"), 0); } },
+      { id:"research-library", label:"Research pipeline", aliases:["open research","show sources","research library","source cards"], scope:"User-entered local source metadata", confirmation:"none", match:/\b(research|sources?|citations?|references?)\b/, run:async() => { await this.openPanel("assignments-flyout","Opened Study OS. Choose Research to inspect source provenance and notes."); StudyOS.showView("research"); } },
       { id:"recall", label:"Recall Lab", aliases:["open recall","revision cards","flashcards","spaced repetition"], scope:"Local recall cards", confirmation:"reviews only reschedule the graded card", match:/\b(recall|flashcards?|spaced repetition|revision cards?)\b/, run:() => this.openPanel("srs-flyout","Opened Recall Lab.") },
       { id:"study", label:"Study OS", aliases:["open study","study command centre","what should i study"], scope:"Local assignments, exams, sources and tasks", confirmation:"mission launch requires review", match:/\b(study|study os|study command|what.*study)\b/, run:() => this.openPanel("assignments-flyout","Opened Study OS. It will choose only from your real local commitments.") },
-      { id:"assignments", label:"Assignment centre", aliases:["open assignments","assessment deadlines","assignment planner"], scope:"Local study planning", confirmation:"calendar plans require review", match:/\b(assignments?|assessments?|deadlines?)\b/, run:async() => { this.openPanel("assignments-flyout","Opened Study OS. Calendar sessions remain review-only."); setTimeout(() => StudyOS?.showView?.("assignments"), 0); } },
+      { id:"assignments", label:"Assignment centre", aliases:["open assignments","assessment deadlines","assignment planner"], scope:"Local study planning", confirmation:"calendar plans require review", match:/\b(assignments?|assessments?|deadlines?)\b/, run:async() => { await this.openPanel("assignments-flyout","Opened Study OS. Calendar sessions remain review-only."); StudyOS.showView("assignments"); } },
       { id:"ventures", label:"Venture dashboard", aliases:["open ventures","projects","build dashboard"], scope:"Local venture data", confirmation:"none", match:/\b(venture|project|build dashboard)\b/, run:() => this.openPanel("venture-dash-flyout","Opened the Venture Dashboard.") },
       { id:"schedule", label:"Schedule", aliases:["open schedule","routine","timetable"], scope:"Local timetable", confirmation:"none", match:/\b(schedule|routine|timetable)\b/, run:() => this.openPanel("schedule-flyout","Opened schedules.") },
       { id:"stats", label:"Weekly signals", aliases:["open stats","weekly review","progress"], scope:"Local activity", confirmation:"none", match:/\b(stats|signals|progress|review)\b/, run:() => this.openPanel("stats-flyout","Opened Weekly Signals.") },
@@ -448,6 +447,7 @@ const Nexus = {
     document.getElementById("nexus-plan-steps").textContent = plan.steps;
     document.getElementById("nexus-plan-preview").hidden = false;
     this.setResult("Review the exact change, then confirm or cancel.", "Review required");
+    return true; // Tell the command router this intent was fully handled.
   },
 
   cancelPlan() {
@@ -457,7 +457,8 @@ const Nexus = {
   },
 
   async confirmPlan() {
-    if (!this.pendingPlan) return;
+    if (!this.pendingPlan || this.executingPlan) return;
+    this.executingPlan = true;
     const plan = this.pendingPlan;
     const button = document.getElementById("nexus-plan-run");
     button.disabled = true;
@@ -472,6 +473,7 @@ const Nexus = {
       console.error("Nexus plan failed:", error);
       this.setResult("The action stopped safely. Review the current state before retrying.", "Action failed");
     } finally {
+      this.executingPlan = false;
       button.disabled = false;
     }
   },
@@ -482,6 +484,13 @@ const Nexus = {
       this.setResult("Type a command, or choose a mission or handoff below.", "Waiting");
       return;
     }
+
+    if (this.routing || this.executingPlan) {
+      this.setResult("Wait for the current command to finish before starting another.", "Working");
+      return;
+    }
+    this.routing = true;
+    if (this.pendingPlan) this.cancelPlan();
 
     this.setResult("Routing locally…", "Working");
     try {
@@ -542,6 +551,8 @@ const Nexus = {
     } catch (error) {
       console.error("Nexus command failed:", error);
       this.setResult("That action could not be completed. Nothing else was changed.", "Action failed");
+    } finally {
+      this.routing = false;
     }
   },
 
@@ -574,7 +585,7 @@ const Nexus = {
         mode.dispatchEvent(new Event("change", { bubbles: true }));
         if (typeof Pomodoro !== "undefined" && !Pomodoro.running) await Pomodoro.toggle();
       }
-      this.openPanel(mission.panel, `${mission.title} is active${mission.minutes ? ` with a ${mission.minutes}-minute timer` : ""}.`);
+      await this.openPanel(mission.panel, `${mission.title} is active${mission.minutes ? ` with a ${mission.minutes}-minute timer` : ""}.`);
       document.getElementById("nexus-mission-preview").hidden = true;
       document.querySelectorAll(".nexus-mission").forEach(button => {
         button.classList.remove("selected");
