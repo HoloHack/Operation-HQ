@@ -9,6 +9,7 @@ const INBOX_NAME = "Inbox";
 const Bookmarks = {
   MANAGED_KEY: "hq_bookmark_managed_folders_v2",
   UNDO_KEY: "hq_bookmark_undo_v2",
+  JOURNAL_KEY: "hq_bookmark_pending_v1",
   DECISIONS_KEY: "hq_bookmark_decisions_v1",
   existingFolders: [],
   decisionItems: [],
@@ -75,38 +76,26 @@ const Bookmarks = {
     }
     this.setBusy(true, label);
     this.operationToken = crypto.randomUUID();
-    let ownsGlobalLock = false;
-    let ownsBulkFlag = false;
     try {
-      if (chrome.runtime?.sendMessage) {
-        try {
-          const response = await chrome.runtime.sendMessage({ type: "hq:bookmarks:lock", action: "acquire", token: this.operationToken, label });
-          if (response && response.granted === false) {
-            this.log(`${response.label || "Another bookmark operation"} is running in a different new tab. Nothing was changed.`);
-            return { blocked: true };
-          }
-          ownsGlobalLock = response?.granted === true;
-        } catch { /* local lock remains a safe fallback during service-worker restart */ }
-      }
-      await chrome.storage.local.set({ hq_bulk_sort_active: { token: this.operationToken, expiresAt: Date.now() + 120000 } });
-      ownsBulkFlag = true;
-      return await operation();
+      if (!globalThis.navigator?.locks?.request) throw new Error("Browser coordination is unavailable. No bookmarks were changed.");
+      return await navigator.locks.request("hq-bookmark-mutations", { ifAvailable: true }, async lock => {
+        if (!lock) { this.log("Another bookmark operation is running. Nothing was changed."); return { blocked: true }; }
+        const saved = await chrome.storage.local.get(this.JOURNAL_KEY);
+        if (saved[this.JOURNAL_KEY]?.moves?.length && label !== "Undo") {
+          throw new Error("An interrupted sort has recovery steps. Use Undo before starting another sort.");
+        }
+        this.pendingTransaction = null;
+        this.journalFailed = false;
+        return await operation();
+      });
     } catch (error) {
       this.log(`${label} stopped safely: ${String(error?.message || error)}`);
-      await this.recordAudit("operation-error", { label, message: String(error?.message || error).slice(0, 400) });
+      try { await this.recordAudit("operation-error", { label, message: String(error?.message || error).slice(0, 400) }); } catch { /* Storage failure must not trap the controls. */ }
       return { error: true };
     } finally {
-      if (ownsBulkFlag) {
-        const active = await chrome.storage.local.get("hq_bulk_sort_active");
-        if (active.hq_bulk_sort_active?.token === this.operationToken) await chrome.storage.local.set({ hq_bulk_sort_active: false });
-      }
-      if (ownsGlobalLock) {
-        try { await chrome.runtime.sendMessage({ type: "hq:bookmarks:lock", action: "release", token: this.operationToken }); }
-        catch { /* an expired/restarted worker has no lock left to release */ }
-      }
       this.operationToken = "";
       this.setBusy(false);
-      await this.updateUndoButton();
+      try { await this.updateUndoButton(); } catch { this.log("Recovery history could not be read. Try again when storage is available."); }
     }
   },
 
@@ -461,7 +450,9 @@ const Bookmarks = {
               const decision = byId.get(String(item.bm.id));
               const path = Classifier.normalizePath([decision?.root, decision?.sub].filter(Boolean), { allowOperational:false });
               const confidence = String(decision?.confidence || "low").toLowerCase();
-              if (path && confidence === "high") {
+              // Model confidence is not independent evidence. A model-only
+              // destination stays a suggestion until the user confirms it.
+              if (path && confidence === "high" && Classifier.classify({ ...item.bm, title: `${item.bm.title} ${item.context || ""}` }, learnedMap, legitFolders).path?.join("\n") === path.join("\n")) {
                 const targetParent = await this.getOrCreateFolderPath(path, barId);
                 await this.moveAndRecord(item.bm, targetParent, path, barId, moves);
                 locallyClassified += 1;
@@ -529,12 +520,14 @@ const Bookmarks = {
 
   async cleanupManagedEmptyFolders(barId) {
     let registry = await this.readManagedRegistry();
+    const protectedIds = new Set((await this.readUndoStack()).flatMap(transaction => transaction.moves || []).map(move => String(move.fromParentId)));
     let removed = 0;
     let changed = true;
     while (changed) {
       changed = false;
       const ordered = [...registry].sort((a, b) => (b.path?.length || 0) - (a.path?.length || 0));
       for (const entry of ordered) {
+        if (protectedIds.has(String(entry.id))) continue;
         try {
           const [node] = await chrome.bookmarks.get(entry.id);
           if (!node || node.url) { registry = registry.filter(item => item.id !== entry.id); continue; }
@@ -555,27 +548,8 @@ const Bookmarks = {
   },
 
   async cleanupLegacyHoldingFolders(barId) {
-    // Earlier Operation HQ builds created these exact holding folders. They
-    // are retired in v7. Delete only an empty exact legacy location—never a
-    // populated folder or an arbitrary similarly named personal folder.
-    const rootChildren = await chrome.bookmarks.getChildren(barId);
-    const candidates = rootChildren.filter(node => !node.url && ["Review Queue", "Uncategorized"].includes(node.title));
-    const utilities = rootChildren.find(node => !node.url && node.title === "Utilities & Misc");
-    if (utilities) {
-      const nested = await chrome.bookmarks.getChildren(utilities.id);
-      const queue = nested.find(node => !node.url && node.title === "Review Queue");
-      if (queue) candidates.push(queue);
-    }
-    let removed = 0;
-    for (const folder of candidates) {
-      try {
-        if ((await chrome.bookmarks.getChildren(folder.id)).length === 0) {
-          await chrome.bookmarks.remove(folder.id);
-          removed += 1;
-        }
-      } catch { /* folder changed while the accuracy pass was running */ }
-    }
-    return removed;
+    // A matching name is not proof of ownership, including old catch-all names.
+    return this.cleanupManagedEmptyFolders(barId);
   },
 
   isLegacyHoldingPath(path) {
@@ -586,8 +560,9 @@ const Bookmarks = {
 
   async releaseLegacyHoldingBookmarks(items, barId, moves) {
     let released = 0;
+    const managedIds = new Set((await this.readManagedRegistry()).map(entry => String(entry.id)));
     for (const item of items) {
-      if (!this.isLegacyHoldingPath(item?.bm?.sourcePath)) continue;
+      if (!this.isLegacyHoldingPath(item?.bm?.sourcePath) || !managedIds.has(String(item.bm.parentId))) continue;
       if (await this.moveAndRecord(item.bm, barId, [], barId, moves)) released += 1;
       item.bm = { ...item.bm, parentId:String(barId), sourcePath:[] };
     }
@@ -606,25 +581,42 @@ const Bookmarks = {
   },
 
   async moveAndRecord(bm, targetParentId, targetPath, barId, moves) {
-    if (bm.parentId === targetParentId) return false;
-    const inverse = { id: bm.id, fromParentId: bm.parentId, fromPath: await this.folderPath(bm.parentId, barId), toParentId: targetParentId, toPath: [...targetPath] };
-    await chrome.bookmarks.move(bm.id, { parentId: targetParentId });
-    moves.push(inverse); // only successful mutations are undoable
+    if (this.journalFailed) throw new Error("Recovery storage failed; further moves are paused.");
+    const [current] = await chrome.bookmarks.get(bm.id);
+    if (!current?.url || current.url !== bm.url || String(current.parentId) !== String(bm.parentId)) throw new Error("Bookmark changed after preview. Refresh before sorting it.");
+    if (String(current.parentId) === String(targetParentId)) return false;
+    const inverse = { id: current.id, url: current.url, fromParentId: current.parentId, fromIndex: current.index, fromPath: await this.folderPath(current.parentId, barId), toParentId: targetParentId, toPath: [...targetPath] };
+    const transaction = this.pendingTransaction ||= { id: this.operationToken || crypto.randomUUID(), kind: "interrupted-sort", createdAt: Date.now(), moves: [] };
+    transaction.moves.push(inverse);
+    // Persist the inverse BEFORE Chrome can change the tree. A tab closed at
+    // any subsequent point leaves a recoverable transaction, not an orphan move.
+    try { await chrome.storage.local.set({ [this.JOURNAL_KEY]: transaction }); }
+    catch (error) { this.journalFailed = true; transaction.moves.pop(); throw error; }
+    try { await chrome.bookmarks.move(current.id, { parentId: targetParentId }); }
+    catch (error) {
+      transaction.moves.pop();
+      try { await chrome.storage.local.set({ [this.JOURNAL_KEY]: transaction }); }
+      catch { this.journalFailed = true; }
+      throw error;
+    }
+    moves.push(inverse);
     return true;
   },
 
   async readUndoStack() {
-    const saved = await chrome.storage.local.get([this.UNDO_KEY, "hq_bookmark_undo"]);
-    if (Array.isArray(saved[this.UNDO_KEY])) return saved[this.UNDO_KEY];
-    if (Array.isArray(saved.hq_bookmark_undo) && saved.hq_bookmark_undo.length) return [{ id: `legacy-${Date.now()}`, kind: "legacy-sort", createdAt: Date.now(), moves: saved.hq_bookmark_undo }];
-    return [];
+    const saved = await chrome.storage.local.get([this.UNDO_KEY, this.JOURNAL_KEY, "hq_bookmark_undo"]);
+    const stack = Array.isArray(saved[this.UNDO_KEY]) ? saved[this.UNDO_KEY] :
+      (Array.isArray(saved.hq_bookmark_undo) && saved.hq_bookmark_undo.length ? [{ id: "legacy-sort", kind: "legacy-sort", createdAt: Date.now(), moves: saved.hq_bookmark_undo }] : []);
+    const pending = saved[this.JOURNAL_KEY];
+    return pending?.moves?.length ? [...stack.filter(item => item.id !== pending.id), pending] : stack;
   },
 
   async commitTransaction(kind, moves) {
     if (!moves.length) return null;
     const stack = await this.readUndoStack();
-    const transaction = { id: crypto.randomUUID(), kind, createdAt: Date.now(), moves };
-    await chrome.storage.local.set({ [this.UNDO_KEY]: [...stack, transaction].slice(-8), hq_bookmark_undo: [] });
+    const transaction = { id: this.pendingTransaction?.id || crypto.randomUUID(), kind, createdAt: Date.now(), moves };
+    await chrome.storage.local.set({ [this.UNDO_KEY]: [...stack.filter(item => item.id !== transaction.id), transaction].slice(-8), [this.JOURNAL_KEY]: null, hq_bookmark_undo: [] });
+    this.pendingTransaction = null;
     return transaction;
   },
 
@@ -664,7 +656,7 @@ const Bookmarks = {
     this.setProgress(0, 1);
     this.log("Analysing titles, URLs, known services and learned corrections…");
     const { barId } = await this.getAllBookmarks();
-    await this.migrateEmojiRootNames(barId);
+    // Never rename or merge user folders as a side effect of sorting.
     const { plan } = await this.computePlan(scopeParentId);
     const total = plan.length || 1;
     const moves = [];
@@ -785,26 +777,28 @@ const Bookmarks = {
       const { barId } = await this.getAllBookmarks();
       let restored = 0;
       let skipped = 0;
+      const retry = [];
       for (const move of [...transaction.moves].reverse()) {
         try {
           const [bm] = await chrome.bookmarks.get(move.id);
-          if (!bm || (move.toParentId && bm.parentId !== move.toParentId)) { skipped += 1; continue; }
+          if (!bm || (move.url && bm.url !== move.url) || (move.toParentId && bm.parentId !== move.toParentId)) { skipped += 1; continue; }
           let targetId = move.fromParentId;
           try { await chrome.bookmarks.get(targetId); }
           catch {
             if (move.fromPath?.length === 1 && move.fromPath[0] === INBOX_NAME) targetId = await this.getOrCreateInbox(barId);
             else if (Classifier.isManagedPath(move.fromPath)) targetId = await this.getOrCreateFolderPath(move.fromPath, barId);
             else if (this.isLegacyHoldingPath(move.fromPath)) targetId = await this.getOrCreateLegacyFolderPath(move.fromPath, barId);
-            else { skipped += 1; continue; }
+            else { retry.unshift(move); continue; }
           }
-          await chrome.bookmarks.move(move.id, { parentId: targetId });
+          await chrome.bookmarks.move(move.id, { parentId: targetId, ...(Number.isInteger(move.fromIndex) ? { index: move.fromIndex } : {}) });
           restored += 1;
-        } catch { skipped += 1; }
+        } catch { retry.unshift(move); }
       }
-      await chrome.storage.local.set({ [this.UNDO_KEY]: stack, hq_bookmark_undo: [] });
+      if (retry.length) stack.push({ ...transaction, moves: retry });
+      await chrome.storage.local.set({ [this.UNDO_KEY]: stack, [this.JOURNAL_KEY]: null, hq_bookmark_undo: [] });
       const removed = await this.cleanupManagedEmptyFolders(barId);
       await this.recordAudit("undo", { transactionId: transaction.id, restored, skipped, removed });
-      this.log(`Undo complete: ${restored} restored${skipped ? `, ${skipped} left untouched because they changed later` : ""}.`, true);
+      this.log(`Undo: ${restored} restored${skipped ? `, ${skipped} left untouched because they changed later` : ""}${retry.length ? `, ${retry.length} could not be restored—retry Undo` : ""}.`, !retry.length);
       await this.refreshInboxCount();
     });
   },

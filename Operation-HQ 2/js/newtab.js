@@ -522,6 +522,7 @@ function syncWallpaperSceneControl(category, savedMap = {}) {
 
 async function wireLocalAI() {
   const btn = document.getElementById("local-ai-load-btn");
+  const unloadBtn = document.getElementById("local-ai-unload-btn");
   const statusEl = document.getElementById("local-ai-status");
   const progressWrap = document.getElementById("local-ai-progress-bar");
   const progressFill = document.getElementById("local-ai-progress-fill");
@@ -544,6 +545,8 @@ async function wireLocalAI() {
   renderProfile();
 
   async function refreshStatus() {
+    unloadBtn?.classList.toggle("hidden", !LocalAI.isLoadedThisSession());
+    if (profileSelect) profileSelect.disabled = LocalAI.isLoadedThisSession();
     if (!LocalAI.isSupported()) {
       statusEl.textContent = "Not supported — this browser doesn't have WebGPU.";
       btn.disabled = true;
@@ -597,6 +600,17 @@ async function wireLocalAI() {
       progressWrap.classList.add("hidden");
       btn.disabled = false;
     }
+  };
+
+  if (unloadBtn) unloadBtn.onclick = async () => {
+    unloadBtn.disabled = true;
+    runBtn.disabled = true;
+    try {
+      await LocalAI.unload();
+      await refreshStatus();
+      output.textContent = "Local AI unloaded. Your input and downloaded model cache are preserved.";
+    } catch (error) { statusEl.textContent = `Could not unload: ${error.message}`; }
+    finally { unloadBtn.disabled = false; }
   };
 
   input.oninput = () => { runBtn.disabled = !LocalAI.isLoadedThisSession() || !input.value.trim() || LocalAI.isRunning(); };

@@ -15,7 +15,8 @@
 //   done here.
 // - THREE EXPLICIT PROFILES: a fast 1B model, stronger 3B planner, and a
 //   maths-focused 1.5B model. The person chooses before loading; switching
-//   requires a fresh tab so stale GPU memory is never hidden or doubled.
+//   requires unloading the previous model first. One browser-managed lock
+//   permits only one HQ tab to own a model at a time.
 // - NEVER auto-downloads. The multi-hundred-MB download only starts on
 //   an explicit button press in Settings.
 // - Fetches model weights from huggingface.co and WASM libraries from
@@ -38,6 +39,10 @@ const LocalAI = {
   _bridgePromise: null,
   _generation: 0,
   _running: false,
+  _unloading: false,
+  _requestActive: false,
+  _inflight: null,
+  _releaseModelLock: null,
 
   isSupported() {
     return typeof navigator !== "undefined" && !!navigator.gpu;
@@ -56,7 +61,7 @@ const LocalAI = {
 
   async selectProfile(profileId) {
     if (!this.MODEL_PROFILES[profileId]) throw new Error("Unknown local model profile.");
-    if (this._engine) throw new Error("The current model is already loaded. Open a fresh tab before switching models so GPU memory is released cleanly.");
+    if (this._engine || this._loading || this._unloading) throw new Error("Unload the current model before switching profiles.");
     this.profileId = profileId;
     this.MODEL_ID = this.profile().id;
     await chrome.storage.local.set({ [this.PROFILE_KEY]: profileId });
@@ -107,17 +112,25 @@ const LocalAI = {
   // tab session. onProgress receives WebLLM's real {progress, text}
   // reports — no synthetic/fake progress bar.
   async downloadAndLoad(onProgress) {
-    if (this._loading) throw new Error("Already loading — wait for that to finish.");
+    if (this._loading || this._unloading) throw new Error("A model is loading or unloading. Wait for that to finish.");
     if (this._engine) return true; // already loaded this session, nothing to do
     if (!this.isSupported()) throw new Error("This browser doesn't support WebGPU, which local AI requires (Chrome 113+ or Edge).");
 
-    const bridgeReady = await this._waitForBridge();
-    if (!bridgeReady) throw new Error("Local AI library failed to load — try reloading the tab.");
-
     this._loading = true;
     try {
-      this._engine = await window.WebLLM.CreateMLCEngine(this.MODEL_ID, {
-        initProgressCallback: (report) => { if (onProgress) onProgress(report); },
+      if (!navigator.locks?.request) throw new Error("Model memory coordination is unavailable in this browser.");
+      await new Promise((resolve, reject) => {
+        navigator.locks.request("hq-local-model", { ifAvailable: true }, async lock => {
+          if (!lock) throw new Error("Local AI is already loaded in another HQ tab. Unload it there first.");
+          const bridgeReady = await this._waitForBridge();
+          if (!bridgeReady) throw new Error("Local AI library failed to load — try reloading the tab.");
+          this._engine = await window.WebLLM.CreateMLCEngine(this.MODEL_ID, {
+            initProgressCallback: report => { if (onProgress) onProgress(report); },
+          });
+          const lifetime = new Promise(release => { this._releaseModelLock = release; });
+          resolve();
+          await lifetime;
+        }).catch(reject);
       });
       return true;
     } finally {
@@ -126,7 +139,21 @@ const LocalAI = {
   },
 
   isRunning() {
-    return this._running;
+    return this._requestActive;
+  },
+
+  async unload() {
+    if (this._loading || this._unloading) throw new Error("Wait for the current model operation to finish.");
+    if (!this._engine) return;
+    this._unloading = true;
+    try {
+      this.cancelActive();
+      try { await this._inflight; } catch { /* A cancelled response need not succeed. */ }
+      await this._engine.unload();
+      this._engine = null;
+      this._releaseModelLock?.();
+      this._releaseModelLock = null;
+    } finally { this._unloading = false; }
   },
 
   cancelActive() {
@@ -137,21 +164,26 @@ const LocalAI = {
 
   async run({ system, input, temperature = 0.25, maxTokens = 500 }) {
     if (!this._engine) throw new Error("Local AI isn't loaded yet — load it in Settings first.");
+    if (this._requestActive || this._unloading) throw new Error("Local AI is finishing another request. Try again when it stops.");
     const trimmed = String(input || "").slice(0, 9000).trim();
     if (!trimmed) throw new Error("Add real text first.");
     const token = ++this._generation;
     this._running = true;
+    this._requestActive = true;
     try {
-      const reply = await this._engine.chat.completions.create({
+      this._inflight = this._engine.chat.completions.create({
         messages: [{ role: "system", content: system }, { role: "user", content: trimmed }],
         temperature,
         max_tokens: maxTokens,
       });
+      const reply = await this._inflight;
       if (token !== this._generation) throw new Error("Generation cancelled.");
       const result = (reply.choices[0]?.message?.content || "").trim();
       if (!result) throw new Error("The local model returned no usable text.");
       return result;
     } finally {
+      this._inflight = null;
+      this._requestActive = false;
       if (token === this._generation) this._running = false;
     }
   },

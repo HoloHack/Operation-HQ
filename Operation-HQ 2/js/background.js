@@ -12,25 +12,23 @@ importScripts("claude-client.js");
 importScripts("daily-planner.js");
 importScripts("idea-radar.js");
 
-// One cross-page bookmark mutation lease. New-tab pages keep their own local
-// guard too, while this worker prevents two separate HQ tabs from interleaving
-// sorts and overwriting each other's inverse transaction.
-let bookmarkOperationLock = null;
+// Old pages must reload before mutating. Web Locks now coordinate pages and
+// the worker without an expiring in-memory lease or an unsafe local fallback.
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type !== "hq:bookmarks:lock") return false;
-  const now = Date.now();
-  if (bookmarkOperationLock && now - bookmarkOperationLock.acquiredAt > 120000) bookmarkOperationLock = null;
-  if (message.action === "acquire") {
-    if (!bookmarkOperationLock || bookmarkOperationLock.token === message.token) {
-      bookmarkOperationLock = { token: message.token, label: message.label || "Bookmark operation", acquiredAt: now };
-      sendResponse({ granted: true });
-    } else sendResponse({ granted: false, label: bookmarkOperationLock.label });
-  } else if (message.action === "release") {
-    if (bookmarkOperationLock?.token === message.token) bookmarkOperationLock = null;
-    sendResponse({ released: !bookmarkOperationLock });
-  }
+  sendResponse({ granted: false, label: "Reload this HQ tab to use the updated bookmark coordinator" });
   return false;
 });
+
+async function withBookmarkLock(operation) {
+  if (!globalThis.navigator?.locks?.request) throw new Error("Bookmark coordination is unavailable; no changes made.");
+  return navigator.locks.request("hq-bookmark-mutations", { ifAvailable: true }, async lock => {
+    if (!lock) return; // Leave the newly saved bookmark exactly where it is.
+    const saved = await chrome.storage.local.get("hq_bookmark_pending_v1");
+    if (saved.hq_bookmark_pending_v1?.moves?.length) return;
+    return operation();
+  });
+}
 
 // The service worker is the sole Context Bus writer. Every tab sends a
 // narrow patch here; commits are serialized inside ContextBus and merge
@@ -296,15 +294,31 @@ async function scanLegitFolders(barId) {
 }
 
 async function moveSelf(id, parentId) {
+  const [bookmark] = await chrome.bookmarks.get(id);
+  const saved = await chrome.storage.local.get(["hq_bookmark_undo_v2", "hq_bookmark_undo"]);
+  const transaction = {
+    id: crypto.randomUUID(), kind: "automatic-sort", createdAt: Date.now(),
+    moves: [{ id, url: bookmark.url, fromParentId: bookmark.parentId, fromIndex: bookmark.index,
+      fromPath: await bookmarkFolderPath(bookmark.parentId, await getBarId()), toParentId: parentId }],
+  };
+  await chrome.storage.local.set({ hq_bookmark_pending_v1: transaction });
   selfMovedIds.add(id);
-  await chrome.bookmarks.move(id, { parentId });
-  setTimeout(() => selfMovedIds.delete(id), 3000);
+  try {
+    await chrome.bookmarks.move(id, { parentId });
+    const stack = Array.isArray(saved.hq_bookmark_undo_v2) ? saved.hq_bookmark_undo_v2 :
+      (saved.hq_bookmark_undo?.length ? [{ id: "legacy-sort", kind: "legacy-sort", moves: saved.hq_bookmark_undo }] : []);
+    await chrome.storage.local.set({ hq_bookmark_undo_v2: [...stack, transaction].slice(-8), hq_bookmark_pending_v1: null, hq_bookmark_undo: [] });
+  } finally { setTimeout(() => selfMovedIds.delete(id), 3000); }
 }
 
 // --- Real-time sort on bookmark creation ---
 chrome.bookmarks.onCreated.addListener(safely("Bookmark auto-sort", async (id, bookmark) => {
   if (!bookmark.url) return; // it's a folder, ignore
-
+  return withBookmarkLock(async () => {
+  // Event snapshots can be stale by the time the worker wakes up.
+  const [current] = await chrome.bookmarks.get(id);
+  if (!current?.url || current.parentId !== bookmark.parentId || current.url !== bookmark.url) return;
+  bookmark = current;
   const { hq_realtime_sort_enabled } = await chrome.storage.local.get("hq_realtime_sort_enabled");
   if (hq_realtime_sort_enabled === false) return; // user disabled it in settings
   const { hq_bulk_sort_active } = await chrome.storage.local.get("hq_bulk_sort_active");
@@ -328,11 +342,13 @@ chrome.bookmarks.onCreated.addListener(safely("Bookmark auto-sort", async (id, b
     // where the person saved it.
     await markBookmarkDecision({ ...bookmarkWithPath, id }, result);
   }
+  });
 }));
 
 // --- Learn from manual re-files ---
 chrome.bookmarks.onMoved.addListener(safely("Bookmark learning", async (id, moveInfo) => {
   if (selfMovedIds.has(id)) { selfMovedIds.delete(id); return; } // our own real-time move
+  return withBookmarkLock(async () => {
   const { hq_bulk_sort_active } = await chrome.storage.local.get("hq_bulk_sort_active");
   if (bulkBookmarkOperationActive(hq_bulk_sort_active)) return; // ignore moves happening during a current bulk transaction
 
@@ -368,6 +384,7 @@ chrome.bookmarks.onMoved.addListener(safely("Bookmark learning", async (id, move
   map[Classifier.fingerprint(bm)] = validatedPath;
   await chrome.storage.local.set({ hq_learned_domains: map });
   await clearBookmarkDecision(id);
+  });
 }));
 
 chrome.bookmarks.onRemoved.addListener(safely("Bookmark decision cleanup", async id => {

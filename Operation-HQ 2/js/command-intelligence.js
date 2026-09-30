@@ -23,24 +23,17 @@ const HQCommandEngine = {
   },
 
   chapterRange(text) {
-    const range = text.match(/\bchapters?\s*(\d{1,3})\s*(?:-|–|to|through)\s*(\d{1,3})\b/i);
-    if (range) {
-      const start = Number(range[1]);
-      const end = Number(range[2]);
-      if (start >= 0 && end >= start && end - start <= 30) {
-        return { start, end, values:Array.from({ length:end - start + 1 }, (_, index) => start + index), contiguous:true };
-      }
+    const match = text.match(/\bchapters?\s*(\d+(?:\s*(?:-|–|to\b|through\b|,|&|and\b)\s*\d+)*)/i);
+    if (!match || /^\.\d/.test(text.slice(match.index + match[0].length))) return null;
+    const values = [];
+    for (const part of match[1].split(/\s*(?:,|&|\band\b)\s*/i)) {
+      const bounds = part.split(/\s*(?:-|–|\bto\b|\bthrough\b)\s*/i).map(Number);
+      const [start, end = start] = bounds;
+      if (bounds.length > 2 || !Number.isInteger(start) || start < 0 || end < start || end > 999 || end - start >= 30) return null;
+      for (let value = start; value <= end; value++) if (!values.includes(value)) values.push(value);
+      if (values.length > 30) return null;
     }
-    const list = text.match(/\bchapters?\s*(\d{1,3}(?:\s*(?:,|&|\band\b)\s*\d{1,3})+)/i);
-    if (list) {
-      const values = [...list[1].matchAll(/\d{1,3}/g)]
-        .map(match => Number(match[0]))
-        .filter((value, index, all) => value >= 0 && all.indexOf(value) === index)
-        .slice(0, 30);
-      if (values.length > 1) return { start:Math.min(...values), end:Math.max(...values), values, contiguous:false };
-    }
-    const single = text.match(/\bchapters?\s*(\d{1,3})\b/i);
-    return single ? { start:Number(single[1]), end:Number(single[1]), values:[Number(single[1])], contiguous:true } : null;
+    return { start:Math.min(...values), end:Math.max(...values), values, contiguous:values.every((n, i) => !i || n === values[i - 1] + 1) };
   },
 
   dateKey(date) {
@@ -51,7 +44,7 @@ const HQCommandEngine = {
     const iso = text.match(/\b(20\d{2}-\d{2}-\d{2})\b/);
     if (iso) {
       const date = new Date(`${iso[1]}T12:00:00`);
-      if (!Number.isNaN(date.getTime())) return { key: iso[1], label: iso[1] };
+      return !Number.isNaN(date.getTime()) && this.dateKey(date) === iso[1] ? { key: iso[1], label: iso[1] } : null;
     }
     const base = new Date();
     base.setHours(12,0,0,0);
@@ -62,7 +55,7 @@ const HQCommandEngine = {
     }
     const inDays = text.match(/\b(?:within|in)\s+(\d{1,2})\s+days?\b/i);
     if (inDays) {
-      base.setDate(base.getDate() + Math.min(60, Number(inDays[1])));
+      base.setDate(base.getDate() + Number(inDays[1]));
       return { key:this.dateKey(base), label:`in ${inDays[1]} days` };
     }
     const weekdayNames = ["sunday","monday","tuesday","wednesday","thursday","friday","saturday"];
