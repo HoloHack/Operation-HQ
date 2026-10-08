@@ -60,7 +60,7 @@ function updateBookmarkDecisions(mutator) {
   bookmarkDecisionWrite = bookmarkDecisionWrite.catch(() => {}).then(async () => {
     const saved = await chrome.storage.local.get(BOOKMARK_DECISIONS_KEY);
     const current = Array.isArray(saved[BOOKMARK_DECISIONS_KEY]) ? saved[BOOKMARK_DECISIONS_KEY] : [];
-    const next = mutator(current).filter(item => item?.bm?.id && item?.bm?.url).slice(-250);
+    const next = mutator(current).filter(item => item?.bm?.id && item?.bm?.url);
     await chrome.storage.local.set({ [BOOKMARK_DECISIONS_KEY]:next });
   });
   return bookmarkDecisionWrite;

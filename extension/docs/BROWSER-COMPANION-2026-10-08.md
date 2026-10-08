@@ -10,6 +10,7 @@ The hosted dashboard remains at https://operation-hq-command-center.shour-ya11.c
 
 - Opening an ordinary new tab no longer starts Operation HQ's full interface, canvases, editor, charts or AI. The extension is a toolbar companion. Browser alarms and permitted background tools still exist.
 - The popup opens the dashboard or one reusable browser-tools workspace. Repeated or concurrent tool clicks reuse it.
+- Pending bookmark decisions no longer disappear at a 250-item cutoff. Only 20 rows are rendered per page; the full unresolved collection is preserved and reachable. This reduces UI weight without guessing incorrect destinations.
 - A slower tool load cannot replace a later selection. Closing a panel cancels pending panel openings. Programmatic tool launches are idempotent.
 - If saved data belongs to a newer unsupported schema, startup stops before feature writers run. Original data is left intact.
 - Calendar transactions no longer silently cut off actions, text or recurrence. Invalid or oversized input stops atomically; existing events and event-specific undo remain preserved.

@@ -174,3 +174,10 @@ test("managed source folders needed for undo are not removed", async () => {
   await f.book.undo();
   assert.deepEqual(f.children("from").map(n => n.id), ["a", "b", "c"]);
 });
+
+test('large pending collections survive persistence and restore without a 250-item cutoff',async()=>{
+  const f=fixture();const pending=[];
+  for(let i=0;i<320;i++){const bm=f.add({id:`pending-${i}`,parentId:'from',title:`Ambiguous ${i}`,url:`https://example.org/pending/${i}`});pending.push({bm,reasons:['needs evidence']});}
+  await f.book.persistDecisions(pending);assert.equal(f.data[f.book.DECISIONS_KEY].length,320);
+  const fresh=f.page();await fresh.restoreDecisions();assert.equal(fresh.decisionItems.length,320);assert.equal(f.data[f.book.DECISIONS_KEY].length,320);
+});

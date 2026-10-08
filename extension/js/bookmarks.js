@@ -13,6 +13,8 @@ const Bookmarks = {
   DECISIONS_KEY: "hq_bookmark_decisions_v1",
   existingFolders: [],
   decisionItems: [],
+  decisionPage: 0,
+  DECISION_PAGE_SIZE: 20,
   busy: false,
   activeOperation: "",
   operationToken: "",
@@ -64,6 +66,10 @@ const Bookmarks = {
       } else {
         button.disabled = busy || !button.closest(".bookmark-review-controls")?.querySelector("select")?.value;
       }
+    });
+    document.querySelectorAll("[data-bookmark-page]").forEach(button => {
+      const last = Math.max(0, Math.ceil(this.decisionItems.length / this.DECISION_PAGE_SIZE) - 1);
+      button.disabled = busy || (button.dataset.bookmarkPage === "previous" ? this.decisionPage === 0 : this.decisionPage === last);
     });
     const status = this.el("bookmark-operation-state");
     if (status) status.textContent = busy ? `${label} in progress…` : "Ready";
@@ -210,7 +216,7 @@ const Bookmarks = {
     items.forEach(item => {
       if (item?.bm?.id && item?.bm?.url) byId.set(String(item.bm.id), this.serializeDecision(item));
     });
-    this.decisionItems = [...byId.values()].slice(-250);
+    this.decisionItems = [...byId.values()];
     await chrome.storage.local.set({ [this.DECISIONS_KEY]:this.decisionItems });
     return this.decisionItems;
   },
@@ -219,7 +225,7 @@ const Bookmarks = {
     const saved = await chrome.storage.local.get(this.DECISIONS_KEY);
     const raw = Array.isArray(saved[this.DECISIONS_KEY]) ? saved[this.DECISIONS_KEY] : [];
     const current = [];
-    for (const item of raw.slice(-250)) {
+    for (const item of raw) {
       try {
         const [bm] = await chrome.bookmarks.get(String(item?.bm?.id || ""));
         if (bm?.url) current.push({ ...item, bm:{ ...item.bm, ...bm } });
@@ -245,11 +251,30 @@ const Bookmarks = {
     const list = this.el("bookmark-review-list");
     const count = this.el("bookmark-review-count");
     if (!board || !list || !count) return;
-    this.decisionItems = items.slice(0, 250);
+    this.decisionItems = items;
+    const pages = Math.max(1, Math.ceil(items.length / this.DECISION_PAGE_SIZE));
+    this.decisionPage = Math.max(0, Math.min(this.decisionPage, pages - 1));
     count.textContent = String(items.length);
     board.classList.toggle("hidden", items.length === 0);
     list.replaceChildren();
-    this.decisionItems.forEach(item => {
+    if (pages > 1) {
+      const navigation = document.createElement("nav");
+      navigation.className = "bookmark-pagination";
+      navigation.setAttribute("aria-label", "Bookmark topic decisions");
+      const label = document.createElement("span");
+      label.textContent = `Page ${this.decisionPage + 1} of ${pages} · all ${items.length} decisions retained`;
+      const previous = document.createElement("button"), next = document.createElement("button");
+      previous.type = next.type = "button";
+      previous.textContent = "Previous"; next.textContent = "Next";
+      previous.disabled = this.busy || this.decisionPage === 0;
+      next.disabled = this.busy || this.decisionPage === pages - 1;
+      previous.dataset.bookmarkPage = "previous"; next.dataset.bookmarkPage = "next";
+      previous.onclick = () => { if (!this.busy && this.decisionPage > 0) { this.decisionPage -= 1; this.renderAccuracyGate(); } };
+      next.onclick = () => { if (!this.busy && this.decisionPage < pages - 1) { this.decisionPage += 1; this.renderAccuracyGate(); } };
+      navigation.append(previous, label, next); list.append(navigation);
+    }
+    const start = this.decisionPage * this.DECISION_PAGE_SIZE;
+    this.decisionItems.slice(start, start + this.DECISION_PAGE_SIZE).forEach(item => {
       const row = document.createElement("article");
       row.className = "bookmark-review-row";
       row.dataset.bookmarkDecisionId = String(item.bm.id);

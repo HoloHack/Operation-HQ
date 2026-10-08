@@ -10,7 +10,7 @@ const output=path.join(root,'test-results');await fs.mkdir(output,{recursive:tru
 const results=[],errors=[],consoleErrors=[],network=[];
 let context;
 async function waitForSaved(read,accept){const end=Date.now()+12000;while(Date.now()<end){const value=await read();if(accept(value))return value;await new Promise(r=>setTimeout(r,50));}throw new Error("Saved data did not reach the expected state.");}
-async function check(name,run){const start=Date.now();try{const details=await run();results.push({name,passed:true,milliseconds:Date.now()-start,details});console.log('✓ '+name);}catch(error){results.push({name,passed:false,error:String(error.stack||error)});throw error;}}
+async function check(name,run){const start=Date.now();try{const details=await run();results.push({name,passed:true,milliseconds:Date.now()-start,details});console.log('✓ '+name+(details?' '+JSON.stringify(details):''));}catch(error){results.push({name,passed:false,error:String(error.stack||error)});throw error;}}
 try{
  context=await chromium.launchPersistentContext(profile,{channel:'chromium',headless:true,viewport:{width:1440,height:960},args:[`--disable-extensions-except=${root}`,`--load-extension=${root}`,'--no-sandbox']});
  context.setDefaultTimeout(12000);
@@ -22,8 +22,8 @@ try{
  const page=await context.newPage();await page.emulateMedia({reducedMotion:'reduce'});
  await page.goto(base+'newtab.html');await page.waitForFunction(()=>document.body?.classList.contains('app-ready'));
  await check('Native service worker boots without startup errors',async()=>{
-   const issues=await worker.evaluate(()=>chrome.storage.local.get('hq_background_diagnostics_v1'));
-   assert.equal((await page.evaluate(()=>BootDiagnostics.issues)).length,0);
+   const issues=await worker.evaluate(()=>chrome.storage.local.get('hq_background_errors'));
+   assert.equal((await page.evaluate(()=>BootDiagnostics.issues)).length,0);assert.deepEqual(issues.hq_background_errors||[],[]);
    return {extensionId,backgroundDiagnostics:issues};
  });
  await check('Ordinary new tabs do not load the Operation HQ workspace',async()=>{
@@ -87,7 +87,7 @@ try{
      const tree=await chrome.bookmarks.getTree(),bar=tree[0].children.find(n=>n.id==='1')||tree[0].children[0];
      const user=await chrome.bookmarks.create({parentId:bar.id,title:'HQ TEST Personal'}),empty=await chrome.bookmarks.create({parentId:bar.id,title:'HQ TEST Keep Empty'}),target=await chrome.bookmarks.create({parentId:bar.id,title:'HQ TEST Target'});
      const siblings=[];for(const title of ['Alpha','Beta','Gamma'])siblings.push(await chrome.bookmarks.create({parentId:user.id,title,url:'https://example.org/'+title}));
-     await Bookmarks.runExclusive('Native test',async()=>{const moves=[];await Bookmarks.moveAndRecord(siblings[1],target.id,[],bar.id,moves);await Bookmarks.moveAndRecord(siblings[0],target.id,[],bar.id,moves);await Bookmarks.commitTransaction('native-test',moves);await Bookmarks.cleanupManagedEmptyFolders(bar.id);});
+     let result;for(let attempt=0;attempt<40;attempt++){result=await Bookmarks.runExclusive('Native test',async()=>{const moves=[];await Bookmarks.moveAndRecord(siblings[1],target.id,[],bar.id,moves);await Bookmarks.moveAndRecord(siblings[0],target.id,[],bar.id,moves);await Bookmarks.commitTransaction('native-test',moves);await Bookmarks.cleanupManagedEmptyFolders(bar.id);return {moved:moves.length};});if(!result?.blocked)break;await new Promise(r=>setTimeout(r,50));}if(result?.error||result?.blocked)throw new Error('Native bookmark operation did not finish: '+document.getElementById('bookmark-log').textContent);
      const moved=(await chrome.bookmarks.getChildren(target.id)).map(n=>n.title);await Bookmarks.undo();
      return {moved,restored:(await chrome.bookmarks.getChildren(user.id)).map(n=>n.title),empty:(await chrome.bookmarks.get(empty.id))[0].title};
    });

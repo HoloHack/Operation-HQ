@@ -4372,3 +4372,6 @@ body[data-compositor="active"] .living-widget[data-state="complete"] { --widget-
 }
 
 .compatibility-warning { position:fixed; inset:30% max(24px,calc((100vw - 640px)/2)) auto; z-index:10000; padding:28px; border:1px solid #e3b55a; border-radius:18px; background:#181b24; color:#f6e6c6; line-height:1.7; box-shadow:0 20px 100px #0008; }
+.bookmark-pagination { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px; padding:12px 0 18px; border-bottom:1px solid var(--panel-border); margin-bottom:10px; }
+.bookmark-pagination span { flex:1 1 150px; text-align:center; color:var(--text-dim); font-size:12px; line-height:1.5; }
+.bookmark-pagination button { min-height:40px; padding:8px 12px; }
