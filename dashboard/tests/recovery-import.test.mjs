@@ -44,3 +44,10 @@ test('acknowledgement cannot clear a newer device draft',async()=>{
 test('unavailable recovery cannot block valid cloud saves or delete unreadable copies',async()=>{
  let checkpoints=0;const c=coordinator({recover:async()=>{throw Error('Unreadable device copy');},checkpoint:async()=>{checkpoints++;}});await c.start();assert(c.ready);c.change(s=>({...s,notes:{plain:'new',updatedAt:1}}));await c.flush();assert.equal(c.status,'saved');assert.match(c.recoveryError,/Unreadable/);assert.equal(checkpoints,0);c.dispose();
 });
+
+test('unreadable recovery records are refused instead of filtering their contents',async()=>{
+ const {DraftJournal}=await import('../lib/draft-journal.ts');const j=new DraftJournal('alice','tab');const checkpoint={version:1,state:base(),baseline:base(),revision:0,conflict:null};
+ assert.equal(j.validate({id:'test',accountId:'alice',savedAt:1,checkpoint}).state.notes.plain,'dashboard notes');
+ for(const modified of [{...checkpoint,revision:-1},{...checkpoint,state:{...base(),tasks:[{}]}},{...checkpoint,state:{...base(),schemaVersion:2}},{...checkpoint,state:{...base(),tasks:[task('same'),task('same')]}}])assert.throws(()=>j.validate({id:'test',accountId:'alice',savedAt:1,checkpoint:modified}));
+ assert.throws(()=>j.validate({id:'test',accountId:'bob',savedAt:1,checkpoint}));
+});

@@ -9,7 +9,7 @@ import {
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { assertHQCapacity, emptyHQState, HQState, mergeHQState, sanitizeHQState } from "../lib/hq-state";
 import { SyncCoordinator } from "../lib/sync-coordinator";
-import { DraftJournal, DraftRecord, claimDraftTab } from "../lib/draft-journal";
+import { DraftJournal, DraftSummary, claimDraftTab } from "../lib/draft-journal";
 import { applyBrowserImport, browserImportSummary, reviewBrowserImport, NotesChoice } from "../lib/browser-import";
 import { parseChapters, remainingSeconds } from "../lib/focus-clock";
 import { createChapterTasks } from "../lib/study-plan";
@@ -116,7 +116,7 @@ export default function Dashboard({ displayName, signedIn, accountId }: { displa
   const [ownProfile, setOwnProfile] = useState(false);
   const importEpoch = useRef(0);
   const [recoveryReview, setRecoveryReview] = useState(false);
-  const [drafts, setDrafts] = useState<DraftRecord[]>([]);
+  const [drafts, setDrafts] = useState<DraftSummary[]>([]);
   const [recoveryMessage, setRecoveryMessage] = useState('');
   const [panel, setPanel] = useState<Panel>(null);
   const panelOpener = useRef<HTMLElement | null>(null);
@@ -215,11 +215,19 @@ export default function Dashboard({ displayName, signedIn, accountId }: { displa
   const closeImport = () => {importEpoch.current++;setImportReview(false);setImportCandidate(null);setBridge(value=>value==='checking'?'missing':value);};
   const openRecovery = async () => {
     setPanel(null);setRecoveryReview(true);setRecoveryMessage('Reading recovery copies on this device…');
-    try {if(!journal.current)throw new Error('Local recovery is unavailable in this browser.');await coordinator.checkpointSettled();setDrafts(await journal.current.list());setRecoveryMessage('Only copies for your signed-in account are listed.');}
+    try {if(!journal.current)throw new Error('Local recovery is unavailable in this browser.');await coordinator.checkpointSettled();setDrafts(await journal.current.list());setRecoveryMessage('Showing up to 20 recovery summaries for your signed-in account. Full documents load only when you choose one.');}
     catch(error){setRecoveryMessage(error instanceof Error ? error.message : 'Could not read recovery copies.');}
   };
-  const restoreDraft = async (record: DraftRecord) => {
-    try {if(!journal.current)throw new Error('Local recovery is unavailable.');coordinator.restore(journal.current.validate(record));await coordinator.checkpointSettled();setRecoveryReview(false);if(coordinator.conflict)setPanel('notes');void coordinator.retry();}
+  const exportDraft = async (record: DraftSummary) => {
+    try {if(!journal.current)throw new Error('Local recovery is unavailable.');exportWork((await journal.current.read(record)).state);}
+    catch(error){setRecoveryMessage(error instanceof Error ? error.message : 'Could not export this copy.');}
+  };
+  const olderDrafts = async () => {
+    try {if(!journal.current)return;const next=await journal.current.list(drafts.at(-1));if(next.length)setDrafts(next);else setRecoveryMessage('These are the oldest recovery copies.');}
+    catch(error){setRecoveryMessage(error instanceof Error ? error.message : 'Could not read older copies.');}
+  };
+  const restoreDraft = async (record: DraftSummary) => {
+    try {if(!journal.current)throw new Error('Local recovery is unavailable.');coordinator.restore(await journal.current.read(record));await coordinator.checkpointSettled();setRecoveryReview(false);if(coordinator.conflict)setPanel('notes');void coordinator.retry();}
     catch(error){setRecoveryMessage(error instanceof Error ? error.message : 'Recovery stopped. The saved copy is unchanged.');}
   };
 
@@ -338,7 +346,7 @@ export default function Dashboard({ displayName, signedIn, accountId }: { displa
       </DialogContent></Dialog>
       <Dialog open={recoveryReview} onOpenChange={setRecoveryReview}><DialogContent className="module-panel hq-dialog" showCloseButton={false} aria-describedby={undefined} onCloseAutoFocus={event=>{event.preventDefault();panelOpener.current?.focus();}}>
         <header className="panel-head"><DialogTitle>Recover unsaved drafts</DialogTitle><button onClick={()=>setRecoveryReview(false)} aria-label="Close recovery"><X/></button></header>
-        <div className="panel-body"><p role="status">{recoveryMessage}</p>{drafts.length===0 && <p>No pending recovery copies were found for this account.</p>}{drafts.map(record=><section className="draft-record" key={record.id}><h3>{new Date(record.savedAt).toLocaleString()}</h3><p>{record.checkpoint.state.tasks.length} tasks · {record.checkpoint.state.events.length} events · {record.checkpoint.state.notes.plain.length} note characters</p><div className="button-row"><button className="small-button" onClick={()=>exportWork(record.checkpoint.state)}>Export draft</button><button className="small-button accent" onClick={()=>void restoreDraft(record)}>Review and recover</button></div></section>)}</div>
+        <div className="panel-body"><p role="status">{recoveryMessage}</p>{drafts.length===0 && <p>No pending recovery copies were found for this account.</p>}{drafts.map(record=><section className="draft-record" key={record.id}><h3>{new Date(record.savedAt).toLocaleString()}</h3><p>{record.tasks} tasks · {record.events} events · {record.noteCharacters} note characters</p><div className="button-row"><button className="small-button" onClick={()=>void exportDraft(record)}>Export draft</button><button className="small-button accent" onClick={()=>void restoreDraft(record)}>Review and recover</button></div></section>)}{drafts.length>0 && <div className="button-row"><button className="small-button" onClick={()=>void olderDrafts()}>Older copies</button><button className="small-button" onClick={()=>void openRecovery()}>Newest copies</button></div>}</div>
       </DialogContent></Dialog>
       {cinema && <button className="cinema-exit" onClick={() => setCinema(false)}><Menu/>Restore dashboard</button>}
     </main>
