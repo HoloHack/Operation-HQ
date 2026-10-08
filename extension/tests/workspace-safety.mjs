@@ -7,6 +7,7 @@ const context=vm.createContext({chrome,URL,Map,Set,crypto,Date,document:{getElem
 vm.runInContext(readFileSync(new URL('../js/workspaces.js',import.meta.url),'utf8'),context);
 const work=vm.runInContext('Workspaces',context);work.render=()=>{};
 assert.equal((await work.captureCurrent()).length,150);
+tabs.push({id:151,pendingUrl:'https://example.org/still-loading',title:'Loading',groupId:-1});assert.equal((await work.captureCurrent()).at(-1).url,'https://example.org/still-loading');tabs.pop();
 work.items=[{id:'existing',name:'Preserve all',tabs:Array.from({length:160},(_,i)=>({url:`https://saved.example/${i}`}))}];
 await work.replaceSnapshot('existing');assert.equal(saved.hq_browser_workspaces[0].tabs.length,310);
 work.items=Array.from({length:31},(_,i)=>({id:String(i),tabs:[]}));await work.persist();assert.equal(saved.hq_browser_workspaces.length,31,'Persist discarded older snapshots');

@@ -96,7 +96,7 @@ try{
  await check('Native tab groups survive save and restore in a separate window',async()=>{
    await page.evaluate(()=>HQPanels.close());await page.evaluate(()=>HQPanels.open('optimizer-flyout'));
    const saved=await page.evaluate(async()=>{
-     const a=await chrome.tabs.create({url:'https://example.org/hq-test-a',active:false}),b=await chrome.tabs.create({url:'https://example.org/hq-test-b',active:false});
+     const own=await chrome.tabs.getCurrent();const a=await chrome.tabs.create({windowId:own.windowId,url:'https://example.org/hq-test-a',active:false}),b=await chrome.tabs.create({windowId:own.windowId,url:'https://example.org/hq-test-b',active:false});
      const group=await chrome.tabs.group({tabIds:[a.id,b.id]});await chrome.tabGroups.update(group,{title:'HQ Maths Test',color:'blue'});
      await Workspaces.saveCurrent('Native group test');const snapshot=Workspaces.items[0];await Workspaces.restore(snapshot.id);
      const groups=await chrome.tabGroups.query({title:'HQ Maths Test'});return {snapshot: snapshot.tabs.filter(t=>t.url.includes('/hq-test-')),groups:groups.map(g=>({title:g.title,color:g.color,windowId:g.windowId})),originalStillOpen:(await chrome.tabs.get(a.id)).url};

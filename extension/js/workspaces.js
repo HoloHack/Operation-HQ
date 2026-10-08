@@ -9,7 +9,12 @@ const Workspaces = {
   groupPlan: [],
   GROUP_COLORS: ["blue", "purple", "cyan", "green", "yellow", "orange", "red", "pink", "grey"],
 
-  eligible(tab) { return /^https?:\/\//i.test(tab.url || ""); },
+  restorableUrl(tab) {
+    return [tab.pendingUrl, tab.url].find(url => {
+      try { const value = new URL(url); return ["http:", "https:"].includes(value.protocol) && Boolean(value.hostname); } catch { return false; }
+    }) || null;
+  },
+  eligible(tab) { return Boolean(this.restorableUrl(tab)); },
   domain(url) { try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return "unknown"; } },
   normalized(url) {
     try {
@@ -49,7 +54,12 @@ const Workspaces = {
   },
 
   async captureCurrent() {
-    const tabs = (await chrome.tabs.query({ currentWindow: true })).filter(tab => this.eligible(tab));
+    const ownTab = typeof chrome.tabs.getCurrent === "function" ? await chrome.tabs.getCurrent() : null;
+    const query = ownTab?.windowId != null ? { windowId: ownTab.windowId } : { currentWindow: true };
+    const tabs = (await chrome.tabs.query(query)).filter(tab => this.eligible(tab)).map(tab => ({
+      ...tab, url: this.restorableUrl(tab),
+      title: tab.pendingUrl && tab.pendingUrl !== tab.url ? this.domain(tab.pendingUrl) : tab.title,
+    }));
     const [groups, bookmarks, learned] = await Promise.all([
       this.groupMap(tabs), this.bookmarkIndex(), chrome.storage.local.get("hq_learned_domains"),
     ]);
