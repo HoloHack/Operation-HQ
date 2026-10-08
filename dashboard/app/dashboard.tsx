@@ -9,6 +9,8 @@ import {
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { assertHQCapacity, emptyHQState, HQState, mergeHQState, sanitizeHQState } from "../lib/hq-state";
 import { SyncCoordinator } from "../lib/sync-coordinator";
+import { DraftJournal, DraftRecord, claimDraftTab } from "../lib/draft-journal";
+import { applyBrowserImport, browserImportSummary, reviewBrowserImport, NotesChoice } from "../lib/browser-import";
 import { parseChapters, remainingSeconds } from "../lib/focus-clock";
 import { createChapterTasks } from "../lib/study-plan";
 import { Dialog, DialogContent, DialogTitle } from "../components/ui/dialog";
@@ -38,12 +40,13 @@ function themeChoices(seed: string): ThemeChoice[] {
   ];
 }
 
-async function cloudRequest(snapshot?: HQState, baseRevision?: number) {
+async function cloudRequest(snapshot?: HQState, baseRevision?: number, accountId?: string) {
   if (snapshot) assertHQCapacity(snapshot);
-  const response = await fetch("/api/state", { cache: "no-store", signal: AbortSignal.timeout(15000), ...(snapshot ? { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ snapshot, baseRevision }) } : {}) });
-  const data = await response.json() as { snapshot?: unknown; revision?: unknown; error?: string };
+  const response = await fetch("/api/state", { cache: "no-store", headers: {"X-HQ-Account":accountId || '', ...(snapshot ? {"Content-Type":"application/json"} : {})}, signal: AbortSignal.timeout(15000), ...(snapshot ? { method: "PUT", body: JSON.stringify({ snapshot, baseRevision }) } : {}) });
+  const data = await response.json() as { snapshot?: unknown; revision?: unknown; error?: string; accountId?: string };
   if (!response.ok && response.status !== 409) throw new Error(data.error || "Sync is unavailable. Keep this tab open or export your work.");
   if (!data.snapshot || typeof data.revision !== "number" || !Number.isSafeInteger(data.revision)) throw new Error("Sync returned an invalid response. Your local work was preserved.");
+  if (accountId && data.accountId !== accountId) throw new Error("Your signed-in account changed. Reload before recovering or saving work.");
   return { snapshot: sanitizeHQState(data.snapshot), revision: data.revision, conflict: response.status === 409 };
 }
 
@@ -100,14 +103,21 @@ function Empty({ title, detail }: { title: string; detail: string }) {
   return <div className="empty-state"><Circle size={13} /><div><strong>{title}</strong><span>{detail}</span></div></div>;
 }
 
-export default function Dashboard({ displayName, signedIn }: { displayName: string; signedIn: boolean }) {
+export default function Dashboard({ displayName, signedIn, accountId }: { displayName: string; signedIn: boolean; accountId: string }) {
   const [, renderSync] = useState(0);
-  const [coordinator] = useState(() => new SyncCoordinator<HQState>({ initial: emptyHQState(), merge: mergeHQState, load: () => cloudRequest(), save: cloudRequest, changed: () => renderSync(value => value + 1) }));
+  const journal = useRef<DraftJournal | null>(null);
+  const [coordinator] = useState(() => new SyncCoordinator<HQState>({ initial: emptyHQState(), merge: mergeHQState, load: () => cloudRequest(undefined,undefined,accountId), save: (state,revision) => cloudRequest(state,revision,accountId), changed: () => renderSync(value => value + 1), recover: async()=>journal.current?.recoverOwn() || null, checkpoint: async value => {if (!journal.current) throw new Error('Local recovery is unavailable. Export unsaved work before closing.');await journal.current.write(value);} }));
   const state = coordinator.state, sync = coordinator.status;
   const [bridge, setBridge] = useState<"checking" | "connected" | "disabled" | "missing">("missing");
   const [bridgeMessage, setBridgeMessage] = useState("Not connected. Import is optional; automatic writeback is off.");
   const [importReview, setImportReview] = useState(false);
   const [importCandidate, setImportCandidate] = useState<HQState | null>(null);
+  const [notesChoice, setNotesChoice] = useState<NotesChoice>('keep');
+  const [ownProfile, setOwnProfile] = useState(false);
+  const importEpoch = useRef(0);
+  const [recoveryReview, setRecoveryReview] = useState(false);
+  const [drafts, setDrafts] = useState<DraftRecord[]>([]);
+  const [recoveryMessage, setRecoveryMessage] = useState('');
   const [panel, setPanel] = useState<Panel>(null);
   const panelOpener = useRef<HTMLElement | null>(null);
   const [cinema, setCinema] = useState(false);
@@ -133,7 +143,15 @@ export default function Dashboard({ displayName, signedIn }: { displayName: stri
 
   useEffect(() => { if (!transition) return; const timer = setTimeout(() => setTransition(0), 1300); return () => clearTimeout(timer); }, [transition]);
   useEffect(() => { if (!running) setSecondsLeft(state.focus.minutes * 60); }, [state.focus.minutes]);
-  useEffect(() => { void coordinator.start(); return () => coordinator.dispose(); }, [coordinator]);
+  useEffect(() => {
+    let cancelled=false;let release: (()=>void) | undefined;
+    void (async()=> {
+      try {const claimed=await claimDraftTab(accountId);release=claimed.release;if(cancelled){release();return;}journal.current=new DraftJournal(accountId,claimed.tabId);}
+      catch {if(cancelled)return;journal.current=null;}
+      await coordinator.start();
+    })();
+    return () => {cancelled=true;release?.();coordinator.dispose();};
+  }, [coordinator,accountId]);
   useEffect(() => {
     const protect = (event: BeforeUnloadEvent) => { if (coordinator.pending) { event.preventDefault(); event.returnValue = ""; } };
     const retry = () => { void coordinator.retry(); };
@@ -174,26 +192,35 @@ export default function Dashboard({ displayName, signedIn }: { displayName: stri
   }, [coordinator]);
 
   const pullBridge = useCallback(async () => {
+    const epoch=++importEpoch.current;setImportCandidate(null);setOwnProfile(false);setNotesChoice('keep');
     setBridge("checking"); setBridgeMessage("Reading the selected extension data for preview…");
     try {
-      const response = await extensionCall<{ ok: boolean; enabled?: boolean; snapshot?: unknown }>({ type: "hq:bridge:pull", protocol: 1 });
-      if (!response?.ok || !response.snapshot) { setBridge(response?.enabled === false ? "disabled" : "missing"); setBridgeMessage("Import unavailable. Enable the bridge in the extension, then retry."); return; }
+      const response = await extensionCall<{ ok: boolean; enabled?: boolean; snapshot?: unknown; error?: string }>({ type: "hq:bridge:pull", protocol: 1 });
+      if(epoch!==importEpoch.current)return;
+      if (!response?.ok || !response.snapshot) { setBridge(response?.enabled === false ? "disabled" : "missing"); setBridgeMessage(response?.error || "Import unavailable. Enable dashboard access in the extension popup, then retry."); return; }
       setBridge("connected");
-      setImportCandidate(sanitizeHQState(response.snapshot)); setBridgeMessage("Preview ready. Nothing has been saved to your account yet.");
-    } catch (error) { setImportCandidate(null); setBridge("missing"); setBridgeMessage(error instanceof Error ? error.message : "Extension unavailable. Install or reload the companion and retry."); }
+      setImportCandidate(reviewBrowserImport(response.snapshot)); setBridgeMessage("Preview ready. Nothing has been saved to your account yet.");
+    } catch (error) { if(epoch!==importEpoch.current)return;setImportCandidate(null); setBridge("missing"); setBridgeMessage(error instanceof Error ? error.message : "Extension unavailable. Install or reload the companion and retry."); }
   }, []);
 
   const acceptImport = () => {
-    if (!importCandidate || !coordinator.ready) return;
-    update(current => {
-      const merged = mergeHQState(current, importCandidate);
-      if (running) merged.focus = current.focus;
-      // A browser import must not silently replace a different notes document.
-      if (current.notes.plain && importCandidate.notes.plain && current.notes.plain !== importCandidate.notes.plain) merged.notes = current.notes;
-      return merged;
-    });
-    setBridgeMessage("Imported planning data. Different existing notes and a running focus mission were kept. Automatic writeback remains off.");
+    if (!importCandidate || !coordinator.ready || !ownProfile || coordinator.conflict) return;
+    try { update(current => applyBrowserImport(current, importCandidate,notesChoice)); }
+    catch(error){setBridgeMessage(error instanceof Error ? error.message : 'Import stopped without changing your work.');return;}
+    setBridgeMessage("Planning data added to this dashboard. Check Saved for cloud confirmation. Existing tasks, preferences and focus were kept. Automatic writeback is off.");
     setImportReview(false); setImportCandidate(null);
+  };
+
+  const openImport = () => {setPanel(null);setImportCandidate(null);setOwnProfile(false);setImportReview(true);};
+  const closeImport = () => {importEpoch.current++;setImportReview(false);setImportCandidate(null);setBridge(value=>value==='checking'?'missing':value);};
+  const openRecovery = async () => {
+    setPanel(null);setRecoveryReview(true);setRecoveryMessage('Reading recovery copies on this device…');
+    try {if(!journal.current)throw new Error('Local recovery is unavailable in this browser.');await coordinator.checkpointSettled();setDrafts(await journal.current.list());setRecoveryMessage('Only copies for your signed-in account are listed.');}
+    catch(error){setRecoveryMessage(error instanceof Error ? error.message : 'Could not read recovery copies.');}
+  };
+  const restoreDraft = async (record: DraftRecord) => {
+    try {if(!journal.current)throw new Error('Local recovery is unavailable.');coordinator.restore(journal.current.validate(record));await coordinator.checkpointSettled();setRecoveryReview(false);if(coordinator.conflict)setPanel('notes');void coordinator.retry();}
+    catch(error){setRecoveryMessage(error instanceof Error ? error.message : 'Recovery stopped. The saved copy is unchanged.');}
   };
 
   const exportWork = (snapshot = coordinator.state) => {
@@ -266,13 +293,15 @@ export default function Dashboard({ displayName, signedIn }: { displayName: stri
   const greeting = !now ? "Welcome back" : now.getHours() < 12 ? "Good morning" : now.getHours() < 17 ? "Good afternoon" : "Good evening";
 
   return (
-    <main onClickCapture={event => { if (!panel && !importReview) { const button = (event.target as HTMLElement).closest("button"); if (button) panelOpener.current = button; } }} className={`hq-shell density-${state.settings.density} ${cinema ? "cinema" : ""}`} style={{ "--hue": state.settings.accentHue, "--support-hue": state.settings.supportHue } as React.CSSProperties}>
+    <main onClickCapture={event => { if (!panel && !importReview && !recoveryReview) { const button = (event.target as HTMLElement).closest("button"); if (button) panelOpener.current = button; } }} className={`hq-shell density-${state.settings.density} ${cinema ? "cinema" : ""}`} style={{ "--hue": state.settings.accentHue, "--support-hue": state.settings.supportHue } as React.CSSProperties}>
       <AmbientField motion={state.settings.motion} hue={state.settings.accentHue} /><div className="grain" aria-hidden="true" />
       {transition > 0 && <div key={transition} className="theme-transition" aria-hidden="true"><i /><i /><i /></div>}
       <header className="topbar" inert={cinema}><button className="brand" onClick={() => setPanel(null)} aria-label="Operation HQ home"><span className="brand-mark"><Zap size={17} /></span><span><b>OPERATION HQ</b><small>COMMAND CENTRE</small></span></button><div className="time-centre"><strong>{now ? now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—:—"}</strong><span>{now ? now.toLocaleDateString([], { weekday: "long", day: "numeric", month: "long" }) : "Loading local time"}</span></div><div className="top-actions"><span className={`status-chip ${sync}`} title={signedIn ? "Private account sync" : "Sign in is required for cloud sync"}>{sync === "unsaved" ? <CloudOff size={14} /> : <Cloud size={14} />}{syncLabel}</span><button className="icon-button" onClick={() => setCinema(true)} title="Hide the interface"><Minimize2 size={18} /></button><button className="avatar" onClick={() => setPanel("settings")} aria-label="Open settings">{displayName.slice(0, 1).toUpperCase()}</button></div></header>
       <aside className="rail" aria-label="Primary navigation" inert={cinema}><button className={!panel ? "active" : ""} onClick={() => setPanel(null)}><LayoutDashboard /><span>Home</span></button><button className={panel === "tasks" ? "active" : ""} onClick={() => setPanel("tasks")}><ListTodo /><span>Tasks</span></button><button className={panel === "calendar" ? "active" : ""} onClick={() => setPanel("calendar")}><CalendarDays /><span>Calendar</span></button><button className={panel === "study" ? "active" : ""} onClick={() => setPanel("study")}><BookOpen /><span>Study</span></button><button className={panel === "notes" ? "active" : ""} onClick={() => setPanel("notes")}><NotebookPen /><span>Notes</span></button><div className="rail-spacer"/><button onClick={() => openBrowserTool("bookmarks")}><Bookmark /><span>Bookmarks</span></button><button onClick={() => openBrowserTool("gmail")}><Mail /><span>Mail</span></button><button className={panel === "settings" ? "active" : ""} onClick={() => setPanel("settings")}><Settings /><span>Settings</span></button></aside>
       <section className="workspace" inert={cinema}>
-        {(coordinator.error || sync === "unsaved" || sync === "conflict") && <div className="save-notice" role="status"><p>{coordinator.error || "Changes have not reached cloud storage yet. Keep this tab open until Saved."}</p><div className="button-row"><button className="small-button" onClick={() => void coordinator.retry()}>Retry save</button><button className="small-button" onClick={() => exportWork()}>Export current work</button>{coordinator.conflict && <button className="small-button" onClick={() => setPanel("notes")}>Review both notes</button>}</div></div>}
+        {(coordinator.error || sync === "unsaved" || sync === "conflict") && <div className="save-notice" role="status"><p>{coordinator.error || "Changes have not reached cloud storage yet. Check the device recovery status below before leaving."}</p><div className="button-row"><button className="small-button" onClick={() => void coordinator.retry()}>Retry save</button><button className="small-button" onClick={() => exportWork()}>Export current work</button>{coordinator.conflict && <button className="small-button" onClick={() => setPanel("notes")}>Review both notes</button>}</div></div>}
+        {coordinator.pending && <p className="device-copy-status" role="status">{coordinator.recoveryError || (coordinator.journaledGeneration === coordinator.generation ? "Unsaved work has a recovery copy on this device." : "Writing the recovery copy on this device…")}</p>}
+        {coordinator.recoveryError && !coordinator.pending && <p className="device-copy-status" role="status">{coordinator.recoveryError}</p>}
         {sync === "loading" && <p role="status">Loading your saved work. New edits will be kept while it loads.</p>}
         <div className="hero-copy"><div><span className="eyebrow"><Sparkles size={14}/> YOUR DAY</span><h1>{greeting}, {displayName}.</h1><p>{nextTask ? <>Next by priority and due date: <strong>{nextTask.title}</strong>{nextTask.due ? `, due ${nextTask.due}` : ""}.</> : "No active tasks are recorded. Add the next thing you want to work on."}</p></div><button className="primary-action" onClick={() => nextTask ? setPanel("tasks") : setPanel("study")}><span>{nextTask ? "Review next task" : "Build a mission"}</span><ArrowRight size={18}/></button></div>
         <div className="widget-grid">
@@ -281,7 +310,7 @@ export default function Dashboard({ displayName, signedIn }: { displayName: stri
           <article className="widget weather-card"><header><span className="widget-icon"><Cloud/></span><div><small>WEATHER</small><h2>{weather ? weather.label : "Local atmosphere"}</h2></div></header>{weather ? <div className="weather-reading"><strong>{weather.temp}°</strong><span>Current temperature · °C<button className="small-button" onClick={requestWeather} disabled={weatherState === "loading"}>{weatherState === "loading" ? "Refreshing…" : weatherState === "error" ? "Refresh failed · retry" : "Refresh"}</button></span></div> : <button className="weather-request" onClick={requestWeather} disabled={weatherState === "loading"}>{weatherState === "loading" ? <RefreshCw className="spin"/> : <Cloud/>}<span>{weatherState === "denied" ? "Location blocked—change this site’s permission to retry" : weatherState === "error" ? "Weather unavailable—retry" : "Use my current location"}</span></button>}</article>
           <article className="widget schedule-card"><header><span className="widget-icon"><CalendarDays/></span><div><small>TODAY</small><h2>{todayEvents.length ? `${todayEvents.length} scheduled` : "No fixed events"}</h2></div></header><div className="timeline-list">{todayEvents.slice(0,3).map(event => <button key={event.id} onClick={() => setPanel("calendar")}><time>{event.start || "All day"}</time><span>{event.title}</span></button>)}{!todayEvents.length && <Empty title="Open capacity" detail="No calendar events are recorded for today. This is not a capacity estimate."/>}</div></article>
           <article className="widget tasks-card"><header><span className="widget-icon"><ListTodo/></span><div><small>TASKS</small><h2>{activeTasks.length ? `${activeTasks.length} active` : "Queue clear"}</h2></div><button className="mini-add" onClick={() => setPanel("tasks")} aria-label="Add task"><Plus/></button></header><div className="mini-list">{activeTasks.slice(0,4).map(task => <button key={task.id} onClick={() => update(current => ({...current,tasks:current.tasks.map(item => item.id===task.id ? {...item,completed:true,updatedAt:Date.now()} : item)}))}><Circle/><span>{task.title}</span><small>{task.priority}</small></button>)}{!activeTasks.length && <Empty title="Nothing pending" detail="Capture an action when one becomes real."/>}</div></article>
-          <article className="widget bridge-card"><header><span className="widget-icon"><Link2/></span><div><small>BROWSER BRIDGE</small><h2>{bridge === "connected" ? "Extension connected" : bridge === "disabled" ? "Connection disabled" : "Extension not detected"}</h2></div><span className={`bridge-light ${bridge}`}/></header><p role="status">{bridgeMessage}</p><div className="button-row"><button className="small-button" onClick={() => setImportReview(true)}><RefreshCw/>Import from extension</button><button className="small-button" onClick={() => openBrowserTool("system")}><Gauge/>Browser tools</button></div></article>
+          <article className="widget bridge-card"><header><span className="widget-icon"><Link2/></span><div><small>BROWSER BRIDGE</small><h2>{bridge === "connected" ? "Extension connected" : bridge === "disabled" ? "Connection disabled" : "Extension not detected"}</h2></div><span className={`bridge-light ${bridge}`}/></header><p role="status">{bridgeMessage}</p><div className="button-row"><button className="small-button" onClick={openImport}><RefreshCw/>Import from extension</button><button className="small-button" onClick={() => openBrowserTool("nexus")}><Gauge/>Browser tools</button></div></article>
         </div>
         <form className="nexus" onSubmit={runCommand}><span className="nexus-core"><Command/></span><div className="nexus-input"><label htmlFor="nexus-command">NEXUS</label><input id="nexus-command" value={command} onChange={event => setCommand(event.target.value)} placeholder="Tell HQ what needs to happen…" autoComplete="off"/></div><button type="submit">Route <ArrowRight/></button></form>
         {commandResult && <section className="command-result" aria-live="polite"><button className="result-close" onClick={() => setCommandResult(null)} aria-label="Dismiss result"><X/></button><span className="result-icon"><WandSparkles/></span><div><small>REVIEW BEFORE ACTION</small><h2>{commandResult.title}</h2><p>{commandResult.detail}</p>{commandResult.chapters && <div className="chapter-row">{commandResult.chapters.map(chapter => <span key={chapter}>CH {chapter}</span>)}</div>}{themes.length > 0 && <div className="theme-options">{themes.map(choice => <button key={choice.name} onClick={() => applyTheme(choice)} style={{"--choice":choice.hue} as React.CSSProperties}><i/><span>{choice.name}</span></button>)}</div>}<div className="button-row">{commandResult.chapters && <><div className="study-plan-inputs"><label>Deadline<input type="date" required min={currentDateKey || undefined} value={studyDue} onChange={event => setStudyDue(event.target.value)}/></label><label>Minutes per chapter<input type="number" min={5} max={180} step={1} value={studyMinutes} onChange={event => setStudyMinutes(Number(event.target.value))}/></label></div>{studyError && <p role="alert">{studyError}</p>}<button className="small-button accent" onClick={applyStudyPlan}><Check/>Apply study plan</button></>}{/Browser review/.test(commandResult.title) && <button className="small-button accent" onClick={() => openBrowserTool("bookmarks")}><Bookmark/>Open browser review</button>}</div></div></section>}
@@ -291,9 +320,26 @@ export default function Dashboard({ displayName, signedIn }: { displayName: stri
         {panel === "calendar" && <div className="panel-body"><form className="capture-form event-form" onSubmit={addEvent}><input aria-label="Event title" maxLength={500} value={eventDraft} onChange={event => setEventDraft(event.target.value)} placeholder="Event name" autoFocus/><input aria-label="Event date" type="date" required value={eventDate} onChange={event => setEventDate(event.target.value)}/><button><Plus/>Add</button></form><div className="agenda">{agendaEvents.slice(0,eventLimit).map(event => <div key={event.id}><time>{new Date(`${event.date}T00:00:00`).toLocaleDateString([], {weekday:"short",day:"numeric",month:"short"})}</time><span>{event.title}</span><small>{event.start || "All day"}</small></div>)}{!state.events.length && <Empty title="Calendar is clear" detail="Add an event or explicitly import calendar events from the extension. Recurring timetable blocks are not imported."/>}</div>{agendaEvents.length > eventLimit && <button className="small-button" onClick={() => setEventLimit(value => value + 50)}>Show next 50 events</button>}</div>}
         {panel === "notes" && <div className="panel-body notes-body"><div className="notes-status"><ShieldCheck/>One document · check save status before leaving</div>{coordinator.conflict && <section className="notes-conflict"><h3>Two versions need your decision</h3><p>Your current text remains editable below. Export it before choosing another version if you want a separate backup.</p><label htmlFor="remote-notes">Saved elsewhere</label><textarea id="remote-notes" readOnly value={coordinator.conflict.remote}/><div className="button-row"><button className="small-button" onClick={() => coordinator.resolveNotes(state.notes.plain)}>Keep my current text</button><button className="small-button" onClick={() => coordinator.resolveNotes(coordinator.conflict!.remote)}>Use the other version</button><button className="small-button" onClick={() => coordinator.resolveNotes(state.notes.plain + "\n\n--- Other version ---\n\n" + coordinator.conflict!.remote)}>Keep both</button></div></section>}<textarea aria-label="Notes document" maxLength={200000} value={state.notes.plain} onChange={event => update(current => ({...current,notes:{plain:event.target.value,updatedAt:Date.now()}}))} placeholder="Write without fighting the editor…" autoFocus/></div>}
         {panel === "study" && <div className="panel-body study-body"><div className="study-intro"><BrainCircuit/><div><h3>Build today’s mission</h3><p>Ask Nexus for a subject and chapter list. It proposes tasks before you approve. Automatic rescheduling and textbook chapter navigation are not yet available in this dashboard.</p></div></div><div className="study-stats"><div><strong>{state.assignments.length}</strong><span>Assignments</span></div><div><strong>{state.exams.length}</strong><span>Exam plans</span></div><div><strong>{activeTasks.filter(task=>task.subject).length}</strong><span>Study actions</span></div></div><button className="panel-command" onClick={() => {panelOpener.current = document.getElementById("nexus-command");setPanel(null);}}>Ask Nexus to build a study plan <ArrowRight/></button></div>}
-        {panel === "settings" && <div className="panel-body settings-body"><section><h3>Motion</h3><p>Full animates the ambient field up to 60fps; Balanced caps it at 24fps. Reduced removes decorative motion. Actual battery usage depends on your device.</p><div className="segmented">{(["full","balanced","reduced"] as const).map(mode => <button key={mode} className={state.settings.motion===mode?"active":""} onClick={() => update(current => ({...current,settings:{...current.settings,motion:mode,updatedAt:Date.now()}}))}>{mode}</button>)}</div></section><section><h3>Density</h3><div className="segmented">{(["calm","balanced","command"] as const).map(mode => <button key={mode} className={state.settings.density===mode?"active":""} onClick={() => update(current => ({...current,settings:{...current.settings,density:mode,updatedAt:Date.now()}}))}>{mode}</button>)}</div></section><section><h3>Connection</h3><p>{signedIn ? "Cloud saves are available when signed in; check the live save status." : "Sign in to enable cross-device saves."} The browser bridge is {bridge}.</p><button className="small-button" onClick={() => setImportReview(true)}><RefreshCw/>Review browser import</button></section></div>}
+        {panel === "settings" && <div className="panel-body settings-body"><section><h3>Motion</h3><p>Full animates the ambient field up to 60fps; Balanced caps it at 24fps. Reduced removes decorative motion. Actual battery usage depends on your device.</p><div className="segmented">{(["full","balanced","reduced"] as const).map(mode => <button key={mode} className={state.settings.motion===mode?"active":""} onClick={() => update(current => ({...current,settings:{...current.settings,motion:mode,updatedAt:Date.now()}}))}>{mode}</button>)}</div></section><section><h3>Density</h3><div className="segmented">{(["calm","balanced","command"] as const).map(mode => <button key={mode} className={state.settings.density===mode?"active":""} onClick={() => update(current => ({...current,settings:{...current.settings,density:mode,updatedAt:Date.now()}}))}>{mode}</button>)}</div></section><section><h3>Connection</h3><p>{signedIn ? "Cloud saves are available when signed in; check the live save status." : "Sign in to enable cross-device saves."} The browser bridge is {bridge}.</p><div className="button-row"><button className="small-button" onClick={openImport}><RefreshCw/>Review browser import</button><button className="small-button" onClick={() => void openRecovery()}>Recover unsaved drafts</button></div></section></div>}
       </DialogContent></Dialog>
-      <Dialog open={importReview} onOpenChange={open => {setImportReview(open); if (!open) setImportCandidate(null);}}><DialogContent className="module-panel hq-dialog" showCloseButton={false} aria-describedby={undefined} onCloseAutoFocus={event => { event.preventDefault(); panelOpener.current?.focus(); }}><header className="panel-head"><DialogTitle>Import browser planning data</DialogTitle><button onClick={() => {setImportReview(false);setImportCandidate(null);}} aria-label="Close import"><X/></button></header><div className="panel-body"><p>This reads tasks, calendar events, notes and planning settings from your extension. Importing saves the preview to your signed-in cloud account. No bookmarks, mail contents or credentials are requested. Automatic writeback to the extension is off.</p><p>Only connect your own browser profile. The extension connection does not verify which account owns the browser data.</p><button className="small-button" disabled={bridge === "checking"} onClick={pullBridge}>{bridge === "checking" ? "Reading…" : "Read preview from extension"}</button><p role="status">{bridgeMessage}</p>{importCandidate && <><p>{importCandidate.tasks.length} tasks · {importCandidate.events.length} events · {importCandidate.notes.plain.length} note characters. Different existing dashboard notes will be kept.</p><div className="button-row"><button className="small-button" onClick={() => exportWork(importCandidate)}>Export preview</button><button className="small-button accent" disabled={!coordinator.ready || Boolean(coordinator.conflict)} onClick={acceptImport}>Import into my account</button></div></>}</div></DialogContent></Dialog>
+      <Dialog open={importReview} onOpenChange={open => {if(!open)closeImport();}}><DialogContent className="module-panel hq-dialog" showCloseButton={false} aria-describedby={undefined} onCloseAutoFocus={event => {event.preventDefault();panelOpener.current?.focus();}}>
+        <header className="panel-head"><DialogTitle>Import browser planning data</DialogTitle><button onClick={closeImport} aria-label="Close import"><X/></button></header>
+        <div className="panel-body import-body"><p>Read tasks, calendar entries and notes from the extension, then choose what to add to this account. Browser bookmarks, emails and credentials stay in the extension. Automatic writeback is off.</p><p>Enable <strong>Allow dashboard access</strong> in the extension popup first.</p>
+          <button className="small-button" disabled={bridge === "checking"} onClick={pullBridge}>{bridge === "checking" ? "Reading…" : "Read preview from extension"}</button><p role="status">{bridgeMessage}</p>
+          {importCandidate && <>
+            <p>{browserImportSummary(state,importCandidate).newTasks} new tasks · {browserImportSummary(state,importCandidate).newEvents} new events. Previously imported records and your dashboard edits are kept.</p>
+            <div className="import-preview"><h3>Tasks</h3>{importCandidate.tasks.slice(0,10).map(task=><p key={task.id}>{task.title}<small>{task.due ? ` · ${task.due}` : ''} · {task.priority}</small></p>)}{importCandidate.tasks.length>10 && <p>Export the preview to review all {importCandidate.tasks.length} tasks.</p>}<h3>Calendar</h3>{importCandidate.events.slice(0,10).map(event=><p key={event.id}>{event.date} · {event.title}</p>)}</div>
+            <label className="preview-notes-label">Browser notes<textarea aria-label="Browser notes preview" readOnly value={importCandidate.notes.plain} /></label>
+            {browserImportSummary(state,importCandidate).notesDiffer && <fieldset className="import-notes-choice"><legend>Your notes differ. Choose what to keep.</legend>{(['keep','browser','both'] as const).map(choice=><label key={choice}><input type="radio" name="notes-import" value={choice} checked={notesChoice===choice} onChange={()=>setNotesChoice(choice)}/>{choice==='keep' ? 'Keep dashboard notes' : choice==='browser' ? 'Use browser notes' : 'Keep both versions'}</label>)}</fieldset>}
+            <label className="profile-confirm"><input type="checkbox" checked={ownProfile} onChange={event=>setOwnProfile(event.target.checked)}/>This is my browser profile; add this preview to my signed-in account.</label>
+            <div className="button-row"><button className="small-button" onClick={() => exportWork(importCandidate)}>Export preview</button><button className="small-button accent" disabled={!coordinator.ready || Boolean(coordinator.conflict) || !ownProfile} onClick={acceptImport}>Import into my account</button></div>
+          </>}
+        </div>
+      </DialogContent></Dialog>
+      <Dialog open={recoveryReview} onOpenChange={setRecoveryReview}><DialogContent className="module-panel hq-dialog" showCloseButton={false} aria-describedby={undefined} onCloseAutoFocus={event=>{event.preventDefault();panelOpener.current?.focus();}}>
+        <header className="panel-head"><DialogTitle>Recover unsaved drafts</DialogTitle><button onClick={()=>setRecoveryReview(false)} aria-label="Close recovery"><X/></button></header>
+        <div className="panel-body"><p role="status">{recoveryMessage}</p>{drafts.length===0 && <p>No pending recovery copies were found for this account.</p>}{drafts.map(record=><section className="draft-record" key={record.id}><h3>{new Date(record.savedAt).toLocaleString()}</h3><p>{record.checkpoint.state.tasks.length} tasks · {record.checkpoint.state.events.length} events · {record.checkpoint.state.notes.plain.length} note characters</p><div className="button-row"><button className="small-button" onClick={()=>exportWork(record.checkpoint.state)}>Export draft</button><button className="small-button accent" onClick={()=>void restoreDraft(record)}>Review and recover</button></div></section>)}</div>
+      </DialogContent></Dialog>
       {cinema && <button className="cinema-exit" onClick={() => setCinema(false)}><Menu/>Restore dashboard</button>}
     </main>
   );

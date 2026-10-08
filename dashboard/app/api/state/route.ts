@@ -21,11 +21,12 @@ async function current(userId: string) {
   }
 }
 
-export async function GET() {
+export async function GET(request?: Request) {
   const user = await getChatGPTUser();
   if (!user) return Response.json({ error: "Sign in is required." }, { status: 401 });
+  if (request?.headers.get('x-hq-account') && request.headers.get('x-hq-account') !== user.userId) return Response.json({error:'Your signed-in account changed. Reload before saving or recovering work.'},{status:403});
   if (!env.DB) return Response.json({ error: "Sync storage is unavailable." }, { status: 503 });
-  try { return Response.json(await current(user.userId), { headers: { "Cache-Control": "no-store" } }); }
+  try { return Response.json({...await current(user.userId),accountId:user.userId}, { headers: { "Cache-Control": "no-store" } }); }
   catch (error) { return storageError(error); }
 }
 
@@ -36,6 +37,7 @@ function storageError(error: unknown) {
 export async function PUT(request: Request) {
   const user = await getChatGPTUser();
   if (!user) return Response.json({ error: "Sign in is required." }, { status: 401 });
+  if (request.headers.get('x-hq-account') && request.headers.get('x-hq-account') !== user.userId) return Response.json({error:'Your signed-in account changed. Reload before saving or recovering work.'},{status:403});
   if (!env.DB) return Response.json({ error: "Sync storage is unavailable." }, { status: 503 });
 
   try {
@@ -49,7 +51,7 @@ export async function PUT(request: Request) {
   }
   // Validate the existing payload before allowing any overwrite, including a matching revision.
   const existing = await current(user.userId);
-  if (existing.revision !== baseRevision) return Response.json({ error: "Your dashboard changed somewhere else.", ...existing }, { status: 409 });
+  if (existing.revision !== baseRevision) return Response.json({ error: "Your dashboard changed somewhere else.", ...existing, accountId:user.userId }, { status: 409 });
 
   const now = Date.now();
   const nextRevision = baseRevision + 1;
@@ -61,8 +63,8 @@ export async function PUT(request: Request) {
     .run();
 
   if (!result.success || Number(result.meta.changes) !== 1) {
-    return Response.json({ error: "Your dashboard changed somewhere else.", ...(await current(user.userId)) }, { status: 409 });
+    return Response.json({ error: "Your dashboard changed somewhere else.", ...(await current(user.userId)), accountId:user.userId }, { status: 409 });
   }
-  return Response.json({ revision: nextRevision, snapshot, updatedAt: now });
+  return Response.json({ revision: nextRevision, snapshot, updatedAt: now, accountId:user.userId });
   } catch (error) { return storageError(error); }
 }
