@@ -148,6 +148,40 @@ try{
      await page.screenshot({path:path.join(output,`workspace-${width}.png`)});
    }
  });
+ await check('Study palettes await approval; layered launch animation stays skippable',async()=>{
+   await page.setViewportSize({width:1440,height:960});await page.bringToFront();
+   await page.evaluate(()=>HQPanels.close());await page.evaluate(()=>HQPanels.open('pomodoro-flyout'));
+   const before=await page.evaluate(()=>chrome.storage.local.get('hq_adaptive_theme_v1'));
+   const proposals=await page.evaluate(()=>AdaptiveThemes.propose('HSIE study',{regenerate:true}));
+   assert.equal(proposals.length,3);assert.equal(new Set(proposals.map(p=>p.id)).size,3);
+   assert.deepEqual(await page.evaluate(()=>chrome.storage.local.get('hq_adaptive_theme_v1')),before,'Proposal applied without approval');
+   await page.locator('.focus-theme-option').first().click();
+   await waitForSaved(()=>page.evaluate(()=>chrome.storage.local.get('hq_adaptive_theme_active_v1')),v=>v.hq_adaptive_theme_active_v1===true);
+   await page.evaluate(()=>HQPanels.close());await page.emulateMedia({reducedMotion:'no-preference'});
+   await page.locator('#settings-btn').click();await page.locator('#boot-sequence-select').selectOption('full');
+   await page.locator('#boot-sequence-preview').click();
+   await page.waitForFunction(()=>document.getElementById('hq-launch').classList.contains('is-active'));
+   const animatedLayers=await page.evaluate(()=>document.getAnimations().filter(a=>a.playState==='running').length);
+   assert(animatedLayers>=5,'Launch animation has too few active layers');
+   await page.locator('#hq-launch-skip').click();await page.waitForFunction(()=>!document.body.classList.contains('boot-cinematic-active'));
+   await page.locator('#close-settings').click();await page.evaluate(()=>HQPanels.open('nexus-flyout'));
+   await page.locator('#nexus-flyout .flyout-close').click();await page.emulateMedia({reducedMotion:'reduce'});
+   return {generatedOptions:proposals.length,animatedLayers};
+ });
+ await check('Exact-origin dashboard bridge works through real Chrome external messaging (isolated fixture)',async()=>{
+   const fixture='https://operation-hq-command-center.shour-ya11.chatgpt.site/__hq_bridge_ci';
+   await context.route(fixture,route=>route.fulfill({status:200,contentType:'text/html',body:'<!doctype html><title>Isolated bridge fixture</title><p>CI fixture only</p>'}));
+   const site=await context.newPage();await site.goto(fixture);
+   const send=type=>site.evaluate(({extensionId,type})=>new Promise(resolve=>chrome.runtime.sendMessage(extensionId,{protocol:1,type},response=>resolve(chrome.runtime.lastError?{error:chrome.runtime.lastError.message}:response))),{extensionId,type});
+   const disabled=await send('hq:bridge:status');assert.equal(disabled.enabled,false);
+   const popup=await context.newPage();await popup.goto(base+'popup.html');await popup.locator('#bridge-enabled').check();
+   await waitForSaved(()=>worker.evaluate(()=>chrome.storage.local.get('hq_dashboard_bridge_enabled_v1')),v=>v.hq_dashboard_bridge_enabled_v1===true);
+   assert.equal((await send('hq:bridge:status')).ok,true);
+   const pulled=await send('hq:bridge:pull');assert.equal(pulled.ok,true);assert.equal(pulled.snapshot.tasks.length,0);assert(pulled.snapshot.notes.plain.includes('Chapter five'));
+   assert.equal(pulled.snapshot.schemaVersion,1);assert(!JSON.stringify(pulled).includes('refresh_token'));
+   await popup.locator('#bridge-enabled').uncheck();await popup.close();await site.close();
+   return {productionSiteRequests:0,realUserDataMutations:0};
+ });
  await check('Heavy AI stays unloaded and measured DOM/JS heap remain bounded',async()=>{
    assert.equal(await page.evaluate(()=>performance.getEntriesByType('resource').some(r=>/webllm-loader|web-llm\.js/.test(r.name))),false);
    const session=await context.newCDPSession(page);await session.send('Performance.enable');const metrics=await session.send('Performance.getMetrics');
