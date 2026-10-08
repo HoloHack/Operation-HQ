@@ -3,6 +3,8 @@
 // saved tab groups. This module never closes a tab.
 const Workspaces = {
   KEY: "hq_browser_workspaces",
+  MAX_TABS: 1000,
+  MAX_SAVED: 30,
   items: [],
   groupPlan: [],
   GROUP_COLORS: ["blue", "purple", "cyan", "green", "yellow", "orange", "red", "pink", "grey"],
@@ -22,7 +24,7 @@ const Workspaces = {
     const stored = await chrome.storage.local.get(this.KEY);
     this.items = Array.isArray(stored[this.KEY]) ? stored[this.KEY] : [];
   },
-  async persist() { await chrome.storage.local.set({ [this.KEY]: this.items.slice(0, 30) }); },
+  async persist() { await chrome.storage.local.set({ [this.KEY]: this.items }); },
   setStatus(message) { const status = document.getElementById("workspace-status"); if (status) status.textContent = message; },
 
   async bookmarkIndex() {
@@ -51,7 +53,8 @@ const Workspaces = {
     const [groups, bookmarks, learned] = await Promise.all([
       this.groupMap(tabs), this.bookmarkIndex(), chrome.storage.local.get("hq_learned_domains"),
     ]);
-    return tabs.slice(0, 100).map(tab => {
+    if (tabs.length > this.MAX_TABS) throw new Error("More than 1,000 web tabs are open. Save smaller windows; nothing was omitted or overwritten.");
+    return tabs.map(tab => {
       const group = groups.get(tab.groupId);
       const classified = typeof Classifier !== "undefined"
         ? Classifier.classify({ title: tab.title || "", url: tab.url }, learned.hq_learned_domains || {}, [])
@@ -67,6 +70,7 @@ const Workspaces = {
   },
 
   async saveCurrent(name) {
+    if (this.items.length >= this.MAX_SAVED) throw new Error("All 30 saved workspace slots are occupied. Export or deliberately remove a saved workspace first; none was discarded.");
     const tabs = await this.captureCurrent();
     if (!tabs.length) throw new Error("This window has no restorable web tabs.");
     const snapshot = { id: crypto.randomUUID(), name: name.trim().slice(0, 48), createdAt: Date.now(), tabs };
@@ -109,7 +113,9 @@ const Workspaces = {
     if (!current.length) throw new Error("This window has no restorable web tabs.");
     const currentUrls = new Set(current.map(tab => this.normalized(tab.url)));
     const preserved = (workspace.tabs || []).filter(tab => !currentUrls.has(this.normalized(tab.url)));
-    workspace.tabs = [...current, ...preserved].slice(0, 120);
+    const combined = [...current, ...preserved];
+    if (combined.length > this.MAX_TABS) throw new Error("Merged workspace exceeds 1,000 tabs. The saved workspace was left intact.");
+    workspace.tabs = combined;
     workspace.updatedAt = Date.now();
     await this.persist(); this.render();
     this.setStatus(`Synced ${workspace.name}: ${current.length} current · ${preserved.length} saved-only tab${preserved.length === 1 ? "" : "s"} preserved.`);

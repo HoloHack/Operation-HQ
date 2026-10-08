@@ -9,6 +9,7 @@ const profile=await fs.mkdtemp(path.join(os.tmpdir(),'hq-chromium-'));
 const output=path.join(root,'test-results');await fs.mkdir(output,{recursive:true});
 const results=[],errors=[],consoleErrors=[],network=[];
 let context;
+async function waitForSaved(read,accept){const end=Date.now()+12000;while(Date.now()<end){const value=await read();if(accept(value))return value;await new Promise(r=>setTimeout(r,50));}throw new Error("Saved data did not reach the expected state.");}
 async function check(name,run){const start=Date.now();try{const details=await run();results.push({name,passed:true,milliseconds:Date.now()-start,details});console.log('✓ '+name);}catch(error){results.push({name,passed:false,error:String(error.stack||error)});throw error;}}
 try{
  context=await chromium.launchPersistentContext(profile,{channel:'chromium',headless:true,viewport:{width:1440,height:960},args:[`--disable-extensions-except=${root}`,`--load-extension=${root}`,'--no-sandbox']});
@@ -74,11 +75,11 @@ try{
    await page.evaluate(()=>HQPanels.close());await page.evaluate(()=>HQPanels.open('notes-flyout'));
    const rich=page.locator('#notes-editor-container [contenteditable="true"]');
    if(await rich.count())await rich.fill('Maths practice\nChapter five');else await page.locator('#notes-area-fallback').fill('Maths practice\nChapter five');
-   await page.waitForFunction(async()=> (await chrome.storage.local.get('hq_notes_document_v2')).hq_notes_document_v2?.plain.includes('Chapter five'));
+   await waitForSaved(()=>page.evaluate(async()=> (await chrome.storage.local.get('hq_notes_document_v2')).hq_notes_document_v2?.plain),value=>typeof value==='string'&&value.includes('Chapter five')); 
    const before=await page.evaluate(async()=> (await chrome.storage.local.get('hq_notes_document_v2')).hq_notes_document_v2.plain);
    await page.reload();await page.waitForFunction(()=>document.body.classList.contains('app-ready'));await page.evaluate(()=>HQPanels.open('notes-flyout'));
    const after=await page.evaluate(async()=> (await chrome.storage.local.get('hq_notes_document_v2')).hq_notes_document_v2.plain);
-   assert.equal(after,before);assert.equal((after.match(/Chapter five/g)||[]).length,1);
+   assert.equal(after,before);assert.equal((after.match(/Chapter five/g)||[]).length,1);return {plain:after};
  });
  await check('Native bookmark move, managed cleanup and exact undo preserve user folders',async()=>{
    await page.evaluate(()=>HQPanels.close());await page.evaluate(()=>HQPanels.open('bookmarks-flyout'));
@@ -91,6 +92,18 @@ try{
      return {moved,restored:(await chrome.bookmarks.getChildren(user.id)).map(n=>n.title),empty:(await chrome.bookmarks.get(empty.id))[0].title};
    });
    assert.deepEqual(receipt.moved,['Beta','Alpha']);assert.deepEqual(receipt.restored,['Alpha','Beta','Gamma']);assert.equal(receipt.empty,'HQ TEST Keep Empty');
+ });
+ await check('Native tab groups survive save and restore in a separate window',async()=>{
+   await page.evaluate(()=>HQPanels.close());await page.evaluate(()=>HQPanels.open('optimizer-flyout'));
+   const saved=await page.evaluate(async()=>{
+     const a=await chrome.tabs.create({url:'https://example.org/hq-test-a',active:false}),b=await chrome.tabs.create({url:'https://example.org/hq-test-b',active:false});
+     const group=await chrome.tabs.group({tabIds:[a.id,b.id]});await chrome.tabGroups.update(group,{title:'HQ Maths Test',color:'blue'});
+     await Workspaces.saveCurrent('Native group test');const snapshot=Workspaces.items[0];await Workspaces.restore(snapshot.id);
+     const groups=await chrome.tabGroups.query({title:'HQ Maths Test'});return {snapshot: snapshot.tabs.filter(t=>t.url.includes('/hq-test-')),groups:groups.map(g=>({title:g.title,color:g.color,windowId:g.windowId})),originalStillOpen:(await chrome.tabs.get(a.id)).url};
+   });
+   assert.equal(saved.snapshot.length,2);assert(saved.snapshot.every(t=>t.groupTitle==='HQ Maths Test'));assert.equal(saved.groups.length,2);assert(saved.originalStillOpen.includes('/hq-test-a'));
+   // Test-only cleanup. Application restore itself never closes original tabs.
+   await page.evaluate(async()=>{const own=await chrome.tabs.getCurrent();for(const window of await chrome.windows.getAll()){if(window.id!==own.windowId)await chrome.windows.remove(window.id);}for(const tab of await chrome.tabs.query({currentWindow:true})){if(tab.url?.includes('/hq-test-'))await chrome.tabs.remove(tab.id);}});
  });
  await check('Gmail connect handles cancelled OAuth visibly (token-provider stub)',async()=>{
    await page.evaluate(()=>HQPanels.close());await page.evaluate(()=>HQPanels.open('gmail-flyout'));
