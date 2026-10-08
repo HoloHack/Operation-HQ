@@ -93,17 +93,44 @@ try{
    });
    assert.deepEqual(receipt.moved,['Beta','Alpha']);assert.deepEqual(receipt.restored,['Alpha','Beta','Gamma']);assert.equal(receipt.empty,'HQ TEST Keep Empty');
  });
+ await check('Native bookmark sorting follows topic, leaves ambiguity in place, and undoes exact moves',async()=>{
+   await page.evaluate(()=>HQPanels.close());await page.evaluate(()=>HQPanels.open('bookmarks-flyout'));
+   const sorted=await page.evaluate(async()=>{
+     await chrome.storage.local.set({hq_realtime_sort_enabled:false});
+     const tree=await chrome.bookmarks.getTree(),bar=tree[0].children.find(n=>n.id==='1')||tree[0].children[0];
+     const folder=await chrome.bookmarks.create({parentId:bar.id,title:'HQ TEST Sorting'});
+     const maths=await chrome.bookmarks.create({parentId:folder.id,title:'Cambridge Maths chapter 5 quadratics',url:'https://youtube.com/watch?v=hq-maths'});
+     const coding=await chrome.bookmarks.create({parentId:folder.id,title:'API reference',url:'https://docs.github.com/en/rest'});
+     const ambiguous=await chrome.bookmarks.create({parentId:folder.id,title:'Watch this',url:'https://example.org/hq-ambiguous'});
+     let result;for(let i=0;i<40;i++){result=await Bookmarks.runExclusive('Native topic sort',()=>Bookmarks.applySort(folder.id));if(!result?.blocked)break;await new Promise(r=>setTimeout(r,50));}
+     if(result?.error||result?.blocked)throw new Error(document.getElementById('bookmark-log').textContent);
+     const topic=async id=>{const b=(await chrome.bookmarks.get(id))[0];return Bookmarks.folderPath(b.parentId,bar.id);};
+     const mathPath=await topic(maths.id),codingPath=await topic(coding.id),ambiguousParent=(await chrome.bookmarks.get(ambiguous.id))[0].parentId;
+     await Bookmarks.undo();return {mathPath,codingPath,ambiguityPreserved:ambiguousParent===folder.id,restored:(await chrome.bookmarks.getChildren(folder.id)).map(n=>n.id),expected:[maths.id,coding.id,ambiguous.id]};
+   });
+   assert.deepEqual(sorted.mathPath,['School & Academics','Mathematics']);assert.deepEqual(sorted.codingPath,['Coding & Dev','Docs & References']);assert(sorted.ambiguityPreserved);assert.deepEqual(sorted.restored,sorted.expected);
+ });
+ await check('Large bookmark decision UI is paginated without dropping entries',async()=>{
+   const result=await page.evaluate(()=>{
+     const prior=Bookmarks.decisionItems;
+     const fixture=Array.from({length:65},(_,i)=>({bm:{id:'ui-fixture-'+i,title:'Ambiguous fixture '+i,url:'https://example.org/'+i,parentId:'1'},reasons:['test fixture'],candidates:[]}));
+     Bookmarks.renderAccuracyGate(fixture);const first=document.querySelectorAll('.bookmark-review-row').length;
+     document.querySelector('[data-bookmark-page="next"]').click();const second=document.querySelector('.bookmark-review-row strong').textContent;
+     const retained=Bookmarks.decisionItems.length;Bookmarks.decisionPage=0;Bookmarks.renderAccuracyGate(prior);return {first,second,retained};
+   });
+   assert.equal(result.first,20);assert.equal(result.second,'Ambiguous fixture 20');assert.equal(result.retained,65);
+ });
  await check('Native tab groups survive save and restore in a separate window',async()=>{
    await page.evaluate(()=>HQPanels.close());await page.evaluate(()=>HQPanels.open('optimizer-flyout'));
    const saved=await page.evaluate(async()=>{
      const own=await chrome.tabs.getCurrent();const a=await chrome.tabs.create({windowId:own.windowId,url:'https://example.org/hq-test-a',active:false}),b=await chrome.tabs.create({windowId:own.windowId,url:'https://example.org/hq-test-b',active:false});
      const group=await chrome.tabs.group({tabIds:[a.id,b.id]});await chrome.tabGroups.update(group,{title:'HQ Maths Test',color:'blue'});
      await Workspaces.saveCurrent('Native group test');const snapshot=Workspaces.items[0];await Workspaces.restore(snapshot.id);
-     const groups=await chrome.tabGroups.query({title:'HQ Maths Test'});return {snapshot: snapshot.tabs.filter(t=>t.url.includes('/hq-test-')),groups:groups.map(g=>({title:g.title,color:g.color,windowId:g.windowId})),originalStillOpen:(await chrome.tabs.get(a.id)).url};
+     const groups=await chrome.tabGroups.query({title:'HQ Maths Test'});return {snapshot: snapshot.tabs.filter(t=>t.url.includes('/hq-test-')),groups:groups.map(g=>({title:g.title,color:g.color,windowId:g.windowId})),originalGroupId:(await chrome.tabs.get(a.id)).groupId,expectedOriginalGroupId:group};
    });
-   assert.equal(saved.snapshot.length,2);assert(saved.snapshot.every(t=>t.groupTitle==='HQ Maths Test'));assert.equal(saved.groups.length,2);assert(saved.originalStillOpen.includes('/hq-test-a'));
+   assert.equal(saved.snapshot.length,2);assert(saved.snapshot.every(t=>t.groupTitle==='HQ Maths Test'));assert.equal(saved.groups.length,2);assert.equal(saved.originalGroupId,saved.expectedOriginalGroupId);
    // Test-only cleanup. Application restore itself never closes original tabs.
-   await page.evaluate(async()=>{const own=await chrome.tabs.getCurrent();for(const window of await chrome.windows.getAll()){if(window.id!==own.windowId)await chrome.windows.remove(window.id);}for(const tab of await chrome.tabs.query({currentWindow:true})){if(tab.url?.includes('/hq-test-'))await chrome.tabs.remove(tab.id);}});
+   await page.evaluate(async()=>{const own=await chrome.tabs.getCurrent();for(const window of await chrome.windows.getAll()){if(window.id!==own.windowId)await chrome.windows.remove(window.id);}for(const tab of await chrome.tabs.query({currentWindow:true})){if(Workspaces.restorableUrl(tab)?.includes('/hq-test-'))await chrome.tabs.remove(tab.id);}});
  });
  await check('Gmail connect handles cancelled OAuth visibly (token-provider stub)',async()=>{
    await page.evaluate(()=>HQPanels.close());await page.evaluate(()=>HQPanels.open('gmail-flyout'));
@@ -122,7 +149,7 @@ try{
    }
  });
  await check('Heavy AI stays unloaded and measured DOM/JS heap remain bounded',async()=>{
-   assert.equal(await page.evaluate(()=>performance.getEntriesByType('resource').some(r=>/webllm-loader|webllm-bundle/.test(r.name))),false);
+   assert.equal(await page.evaluate(()=>performance.getEntriesByType('resource').some(r=>/webllm-loader|web-llm\.js/.test(r.name))),false);
    const session=await context.newCDPSession(page);await session.send('Performance.enable');const metrics=await session.send('Performance.getMetrics');
    const heap=metrics.metrics.find(m=>m.name==='JSHeapUsedSize')?.value,dom=await page.locator('*').count();
    assert(heap<128*1024*1024,'JS heap exceeded test budget');assert(dom<20000,'DOM exceeded test budget');
