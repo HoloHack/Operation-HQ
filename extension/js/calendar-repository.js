@@ -25,6 +25,23 @@ const CalendarRepository = {
     return `${prefix}:${crypto.randomUUID()}`;
   },
 
+  validateDate(value) {
+    if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) throw new Error("Calendar date must use YYYY-MM-DD.");
+    const parsed = new Date(`${value}T00:00:00Z`);
+    if (!Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value) throw new Error("Calendar date is invalid.");
+    return value;
+  },
+
+  validateId(value) {
+    if (typeof value !== "string" || !value || value.length > 200 || ["__proto__", "prototype", "constructor"].includes(value)) throw new Error("Calendar identifier is invalid.");
+    return value;
+  },
+
+  validateText(value) {
+    if (typeof value !== "string" || !value.trim() || value.length > 500) throw new Error("Calendar text must contain 1–500 characters. Nothing was truncated.");
+    return value;
+  },
+
   async readState() {
     const saved = await chrome.storage.local.get([this.EVENTS_KEY, this.DETAILS_KEY, this.IDS_KEY, this.REVISION_KEY]);
     const events = structuredClone(this.validMap(saved[this.EVENTS_KEY]));
@@ -83,10 +100,12 @@ const CalendarRepository = {
     if (action.type === "upsertEvent") {
       const event = structuredClone(action.event || {});
       if (!event.id || !event.date || !event.title || !Array.isArray(event.occurrences)) throw new Error("Calendar event operation is incomplete.");
+      this.validateId(event.id); this.validateDate(event.date); this.validateText(event.title);
+      if (!event.occurrences.length || event.occurrences.length > 200) throw new Error("Calendar recurrence requires 1–200 occurrences. Split a longer plan; nothing was truncated.");
+      event.occurrences.forEach(occurrence => { this.validateDate(occurrence?.dateKey); this.validateText(occurrence?.text); });
       const previous = this.removeEvent(state, event.id);
-      event.occurrences.slice(0, 200).forEach((occurrence, index) => {
-        if (!occurrence?.dateKey || typeof occurrence.text !== "string") return;
-        (state.events[occurrence.dateKey] ||= []).push(occurrence.text.slice(0, 500));
+      event.occurrences.forEach((occurrence, index) => {
+        (state.events[occurrence.dateKey] ||= []).push(occurrence.text);
         (state.ids[occurrence.dateKey] ||= []).push(`event:${event.id}:${index}`);
       });
       state.details[event.id] = event;
@@ -94,17 +113,20 @@ const CalendarRepository = {
     }
 
     if (action.type === "removeEvent") {
+      this.validateId(action.id);
       const previous = this.removeEvent(state, String(action.id || ""));
       return previous ? [{ type: "upsertEvent", event: previous }] : [];
     }
 
     if (action.type === "addLegacy") {
       const dateKey = String(action.dateKey || "");
-      const text = String(action.text || "").trim().slice(0, 500);
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey) || !text) throw new Error("Calendar entry operation is incomplete.");
+      this.validateDate(dateKey);
+      const text = this.validateText(action.text).trim();
       const values = state.events[dateKey] ||= [];
       if (action.dedupe !== false && values.includes(text)) return [];
       const id = String(action.id || this.entryId());
+      this.validateId(id);
+      if (Object.values(state.ids).some(ids => Array.isArray(ids) && ids.includes(id))) throw new Error("Calendar entry identifier already exists.");
       values.push(text);
       (state.ids[dateKey] ||= []).push(id);
       return [{ type: "removeLegacy", id, dateKey }];
@@ -112,6 +134,7 @@ const CalendarRepository = {
 
     if (action.type === "removeLegacy") {
       const dateKey = String(action.dateKey || "");
+      this.validateDate(dateKey);
       const ids = state.ids[dateKey] || [];
       let index = action.id ? ids.indexOf(String(action.id)) : Number(action.index);
       if ((!Number.isInteger(index) || index < 0) && action.text) index = (state.events[dateKey] || []).indexOf(String(action.text));
@@ -121,12 +144,14 @@ const CalendarRepository = {
 
     if (action.type === "restoreLegacy") {
       const dateKey = String(action.dateKey || "");
-      const text = String(action.text || "").slice(0, 500);
-      if (!dateKey || !text) return [];
+      this.validateDate(dateKey);
+      const text = this.validateText(action.text);
       const values = state.events[dateKey] ||= [];
       const ids = state.ids[dateKey] ||= [];
       const index = Math.max(0, Math.min(Number(action.index) || 0, values.length));
       const id = String(action.id || this.entryId());
+      this.validateId(id);
+      if (Object.values(state.ids).some(ids => Array.isArray(ids) && ids.includes(id))) throw new Error("Calendar restore would duplicate an existing entry.");
       values.splice(index, 0, text);
       ids.splice(index, 0, id);
       return [{ type: "removeLegacy", id, dateKey }];
@@ -137,9 +162,10 @@ const CalendarRepository = {
 
   async _authoritativeCommit(actions) {
     const run = async () => {
+      if (!Array.isArray(actions) || actions.length > 250) throw new Error("Calendar transaction requires at most 250 actions. Nothing was changed or truncated.");
       const state = await this.readState();
       const inverse = [];
-      for (const action of Array.isArray(actions) ? actions.slice(0, 250) : []) {
+      for (const action of actions) {
         inverse.unshift(...this.applyAction(state, action));
       }
       state.revision += 1;
