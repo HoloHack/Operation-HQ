@@ -45,6 +45,16 @@ External HTTP is blocked in that suite. Gmail cancellation uses a token-provider
 
 Memory must be reported precisely: `Performance.getMetrics` provides JS heap, not renderer RSS or GPU memory. No 300 MB per-tab Mac claim is made. Ordinary new tabs load no Operation HQ workspace scripts; the optional AI can still require substantial memory when explicitly loaded.
 
+## Verified release evidence
+
+On 8 October 2026, all 11 automated suites and all 17 native Chromium journeys passed at source commit `98b47a6ecebc7db5457716830f54e18a5e904045`. [Cloud run and downloadable screenshots/results](https://github.com/HoloHack/Operation-HQ/actions/runs/37760409606).
+
+The native run opened and closed all 21 packaged flyouts, verified three distinct generated study palettes did not apply before selection, and counted 73 active page animation tracks during the normal-motion launch preview. Skip returned control to the interface. That count includes page animations and is not a frame-pacing or visual-quality measurement. The exact-origin bridge passed real Chrome external messaging against an isolated HTML fixture; the live dashboard still needs its import UI.
+
+After those journeys, measured JavaScript heap was 16,426,608 bytes (15.7 MiB), with 3,560 DOM elements and no model bundle loaded. There were zero uncaught page errors. Expected blocked-resource messages and a fixture resource 404 remained in the console log; successful live providers were deliberately not claimed. This does not measure total renderer, GPU or Mac RAM.
+
+The runtime package was reproduced locally with the same SHA-256 as the cloud-built ZIP. Source/document-only follow-ups remain subject to the same GitHub checks. The artifact is reconstructed 3.1.0, not a certification of inaccessible original 3.0 source or 100% roadmap completion.
+
 ## Install, preserve data, and rollback
 
 1. Keep the currently installed extension and its data. Export a non-secret backup from its working settings before replacing files; do not uninstall it.
