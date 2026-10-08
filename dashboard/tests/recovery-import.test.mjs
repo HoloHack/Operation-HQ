@@ -60,3 +60,10 @@ test('manual recovery waits for an in-flight save and retains unrelated current 
  assert.throws(()=>c.restore(copy),/current save/);const recovering=c.recoverCopy(copy);gate.resolve();await flushing;await recovering;
  assert.deepEqual(new Set(c.state.tasks.map(t=>t.id)),new Set(['current','recovered']));assert.deepEqual(c.conflict,{local:'Current edit',remote:'Older draft'});assert.equal(writes,1);c.dispose();
 });
+
+test('rapid edits retain only the active device write and newest pending recovery snapshot',async()=>{
+ const gate=defer(),copies=[];const c=coordinator({checkpoint:async value=>{if(!value)return;copies.push(value.state.notes.plain);if(copies.length===1)await gate.promise;}});
+ await c.start();await c.checkpointSettled();
+ for(let i=0;i<100;i++)c.change(s=>({...s,notes:{plain:'Edit '+i,updatedAt:i+1}}));
+ gate.resolve();await c.checkpointSettled();assert.deepEqual(copies,['Edit 0','Edit 99']);assert.equal(c.journaledGeneration,c.generation);assert.equal(c.state.notes.plain,'Edit 99');c.dispose();
+});

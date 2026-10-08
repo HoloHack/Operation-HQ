@@ -29,6 +29,8 @@ export class SyncCoordinator<T extends Notes> {
   private baselineNotes = "";
   private baseline: T;
   private checkpointFlight: Promise<void> = Promise.resolve();
+  private checkpointRunning = false;
+  private checkpointNext: {generation: number; value: SyncCheckpoint<T> | null} | null = null;
   private recoveryLoaded = false;
   private recoveryBlocked = false;
   private flight: Promise<void> | null = null;
@@ -43,12 +45,22 @@ export class SyncCoordinator<T extends Notes> {
     if (!this.options.checkpoint || this.recoveryBlocked) return;
     const generation = this.generation;
     const value: SyncCheckpoint<T> | null = this.pending ? {version:1,state:this.state,baseline:this.baseline,revision:this.revision,conflict:this.conflict ? {...this.conflict} : null} : null;
-    this.checkpointFlight = this.checkpointFlight.then(async () => {
-      try { await this.options.checkpoint!(value); this.journaledGeneration = generation; this.recoveryError = ""; }
-      catch (error) { this.recoveryError = error instanceof Error ? error.message : "Local recovery failed. Export unsaved work before closing."; }
-      this.notify();
-    });
+    // Keep one active write and one latest pending copy, rather than every keystroke.
+    this.checkpointNext = {generation,value};
+    if (this.checkpointRunning) return;
+    this.checkpointRunning = true;
+    this.checkpointFlight = (async () => {
+      try {
+        while (this.checkpointNext) {
+          const next = this.checkpointNext; this.checkpointNext = null;
+          try { await this.options.checkpoint!(next.value); this.journaledGeneration = next.generation; this.recoveryError = ""; }
+          catch (error) { this.recoveryError = error instanceof Error ? error.message : "Local recovery failed. Export unsaved work before closing."; }
+          this.notify();
+        }
+      } finally { this.checkpointRunning = false; }
+    })();
   }
+
   restore(value: SyncCheckpoint<T>) {
     if (this.flight) throw new Error("Wait for the current save before recovering a copy.");
     if (value.version !== 1) throw new Error("Unsupported recovery copy. It was left untouched.");

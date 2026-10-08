@@ -274,10 +274,11 @@ export default function Dashboard({ displayName, signedIn, accountId }: { displa
     const subject = /math/i.test(text) ? "Mathematics" : /science/i.test(text) ? "Science" : /hsie|history|geography/i.test(text) ? "HSIE" : /english/i.test(text) ? "English" : undefined;
     if (/\bchapters?\b/i.test(text) && !chapters.length) { setCommandResult({ title: "Check chapter list", detail: "Use whole chapter numbers, such as chapters 5, 7, 8 and 10. No tasks were changed." }); return; }
     if (chapters.length && subject) { setCommandResult({ title: `${subject} mission ready`, detail: `${chapters.length} focused chapter blocks will be created. Nothing changes until you approve below.`, chapters, subject }); setThemes(themeChoices(text)); return; }
+    if (/\b(theme|palette|colou?r(?:s|\s+scheme)?)\b/i.test(text)) { setThemes(themeChoices(text)); setCommandResult({title: "Colour choices ready", detail: "Choose one of three generated combinations to apply it. Your tasks, timer and schedule stay as they are."}); return; }
     if (/bookmark|tabs?|workspace/i.test(text)) { setCommandResult({ title: "Browser review ready", detail: "Open the extension’s local browser tools. No tab or bookmark will be changed without another confirmation." }); return; }
     if (/note/i.test(text)) { setPanel("notes"); setCommandResult({ title: "Notes opened", detail: "Check the saving status before closing this tab. Conflicting edits are kept for review." }); return; }
     if (/calendar|schedule|timetable/i.test(text)) { setPanel("calendar"); setCommandResult({ title: "Calendar opened", detail: "This dashboard has a basic agenda. Full timetable planning remains in the extension; this command does not reschedule your work." }); return; }
-    setCommandResult({ title: "I need one clearer instruction", detail: "Try a subject plus chapters, ‘open bookmarks’, ‘show calendar’, or ‘open notes’. I will ask before anything consequential changes." });
+    setCommandResult({ title: "I need one clearer instruction", detail: "Try a subject plus chapters, ‘open bookmarks’, ‘show calendar’, ‘open notes’, or ‘change theme for HSIE’. I will ask before anything consequential changes." });
   };
 
   const applyStudyPlan = () => {
