@@ -1075,6 +1075,7 @@ function wireDock() {
     }
     const generation = ++panelRequestGeneration;
     if (!(await LazyFeatures.ensure(panelId)) || generation !== panelRequestGeneration) return false;
+    if (!trigger && document.getElementById(panelId).classList.contains("open")) return true;
     return open(panelId, trigger || document.querySelector(`.dock-btn[data-panel="${panelId}"]`));
   }
 
@@ -1633,7 +1634,6 @@ async function boot() {
     const tool = new URLSearchParams(location.hash.slice(1)).get("tool");
     if (!Object.hasOwn(toolPanels, tool || "")) return;
     if (tool === "settings") { document.getElementById("settings-btn").click(); return; }
-    if (document.getElementById(toolPanels[tool]).classList.contains("open")) return;
     void window.HQPanels.open(toolPanels[tool]).catch(error => { window.HQEarlyDiagnostics?.record("panel-route", error.message); Wallpaper.toast("The tool could not open. Please retry."); });
   };
   window.addEventListener("hashchange", openRequested);

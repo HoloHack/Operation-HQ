@@ -39,7 +39,7 @@ try{
  });
  const panels=await page.evaluate(()=>[...document.querySelectorAll('.flyout[id]')].map(e=>e.id));
  await check('All packaged flyouts open and have reachable close buttons',async()=>{
-   for(const id of panels){
+   for(const id of panels){console.log('Opening panel '+id);
      await page.evaluate(()=>HQPanels.close());
      assert.equal(await page.evaluate(id=>HQPanels.open(id),id),true,'Panel failed: '+id);
      const panel=page.locator('#'+id);await panel.waitFor({state:'visible'});
@@ -116,5 +116,5 @@ try{
    return {jsHeapUsedBytes:heap,domElements:dom,note:'JS heap only. Not renderer RSS, GPU memory, or a measured 300 MB Mac limit.'};
  });
  await check('No uncaught browser errors across tested journeys',async()=>{assert.deepEqual(errors,[]);return {consoleErrors};});
-}catch(error){console.error(error);process.exitCode=1;if(context){for(const p of context.pages().filter(p=>p.url().includes('newtab.html'))){await p.screenshot({path:path.join(output,'failure.png')}).catch(()=>{});const diagnostics=await p.evaluate(()=>({issues:typeof BootDiagnostics==='undefined'?[]:BootDiagnostics.issues,early:window.HQEarlyDiagnostics?.entries()})).catch(()=>null);await fs.writeFile(path.join(output,'diagnostics.json'),JSON.stringify(diagnostics,null,2));}}}
+}catch(error){console.error(error);process.exitCode=1;if(context){for(const p of context.pages().filter(p=>p.url().includes('newtab.html'))){await p.screenshot({path:path.join(output,'failure.png')}).catch(()=>{});const diagnostics=await p.evaluate(()=>({issues:typeof BootDiagnostics==='undefined'?[]:BootDiagnostics.issues,early:window.HQEarlyDiagnostics?.entries()})).catch(()=>null);console.log('Failure diagnostics',JSON.stringify(diagnostics));console.log('Failure panel states',JSON.stringify(await p.evaluate(()=>({hash:location.hash,panels:[...document.querySelectorAll('.flyout.open')].map(e=>({id:e.id,visible:getComputedStyle(e).visibility})),errors:window.HQEarlyDiagnostics?.entries()})).catch(()=>null)));await fs.writeFile(path.join(output,'diagnostics.json'),JSON.stringify(diagnostics,null,2));}}}
 finally{await fs.writeFile(path.join(output,'chromium-results.json'),JSON.stringify({timestamp:new Date().toISOString(),results,errors,consoleErrors,network,providerTests:'External HTTP blocked; Gmail cancellation token stub. No live account or local model download.'},null,2));await context?.close();await fs.rm(profile,{recursive:true,force:true});}
