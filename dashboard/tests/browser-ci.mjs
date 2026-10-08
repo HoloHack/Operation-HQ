@@ -62,9 +62,9 @@ try{
  await check('Device journals isolate accounts and duplicate tabs reserve independent copies',async()=>{
   const result=await page.evaluate(async()=>{
    const {DraftJournal,claimDraftTab}=window.HQTest;const snapshot={schemaVersion:1,tasks:[],events:[],notes:{plain:'fixture',updatedAt:1},schedule:[],assignments:[],exams:[],habits:[],captures:[],settings:{accentHue:100,supportHue:150,motion:'balanced',density:'balanced',updatedAt:5},focus:{mission:'',minutes:25,chapters:[],updatedAt:0}};
-   const checkpoint={version:1,state:snapshot,baseline:snapshot,revision:0,conflict:null};const a=new DraftJournal('alice','one'),b=new DraftJournal('bob','one'),a2=new DraftJournal('alice','two');await a.write(checkpoint);await b.write(checkpoint);await a2.write(checkpoint);const own=await a.list(),other=await b.list();let rejected=false;try{await a.remove(other[0]);}catch{rejected=true;}
-   const previous=sessionStorage.getItem('hq-draft-tab-id-v1');const claimed=await claimDraftTab('ci-user');const independent=claimed.tabId!==previous;claimed.release();sessionStorage.setItem('hq-draft-tab-id-v1',previous);return {alice:own.length,bob:other.length,rejected,independent};
-  });assert.deepEqual(result,{alice:2,bob:1,rejected:true,independent:true});return result;
+   const checkpoint={version:1,state:snapshot,baseline:snapshot,revision:0,conflict:null};const a=new DraftJournal('alice','one'),b=new DraftJournal('bob','one'),a2=new DraftJournal('alice','two');await a.write(checkpoint);await b.write(checkpoint);await a2.write(checkpoint);const own=await a.list(),other=await b.list();let rejected=false;try{await a.remove(other[0]);}catch{rejected=true;}let forgedRejected=false;try{await a.remove({...other[0],accountId:'alice'});}catch{forgedRejected=true;}
+   const previous=sessionStorage.getItem('hq-draft-tab-id-v1');const claimed=await claimDraftTab('ci-user');const independent=claimed.tabId!==previous;claimed.release();sessionStorage.setItem('hq-draft-tab-id-v1',previous);return {alice:own.length,bob:other.length,rejected,forgedRejected,independent};
+  });assert.deepEqual(result,{alice:2,bob:1,rejected:true,forgedRejected:true,independent:true});return result;
  });
  await check('Recovery summaries paginate without loading documents and version-1 copies remain readable',async()=>{
   const result=await page.evaluate(async()=>{
@@ -77,6 +77,14 @@ try{
  });
  await check('Recovered notes conflict exposes both versions and saves only after choice',async()=>{
   offline=true;await page.locator('.rail').getByRole('button',{name:'Notes',exact:true}).click();await page.getByLabel('Notes document',{exact:true}).fill('My offline edit');await page.getByText('Unsaved work has a recovery copy on this device.',{exact:true}).waitFor();state.snapshot={...state.snapshot,notes:{plain:'Changed in another window',updatedAt:Date.now()+1000}};state.revision++;offline=false;await page.reload();await page.getByText('Review conflict',{exact:true}).waitFor();await page.locator('.rail').getByRole('button',{name:'Notes',exact:true}).click();assert.equal(await page.getByLabel('Notes document',{exact:true}).inputValue(),'My offline edit');assert.equal(await page.getByLabel('Saved elsewhere',{exact:true}).inputValue(),'Changed in another window');await page.getByRole('button',{name:'Keep both',exact:true}).click();await poll(()=>state.snapshot.notes.plain,v=>v==='My offline edit\n\n--- Other version ---\n\nChanged in another window');await page.getByRole('button',{name:'Close panel'}).click();
+ });
+ await check('Recovery picker restores a selected copy through real dashboard controls',async()=>{
+  await page.getByText('Saved',{exact:true}).waitFor();
+  await page.evaluate(async(snapshot)=>{const recovered={...snapshot,tasks:[...snapshot.tasks,{id:'recovery-action',title:'Finish maths review',priority:'high',completed:false,updatedAt:Date.now()}]};await new window.HQTest.DraftJournal('ci-user','selected-copy').write({version:1,state:recovered,baseline:snapshot,revision:0,conflict:null});},state.snapshot);
+  await page.getByRole('button',{name:'Open settings'}).click();await page.getByRole('button',{name:'Recover unsaved drafts',exact:true}).click();
+  await page.getByRole('button',{name:'Review and recover',exact:true}).waitFor();assert.equal(await page.getByRole('dialog').count(),1);
+  await page.getByRole('button',{name:'Review and recover',exact:true}).click();await poll(()=>state.snapshot.tasks.some(t=>t.id==='recovery-action'),Boolean);await page.getByText('Saved',{exact:true}).waitFor();assert(state.snapshot.tasks.some(t=>t.id==='browser:math-ch5'));
+  return {unrelatedTaskPreserved:true,restoredTaskPresent:true};
  });
  await check('Panels and import close buttons fit narrow screens; keyboard Escape restores Cinema',async()=>{
   for(const width of [320,640,1440,1920]){await page.setViewportSize({width,height:960});await page.getByRole('button',{name:'Open settings'}).click();const panel=page.getByRole('dialog'),close=page.getByRole('button',{name:'Close panel'});const p=await panel.boundingBox(),c=await close.boundingBox();assert(p.x>=-1&&p.x+p.width<=width+1);assert(c.x>=p.x&&c.x+c.width<=p.x+p.width+1);await close.click();await page.screenshot({path:path.join(out,`dashboard-${width}.png`)});}

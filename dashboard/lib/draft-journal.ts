@@ -42,7 +42,7 @@ export class DraftJournal {
   private open() {
     if (!this.db) this.db = new Promise<IDBDatabase>((resolve, reject) => {
       const request = indexedDB.open(databaseName, 2);
-      const timer = setTimeout(() => reject(new Error('Local recovery storage did not open. Export your work before closing.')), 4000);
+      let expired=false;const timer = setTimeout(() => {expired=true;reject(new Error('Local recovery storage did not open. Export your work before closing.'));}, 4000);
       request.onupgradeneeded = () => {
         if(!request.result.objectStoreNames.contains(storeName)){const store=request.result.createObjectStore(storeName,{keyPath:'id'});store.createIndex('accountId','accountId');}
         if(!request.result.objectStoreNames.contains('summaries')){
@@ -54,7 +54,7 @@ export class DraftJournal {
         }
       };
       request.onerror = () => {clearTimeout(timer);reject(new Error('Local recovery storage is unavailable. Export unsaved work before closing.'));};
-      request.onsuccess = () => {clearTimeout(timer);const db=request.result;db.onversionchange=()=>db.close();resolve(db);};
+      request.onsuccess = () => {clearTimeout(timer);const db=request.result;if(expired){db.close();return;}db.onversionchange=()=>db.close();resolve(db);};
     });
     return this.db;
   }
@@ -90,6 +90,7 @@ export class DraftJournal {
   validate(record: DraftRecord): SyncCheckpoint<HQState> {
     if (record.accountId!==this.accountId || record.checkpoint?.version!==1 || !record.checkpoint.state || !record.checkpoint.baseline) throw new Error('This recovery copy belongs to another account or is unsupported. It was left untouched.');
     if(!Number.isSafeInteger(record.checkpoint.revision) || record.checkpoint.revision<0)throw new Error('This recovery copy has an invalid revision. It was left untouched.');
+    if(record.checkpoint.conflict!==null && (typeof record.checkpoint.conflict?.local!=='string' || typeof record.checkpoint.conflict?.remote!=='string'))throw new Error('This recovery copy has an invalid notes conflict. It was left untouched.');
     const normalize=(raw: HQState) => {
       const collections=['tasks','events','schedule','assignments','exams','habits','captures'] as const;
       if(raw.schemaVersion!==1 || typeof raw.notes?.plain!=='string' || collections.some(key=>!Array.isArray(raw[key])))throw new Error('This recovery copy needs repair. It was left untouched.');
@@ -119,6 +120,9 @@ export class DraftJournal {
   }
   async remove(record: DraftSummary) {
     if(record.accountId!==this.accountId)throw new Error('You cannot remove another account’s recovery copy.');
+    const stored=await this.transaction('readonly',store=>store.get(record.id)) as DraftRecord | undefined;
+    if(!stored)return;
+    if(stored.accountId!==this.accountId)throw new Error('You cannot remove another account’s recovery copy.');
     await this.mutate(record.id,null);
   }
 }

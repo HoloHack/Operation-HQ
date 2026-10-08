@@ -8,7 +8,7 @@
 - Import reads only tasks, calendar entries and notes. The extension must be enabled for this exact dashboard origin, and the user confirms that this is their browser profile before accepting. Previewing never saves. Failed refreshes clear an older preview; late responses cannot reopen a closed preview.
 - Imported records have separate browser IDs, do not replace existing dashboard records or preferences, and do not duplicate on repeated import. Notes offer keep current, use browser, or keep both. Oversized or malformed imports stop without partial changes. This is an explicit import, not automatic synchronization of later browser edits.
 - Unsaved dashboard work now has an account-specific and tab-specific IndexedDB recovery copy. Reloading the same tab restores its pending work; cloud writes wait for a successful authenticated load. Conflicting notes retain both versions for a deliberate choice.
-- Settings → Recover device copies shows 20 small summaries at a time. Full documents load only for the selected recovery or export. Existing version-1 device copies migrate to the summary index without deleting their original records. Duplicate tabs use separate locks and cannot overwrite the same pending draft.
+- Settings → Recover unsaved drafts shows 20 small summaries at a time. Full documents load only for the selected recovery or export. Existing version-1 device copies migrate to the summary index without deleting their original records. Duplicate tabs use separate locks and cannot overwrite the same pending draft.
 - Manual recovery waits for active saves and retains unrelated current tasks. Rapid typing keeps one active device write and only the latest pending copy. Unavailable or unreadable storage produces a visible warning; unreadable copies are not erased.
 - Server responses and requests bind the dashboard to the authenticated account. A stale tab from another signed-in account is refused before database access. Changing accounts remounts the dashboard.
 - Direct theme commands now show three generated colour options before any change; choosing one uses the existing layered transition. The choices are generated heuristics, not a model’s semantic colour recommendation.
@@ -16,7 +16,7 @@
 
 ## Verification
 
-38 executable dashboard regressions pass locally, including isolated SQLite tests against the real route code. Type checking passes. Native Chrome candidate acceptance and final production build are release gates; their final results and links will be recorded before publication.
+38 executable dashboard regressions pass locally, including isolated SQLite tests against the real route code. Type checking and the production build pass. The isolated native Chrome workflow exercises 13 acceptance journeys; publication is gated on both GitHub jobs passing. See [release checks and source](https://github.com/HoloHack/Operation-HQ/pull/5) for the final build, production dependency audit, browser logs and screenshots. The earlier 12-journey candidate already passed [run 37858337059](https://github.com/HoloHack/Operation-HQ/actions/runs/37858337059).
 
 The browser harness uses the actual Dashboard React component, actual extension, Chrome messaging, IndexedDB and Web Locks in a disposable profile. Account/cloud responses are isolated fixtures. The API route is separately covered by account and concurrent-write SQLite tests. Tests never read or modify production bookmarks, notes, tasks, email or calendar data. The test entry is not a deployed application route.
 

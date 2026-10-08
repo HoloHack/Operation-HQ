@@ -48,7 +48,7 @@ test('unavailable recovery cannot block valid cloud saves or delete unreadable c
 test('unreadable recovery records are refused instead of filtering their contents',async()=>{
  const {DraftJournal}=await import('../lib/draft-journal.ts');const j=new DraftJournal('alice','tab');const checkpoint={version:1,state:base(),baseline:base(),revision:0,conflict:null};
  assert.equal(j.validate({id:'test',accountId:'alice',savedAt:1,checkpoint}).state.notes.plain,'dashboard notes');
- for(const modified of [{...checkpoint,revision:-1},{...checkpoint,state:{...base(),tasks:[{}]}},{...checkpoint,state:{...base(),schemaVersion:2}},{...checkpoint,state:{...base(),tasks:[task('same'),task('same')]}},{...checkpoint,state:{...base(),tasks:[task('x','a'.repeat(501))]}}])assert.throws(()=>j.validate({id:'test',accountId:'alice',savedAt:1,checkpoint:modified}));
+ for(const modified of [{...checkpoint,conflict:{}},{...checkpoint,revision:-1},{...checkpoint,state:{...base(),tasks:[{}]}},{...checkpoint,state:{...base(),schemaVersion:2}},{...checkpoint,state:{...base(),tasks:[task('same'),task('same')]}},{...checkpoint,state:{...base(),tasks:[task('x','a'.repeat(501))]}}])assert.throws(()=>j.validate({id:'test',accountId:'alice',savedAt:1,checkpoint:modified}));
  assert.throws(()=>j.validate({id:'test',accountId:'bob',savedAt:1,checkpoint}));
 });
 
