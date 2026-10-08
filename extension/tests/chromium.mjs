@@ -20,7 +20,7 @@ try{
  context.on('page',p=>{p.on('pageerror',e=>errors.push({page:p.url(),message:e.message}));p.on('console',m=>{if(m.type()==='error')consoleErrors.push(m.text());});});
  await context.route(/^https?:\/\//,route=>{network.push(route.request().url());return route.abort();});
  const page=await context.newPage();await page.emulateMedia({reducedMotion:'reduce'});
- await page.goto(base+'newtab.html');await page.waitForFunction(()=>document.body.classList.contains('app-ready'));
+ await page.goto(base+'newtab.html');await page.waitForFunction(()=>document.body?.classList.contains('app-ready'));
  await check('Native service worker boots without startup errors',async()=>{
    const issues=await worker.evaluate(()=>chrome.storage.local.get('hq_background_diagnostics_v1'));
    assert.equal((await page.evaluate(()=>BootDiagnostics.issues)).length,0);
@@ -56,8 +56,8 @@ try{
    await page.locator('#settings-btn').click();await page.waitForFunction(()=>!document.getElementById('settings-drawer').classList.contains('hidden'));
    await page.locator('#close-settings').click();
    await page.evaluate(()=>localStorage.setItem('hq_safe_mode_v1','true'));await page.reload();
-   await page.waitForFunction(()=>document.body.classList.contains('app-ready'));assert(await page.locator('#safe-mode-exit').isVisible());
-   await page.locator('#safe-mode-exit').click();await page.waitForFunction(()=>document.body.classList.contains('app-ready')&&!document.body.classList.contains('safe-mode'));
+   await page.waitForFunction(()=>document.body?.classList.contains('app-ready'));assert(await page.locator('#safe-mode-exit').isVisible());
+   await page.locator('#safe-mode-exit').click();await page.waitForFunction(()=>document.body?.classList.contains('app-ready')&&!document.body?.classList.contains('safe-mode'));
  });
  await check('Unknown commands respond; maths chapter lists stay exact and await confirmation',async()=>{
    await page.evaluate(()=>HQPanels.open('nexus-flyout'));
@@ -77,7 +77,7 @@ try{
    if(await rich.count())await rich.fill('Maths practice\nChapter five');else await page.locator('#notes-area-fallback').fill('Maths practice\nChapter five');
    await waitForSaved(()=>page.evaluate(async()=> (await chrome.storage.local.get('hq_notes_document_v2')).hq_notes_document_v2?.plain),value=>typeof value==='string'&&value.includes('Chapter five')); 
    const before=await page.evaluate(async()=> (await chrome.storage.local.get('hq_notes_document_v2')).hq_notes_document_v2.plain);
-   await page.reload();await page.waitForFunction(()=>document.body.classList.contains('app-ready'));await page.evaluate(()=>HQPanels.open('notes-flyout'));
+   await page.reload();await page.waitForFunction(()=>document.body?.classList.contains('app-ready'));await page.evaluate(()=>HQPanels.open('notes-flyout'));
    const after=await page.evaluate(async()=> (await chrome.storage.local.get('hq_notes_document_v2')).hq_notes_document_v2.plain);
    assert.equal(after,before);assert.equal((after.match(/Chapter five/g)||[]).length,1);return {plain:after};
  });

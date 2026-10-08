@@ -1,3 +1,11 @@
+# Operation HQ — Browser Companion 3.1.0
+
+This is the recoverable-source reconstruction. It opens browser tools on demand and leaves ordinary new tabs alone. Start with [the current release and limits](docs/BROWSER-COMPANION-2026-10-08.md). The original 3.0 archive could not be downloaded; unseen additions are not claimed as preserved.
+
+Run `npm ci`, `npm test`, and `npm run test:browser` after installing Playwright Chromium. GitHub Actions performs native extension checks in an isolated profile.
+
+The content below records the recovered 2.8 baseline and historical feature descriptions.
+
 # Operation HQ — New Tab
 
 ## Version 2.8.1 release highlights — Stability Pass
