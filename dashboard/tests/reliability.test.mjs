@@ -145,3 +145,7 @@ test('chapter plan requires real deadline and estimates and reuses existing acti
   const first=createChapterTasks(plan,[existing],id,1);assert.equal(first.tasks.length,3);assert.equal(first.reused,1);assert.ok(first.tasks.every(t=>t.due===plan.due&&t.estimateMinutes===45));assert.equal(existing.due,'2026-10-09');
   const second=createChapterTasks(plan,[existing,...first.tasks],id,2);assert.equal(second.tasks.length,0);assert.equal(second.reused,4);
 });
+
+test('API account binding rejects a stale tab after another account signs in',async()=>{
+ const r=routeHarness();const request=req({baseRevision:0,snapshot:emptyHQState()});request.headers.set('x-hq-account','another-user');assert.equal((await r.PUT(request)).status,403);assert.equal((await r.GET(new Request('https://hq.test/api/state',{headers:{'x-hq-account':'another-user'}}))).status,403);assert.equal(r.db.prepare('SELECT count(*) AS n FROM hq_state').get().n,0);r.db.close();
+});

@@ -22,10 +22,10 @@ Current implementation is a reliability release, not the finished roadmap. Do no
 
 | Surface | Data | Boundary | Retention/recovery | Remaining work |
 |---|---|---|---|---|
-| Browser dashboard memory | Tasks, notes, events, preferences | Signed-in application page | Until page closes; pending data can be exported | Account-scoped durable outbox; crash recovery |
+| Browser dashboard and device journal | Tasks, notes, events, preferences | Signed-in account AND separately locked tab identity | Pending copies in IndexedDB; exact same-tab reload recovery; selected copies can be recovered/exported | Cloud conflict history; encrypted exports; deletion/tombstones; target-device crash tests |
 | D1 account row | Sanitized dashboard snapshot, revision | Server-injected user identity; bound queries | Persistent, revision checked | Event-level history, deletion/tombstones, retention UI, backup restore |
-| Optional browser import | Whitelisted planning projection | Exact deployed origin plus explicit read/accept actions | Preview in memory, accepted data saved to account | Extension-side pairing and field-by-field parity |
-| Browser tool handoff | Requested tool name | Extension checks and Chrome permissions | No dashboard copying of bookmark/mail contents | Real Chrome connected/disabled/revoked-state tests |
+| Optional browser import | Whitelisted tasks/events/notes projection | Exact deployed origin, extension opt-in, explicit profile confirmation and read/accept | Preview; namespaced additions; existing records and preferences retained; notes choice | Revocable account pairing; full field parity; two-way operations and deletion semantics |
+| Browser tool handoff | Requested tool name | Extension allowlist and Chrome permissions | No dashboard copying of bookmark/mail contents | Real Chrome tests cover disabled/connected bridge and Nexus handoff; live account/provider checks remain |
 | Weather | Coordinates and forecast request | Browser location permission; HTTPS provider | Response held in memory | Units/forecast settings; age label and independent provider tests |
 | Recovery export | Current planning snapshot | Explicit download action | User-controlled plaintext file | Import preview and validated restore; optional encryption |
 | Local model (extension) | Selected local context per roadmap | Explicit model load/source selection | Not independently verified this run | Download/unload, quotas, unsupported GPU and retention tests |
@@ -47,7 +47,7 @@ Recovery JSON contains personal tasks/notes. It is not encrypted and should not 
 
 | Work package | Concrete next deliverable | Acceptance criteria | Dependencies |
 |---|---|---|---|
-| Extension audit | Obtain exact v3.0.0 source; run all six suites and inspect Chrome API mutations | No unmanaged folder deletes; no overlapping sort; exact undo; malformed message rejection | Recoverable archive or source checkout |
+| Extension source parity | Compare recovered/tested 3.1 companion with the exact previously installed v3.0 source | 3.1 has isolated mutation/undo/lock and native Chrome tests; comparison must identify any missing v3.0-only capabilities | Fresh archive of the previously installed version, only if parity with that version is required |
 | Shared sync protocol | Versioned domain schema, operation IDs, tombstones, paired account and per-collection selection | Concurrent edits/deletes preserve unrelated work; rich event metadata survives round trip; disconnect stops traffic | Extension audit |
 | Calendar/timetable | Real month/week/day/agenda plus recurring timetable projection and editable events | Local dates, DST, recurrence exceptions, week start, overlapping sessions, tomorrow rollover and ICS round trip | Shared schema; actual timetable fixture |
 | Tasks/planner | Task details, subtasks, dependencies, effort and deadlines; reviewed rescheduling | Math 5/7/8/10 now asks due date and estimate; remaining: respects fixed blocks and capacity, shows moved tasks and exact undo | Calendar and shared store |
@@ -58,7 +58,7 @@ Recovery JSON contains personal tasks/notes. It is not encrypted and should not 
 | Nexus | One capability registry with input schemas, availability, preview, confirmation and undo | Every command maps to a real tested action; unknown commands stay inert; cancellation works | Modules above |
 | Local intelligence | Opt-in provider profile and fixed task benchmark | Resource limits and unload tested; model never mutates stores directly; clear offline/support state | Nexus typed tools |
 | Wallpaper/motion | Real quality-checked assets; theme/reduced-motion parity and bounded animation | Last valid scene preserved on provider errors; pointer-safe overlays; consistent frame pacing | Provider fixtures plus target monitor |
-| Offline recovery | Account-scoped durable draft outbox, conflict history and import restore | Reload/crash/offline/reauth do not lose unsent edits or mix accounts | Shared sync protocol |
+| Offline recovery | Delivered: account/tab device drafts, reload recovery, metadata pagination, explicit note conflict choice and selected-copy recovery | Automated tests and native Chrome cover reload/offline, account isolation, duplicate-tab locks and schema migration; remaining: target-device crash/private-storage cases and cloud conflict history | Tested local journal; shared operation sync remains separate work |
 | Integration gallery | Capability/permission/health/disconnect ledger | Every adapter shows exact scope, last success, current error and deletion choice | At least two real adapters to validate contract |
 
 ## Testing ladder
@@ -113,3 +113,7 @@ This is an engineering feedback loop, not a claim of autonomous general intellig
 Give each agreed capability four binary gates: source implemented, automated behavior tests, real-browser acceptance, target-device/provider acceptance. Report each dimension separately. Missing evidence scores unverified, not failed and not passed. Keep optional desktop work outside the extension/dashboard denominator. Freeze the scope list before calculating a percentage.
 
 Current whole-product completion: **not independently measurable yet**. The previous 75% remains historical only. Today's verified work is a dashboard reliability slice, not completion of Calendar parity, local AI, Gleam, browser intelligence or the full roadmap.
+
+## Latest bridge and recovery release
+
+See [8 October bridge and recovery update](RELEASE-2026-10-08-BRIDGE-AND-RECOVERY.md) for current evidence and limits. Historical release reports remain snapshots of their dates. Source recovery for the tested 3.1 companion is complete; exact historical 3.0 comparison is still unavailable. Device drafts and reviewed imports are now implemented; complete two-way synchronization is not.
