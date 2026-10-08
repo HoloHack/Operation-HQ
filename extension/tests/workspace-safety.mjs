@@ -1,0 +1,17 @@
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import vm from 'node:vm';
+const saved={},tabs=Array.from({length:150},(_,i)=>({id:i,url:`https://example.org/${i}`,title:`Tab ${i}`,groupId:-1}));
+const chrome={storage:{local:{async get(){return {};},async set(v){Object.assign(saved,structuredClone(v));}}},tabs:{async query(){return tabs;}},bookmarks:{async getTree(){return [];}}};
+const context=vm.createContext({chrome,URL,Map,Set,crypto,Date,document:{getElementById(){return null;}}});
+vm.runInContext(readFileSync(new URL('../js/workspaces.js',import.meta.url),'utf8'),context);
+const work=vm.runInContext('Workspaces',context);work.render=()=>{};
+assert.equal((await work.captureCurrent()).length,150);
+tabs.push({id:151,pendingUrl:'https://example.org/still-loading',title:'Loading',groupId:-1});assert.equal((await work.captureCurrent()).at(-1).url,'https://example.org/still-loading');tabs.pop();
+work.items=[{id:'existing',name:'Preserve all',tabs:Array.from({length:160},(_,i)=>({url:`https://saved.example/${i}`}))}];
+await work.replaceSnapshot('existing');assert.equal(saved.hq_browser_workspaces[0].tabs.length,310);
+work.items=Array.from({length:31},(_,i)=>({id:String(i),tabs:[]}));await work.persist();assert.equal(saved.hq_browser_workspaces.length,31,'Persist discarded older snapshots');
+await assert.rejects(work.saveCurrent('Overflow'),/occupied/);assert.equal(work.items.length,31);
+work.items=[{id:'max',tabs:Array.from({length:1000},(_,i)=>({url:`https://saved.example/${i}`}))}];const before=JSON.stringify(work.items);
+await assert.rejects(work.replaceSnapshot('max'),/left intact/);assert.equal(JSON.stringify(work.items),before);
+console.log('✓ Workspaces preserve >100 live tabs, >120 merged tabs, and older saves; oversized merges stop without truncation');
