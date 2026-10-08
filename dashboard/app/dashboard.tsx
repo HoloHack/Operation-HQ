@@ -227,7 +227,7 @@ export default function Dashboard({ displayName, signedIn, accountId }: { displa
     catch(error){setRecoveryMessage(error instanceof Error ? error.message : 'Could not read older copies.');}
   };
   const restoreDraft = async (record: DraftSummary) => {
-    try {if(!journal.current)throw new Error('Local recovery is unavailable.');coordinator.restore(await journal.current.read(record));await coordinator.checkpointSettled();setRecoveryReview(false);if(coordinator.conflict)setPanel('notes');void coordinator.retry();}
+    try {if(!journal.current)throw new Error('Local recovery is unavailable.');await coordinator.recoverCopy(await journal.current.read(record));await coordinator.checkpointSettled();setRecoveryReview(false);if(coordinator.conflict)setPanel('notes');void coordinator.retry();}
     catch(error){setRecoveryMessage(error instanceof Error ? error.message : 'Recovery stopped. The saved copy is unchanged.');}
   };
 

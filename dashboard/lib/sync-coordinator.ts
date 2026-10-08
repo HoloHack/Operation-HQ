@@ -50,17 +50,23 @@ export class SyncCoordinator<T extends Notes> {
     });
   }
   restore(value: SyncCheckpoint<T>) {
+    if (this.flight) throw new Error("Wait for the current save before recovering a copy.");
     if (value.version !== 1) throw new Error("Unsupported recovery copy. It was left untouched.");
     const local = this.state;
-    this.state = this.pending ? this.options.merge(local, value.state) : value.state;
+    this.state = this.ready || this.pending ? this.options.merge(local, value.state) : value.state;
     this.baseline = value.baseline; this.baselineNotes = value.baseline.notes.plain;
     this.revision = value.revision;
     this.conflict = value.conflict;
-    if (this.pending && local.notes.plain !== value.state.notes.plain && local.notes.plain && value.state.notes.plain) {
+    if ((this.ready || this.pending) && local.notes.plain !== value.state.notes.plain && local.notes.plain && value.state.notes.plain) {
       this.state = {...this.state,notes:local.notes}; this.conflict = {local:local.notes.plain,remote:value.state.notes.plain};
     }
     this.generation += 1; this.status = this.conflict ? "conflict" : "unsaved";
     this.checkpoint(); this.notify(); this.schedule();
+  }
+  async recoverCopy(value: SyncCheckpoint<T>) {
+    await this.flush();
+    if (this.disposed) return;
+    this.restore(value);
   }
   private schedule(delay = this.options.debounce ?? 850) {
     if (this.timer) clearTimeout(this.timer);
@@ -122,6 +128,7 @@ export class SyncCoordinator<T extends Notes> {
       const generation = this.generation; const snapshot = this.state;
       // Complete the device write before asking cloud storage to acknowledge it.
       if (this.options.checkpoint) await this.checkpointFlight;
+      if (this.disposed) return;
       this.status = "saving"; this.notify();
       try {
         const result = await this.options.save(snapshot, this.revision);

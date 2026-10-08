@@ -25,15 +25,18 @@ try{
    if(route.request().method()==='PUT'){const body=route.request().postDataJSON();if(body.baseRevision!==state.revision)return route.fulfill({status:409,contentType:'application/json',body:JSON.stringify({...state,accountId:'ci-user'})});state.snapshot=body.snapshot;state.revision++;writes++;}
    return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({...state,accountId:'ci-user'})});
   }
+  if(url.pathname==='/__hq_prepare')return route.fulfill({status:200,contentType:'text/html',body:'<!doctype html><title>Isolated recovery fixture</title>'});
   const relative=url.pathname.startsWith('/assets/')?url.pathname.slice(1):'index.html';const file=path.join(fixture,relative);
   if(!file.startsWith(fixture+path.sep))return route.abort();
   try{return route.fulfill({status:200,contentType:relative.endsWith('.js')?'application/javascript':relative.endsWith('.css')?'text/css':'text/html',body:await fs.readFile(file)});}catch{return route.fulfill({status:404,body:'Fixture resource not found'});}
  });
- const page=await context.newPage();await page.emulateMedia({reducedMotion:'reduce'});await page.goto(origin+'/__hq_ci');await page.getByText('Saved',{exact:true}).waitFor();
+ const page=await context.newPage();await page.emulateMedia({reducedMotion:'reduce'});await page.goto(origin+'/__hq_prepare');
+ await page.evaluate(async(snapshot)=>{await new Promise((resolve,reject)=>{const request=indexedDB.open('operation-hq-local-drafts-v1',1);request.onupgradeneeded=()=>{const store=request.result.createObjectStore('drafts',{keyPath:'id'});store.createIndex('accountId','accountId');};request.onerror=()=>reject(request.error);request.onsuccess=()=>{const db=request.result,tx=db.transaction('drafts','readwrite');tx.objectStore('drafts').put({id:'legacy-copy',accountId:'legacy-user',savedAt:1,checkpoint:{version:1,state:snapshot,baseline:snapshot,revision:0,conflict:null}});tx.oncomplete=()=>{db.close();resolve();};tx.onabort=()=>reject(tx.error);};});},empty());
+ await page.goto(origin+'/__hq_ci');await page.getByText('Saved',{exact:true}).waitFor();
  const openImport=async()=>{await page.getByRole('button',{name:'Import from extension',exact:true}).click();await page.getByRole('button',{name:'Read preview from extension',exact:true}).click();};
  const popup=await context.newPage();await popup.goto(extensionBase+'popup.html');
  await check('Disabled bridge reports its actual reason and cannot import',async()=>{
-  await openImport();await page.getByText(/Enable dashboard access in the extension popup/).waitFor();assert.equal(await page.getByRole('button',{name:'Import into my account'}).count(),0);assert.equal(writes,0);await page.getByRole('button',{name:'Close import'}).click();
+  await openImport();await page.getByRole('dialog').getByText(/Enable dashboard access in the extension popup/).waitFor();assert.equal(await page.getByRole('button',{name:'Import into my account'}).count(),0);assert.equal(writes,0);await page.getByRole('button',{name:'Close import'}).click();
  });
  await popup.locator('#bridge-enabled').check();await poll(()=>worker.evaluate(()=>chrome.storage.local.get('hq_dashboard_bridge_enabled_v1')),v=>v.hq_dashboard_bridge_enabled_v1===true);
  await check('Actual extension preview waits for approval and preserves dashboard preferences',async()=>{
@@ -45,7 +48,7 @@ try{
   const notes=state.snapshot.notes.plain;await openImport();await page.getByLabel('Browser notes preview').waitFor();await page.getByLabel('Keep both versions',{exact:true}).check();await page.getByLabel(/This is my browser profile/).check();await page.getByRole('button',{name:'Import into my account'}).click();await page.getByText('Saved',{exact:true}).waitFor();assert.equal(state.snapshot.tasks.length,1);assert.equal(state.snapshot.events.length,1);assert.equal(state.snapshot.notes.plain,notes);
  });
  await check('Failed refresh clears an older preview and Settings cannot stack dialogs',async()=>{
-  await page.getByRole('button',{name:'Open settings'}).click();await page.getByRole('button',{name:'Review browser import'}).click();assert.equal(await page.getByRole('dialog').count(),1);await page.getByRole('button',{name:'Read preview from extension'}).click();await page.getByLabel('Browser notes preview').waitFor();await popup.locator('#bridge-enabled').uncheck();await poll(()=>worker.evaluate(()=>chrome.storage.local.get('hq_dashboard_bridge_enabled_v1')),v=>v.hq_dashboard_bridge_enabled_v1===false);await page.getByRole('button',{name:'Read preview from extension'}).click();await page.getByText(/Enable dashboard access in the extension popup/).waitFor();assert.equal(await page.getByRole('button',{name:'Import into my account'}).count(),0);await page.getByRole('button',{name:'Close import'}).click();
+  await page.getByRole('button',{name:'Open settings'}).click();await page.getByRole('button',{name:'Review browser import'}).click();assert.equal(await page.getByRole('dialog').count(),1);await page.getByRole('button',{name:'Read preview from extension'}).click();await page.getByLabel('Browser notes preview').waitFor();await popup.locator('#bridge-enabled').uncheck();await poll(()=>worker.evaluate(()=>chrome.storage.local.get('hq_dashboard_bridge_enabled_v1')),v=>v.hq_dashboard_bridge_enabled_v1===false);await page.getByRole('button',{name:'Read preview from extension'}).click();await page.getByRole('dialog').getByText(/Enable dashboard access in the extension popup/).waitFor();assert.equal(await page.getByRole('button',{name:'Import into my account'}).count(),0);await page.getByRole('button',{name:'Close import'}).click();
  });
  await popup.locator('#bridge-enabled').check();await poll(()=>worker.evaluate(()=>chrome.storage.local.get('hq_dashboard_bridge_enabled_v1')),v=>v.hq_dashboard_bridge_enabled_v1===true);
  await check('Browser tools button opens the real allowed Nexus tool',async()=>{
@@ -62,6 +65,15 @@ try{
    const checkpoint={version:1,state:snapshot,baseline:snapshot,revision:0,conflict:null};const a=new DraftJournal('alice','one'),b=new DraftJournal('bob','one'),a2=new DraftJournal('alice','two');await a.write(checkpoint);await b.write(checkpoint);await a2.write(checkpoint);const own=await a.list(),other=await b.list();let rejected=false;try{await a.remove(other[0]);}catch{rejected=true;}
    const previous=sessionStorage.getItem('hq-draft-tab-id-v1');const claimed=await claimDraftTab('ci-user');const independent=claimed.tabId!==previous;claimed.release();sessionStorage.setItem('hq-draft-tab-id-v1',previous);return {alice:own.length,bob:other.length,rejected,independent};
   });assert.deepEqual(result,{alice:2,bob:1,rejected:true,independent:true});return result;
+ });
+ await check('Recovery summaries paginate without loading documents and version-1 copies remain readable',async()=>{
+  const result=await page.evaluate(async()=>{
+   const {DraftJournal}=window.HQTest;const legacy=new DraftJournal('legacy-user','other'),old=await legacy.list(),oldCopy=await legacy.read(old[0]);
+   const checkpoint={version:1,state:oldCopy.state,baseline:oldCopy.baseline,revision:0,conflict:null};
+   for(let i=0;i<25;i++)await new DraftJournal('paged-user',String(i)).write(checkpoint);
+   const journal=new DraftJournal('paged-user','reader'),first=await journal.list(),second=await journal.list(first.at(-1));
+   const loaded=await journal.read(second[0]);return {first:first.length,second:second.length,unique:new Set([...first,...second].map(r=>r.id)).size,summariesOnly:[...first,...second].every(r=>!('checkpoint' in r)),legacyNotes:oldCopy.state.notes.plain,selectedNotes:loaded.state.notes.plain};
+  });assert.deepEqual(result,{first:20,second:5,unique:25,summariesOnly:true,legacyNotes:'Existing dashboard notes',selectedNotes:'Existing dashboard notes'});return result;
  });
  await check('Recovered notes conflict exposes both versions and saves only after choice',async()=>{
   offline=true;await page.locator('.rail').getByRole('button',{name:'Notes',exact:true}).click();await page.getByLabel('Notes document',{exact:true}).fill('My offline edit');await page.getByText('Unsaved work has a recovery copy on this device.',{exact:true}).waitFor();state.snapshot={...state.snapshot,notes:{plain:'Changed in another window',updatedAt:Date.now()+1000}};state.revision++;offline=false;await page.reload();await page.getByText('Review conflict',{exact:true}).waitFor();await page.locator('.rail').getByRole('button',{name:'Notes',exact:true}).click();assert.equal(await page.getByLabel('Notes document',{exact:true}).inputValue(),'My offline edit');assert.equal(await page.getByLabel('Saved elsewhere',{exact:true}).inputValue(),'Changed in another window');await page.getByRole('button',{name:'Keep both',exact:true}).click();await poll(()=>state.snapshot.notes.plain,v=>v==='My offline edit\n\n--- Other version ---\n\nChanged in another window');await page.getByRole('button',{name:'Close panel'}).click();

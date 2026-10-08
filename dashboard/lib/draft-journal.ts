@@ -49,7 +49,7 @@ export class DraftJournal {
           const store=request.result.createObjectStore('summaries',{keyPath:'id'});store.createIndex('accountId','accountId');store.createIndex('newest',['accountId','savedAt','id']);
           const cursor=request.transaction!.objectStore(storeName).openCursor();
           cursor.onsuccess=()=>{const item=cursor.result;if(!item)return;const r=item.value as DraftRecord;
-            if(r.accountId && r.checkpoint?.state?.notes && Array.isArray(r.checkpoint.state.tasks) && Array.isArray(r.checkpoint.state.events))store.put({id:r.id,accountId:r.accountId,savedAt:r.savedAt,tasks:r.checkpoint.state.tasks.length,events:r.checkpoint.state.events.length,noteCharacters:r.checkpoint.state.notes.plain.length});
+            if(r.accountId && typeof r.checkpoint?.state?.notes?.plain==='string' && Array.isArray(r.checkpoint.state.tasks) && Array.isArray(r.checkpoint.state.events))store.put({id:r.id,accountId:r.accountId,savedAt:r.savedAt,tasks:r.checkpoint.state.tasks.length,events:r.checkpoint.state.events.length,noteCharacters:r.checkpoint.state.notes.plain.length});
             item.continue();};
         }
       };
@@ -94,7 +94,7 @@ export class DraftJournal {
       const collections=['tasks','events','schedule','assignments','exams','habits','captures'] as const;
       if(raw.schemaVersion!==1 || typeof raw.notes?.plain!=='string' || collections.some(key=>!Array.isArray(raw[key])))throw new Error('This recovery copy needs repair. It was left untouched.');
       const normalized=sanitizeHQState(raw,{preserveOverflow:true});
-      if(collections.some(key=>normalized[key].length!==raw[key].length || new Set(normalized[key].map(item=>item.id)).size!==raw[key].length))throw new Error('This recovery copy has invalid or duplicate records. Nothing was discarded.');
+      if(collections.some(key=>normalized[key].length!==raw[key].length || normalized[key].some((item,index)=>item.id!==raw[key][index].id || ('title' in item && item.title!== (raw[key][index] as unknown as {title:string}).title)) || new Set(normalized[key].map(item=>item.id)).size!==raw[key].length))throw new Error('This recovery copy has invalid or duplicate records. Nothing was discarded.');
       return normalized;
     };
     return {...record.checkpoint, state:normalize(record.checkpoint.state), baseline:normalize(record.checkpoint.baseline)};

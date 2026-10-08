@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {emptyHQState} from '../lib/hq-state.ts';
+import {emptyHQState,mergeHQState} from '../lib/hq-state.ts';
 import {reviewBrowserImport,applyBrowserImport,browserImportSummary} from '../lib/browser-import.ts';
 import {SyncCoordinator} from '../lib/sync-coordinator.ts';
 const task=(id,title=id)=>({id,title,priority:'high',completed:false,updatedAt:1});
@@ -48,6 +48,15 @@ test('unavailable recovery cannot block valid cloud saves or delete unreadable c
 test('unreadable recovery records are refused instead of filtering their contents',async()=>{
  const {DraftJournal}=await import('../lib/draft-journal.ts');const j=new DraftJournal('alice','tab');const checkpoint={version:1,state:base(),baseline:base(),revision:0,conflict:null};
  assert.equal(j.validate({id:'test',accountId:'alice',savedAt:1,checkpoint}).state.notes.plain,'dashboard notes');
- for(const modified of [{...checkpoint,revision:-1},{...checkpoint,state:{...base(),tasks:[{}]}},{...checkpoint,state:{...base(),schemaVersion:2}},{...checkpoint,state:{...base(),tasks:[task('same'),task('same')]}}])assert.throws(()=>j.validate({id:'test',accountId:'alice',savedAt:1,checkpoint:modified}));
+ for(const modified of [{...checkpoint,revision:-1},{...checkpoint,state:{...base(),tasks:[{}]}},{...checkpoint,state:{...base(),schemaVersion:2}},{...checkpoint,state:{...base(),tasks:[task('same'),task('same')]}},{...checkpoint,state:{...base(),tasks:[task('x','a'.repeat(501))]}}])assert.throws(()=>j.validate({id:'test',accountId:'alice',savedAt:1,checkpoint:modified}));
  assert.throws(()=>j.validate({id:'test',accountId:'bob',savedAt:1,checkpoint}));
+});
+
+test('manual recovery waits for an in-flight save and retains unrelated current tasks and both notes',async()=>{
+ const gate=defer();let writes=0;const current={...base(),tasks:[task('current')],notes:{plain:'Cloud document',updatedAt:10}};
+ const c=coordinator({merge:mergeHQState,load:async()=>({snapshot:current,revision:3}),save:async(snapshot,revision)=>{if(++writes===1)await gate.promise;return {snapshot,revision:revision+1};}});
+ await c.start();c.change(s=>({...s,notes:{plain:'Current edit',updatedAt:11}}));const flushing=c.flush();await new Promise(r=>setTimeout(r,0));
+ const copy={version:1,state:{...base(),tasks:[task('recovered')],notes:{plain:'Older draft',updatedAt:2}},baseline:base(),revision:1,conflict:null};
+ assert.throws(()=>c.restore(copy),/current save/);const recovering=c.recoverCopy(copy);gate.resolve();await flushing;await recovering;
+ assert.deepEqual(new Set(c.state.tasks.map(t=>t.id)),new Set(['current','recovered']));assert.deepEqual(c.conflict,{local:'Current edit',remote:'Older draft'});assert.equal(writes,1);c.dispose();
 });
