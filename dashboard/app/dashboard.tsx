@@ -18,7 +18,7 @@ import { Dialog, DialogContent, DialogTitle } from "../components/ui/dialog";
 import PairedSync from "../components/paired-sync";
 import ReleaseShelf from "../components/release-shelf";
 import PlanningCalendar from "../components/planning-calendar";
-import {contextNow} from "../lib/planning";
+import {contextNow,dayAgenda} from "../lib/planning";
 
 const EXTENSION_ID = "cbgepkbfmcahdpahipkdeahppfbggjok";
 const dateKey = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
@@ -263,7 +263,7 @@ export default function Dashboard({ displayName, signedIn, accountId }: { displa
     const rank = { critical: 0, high: 1, normal: 2, low: 3 }; return rank[a.priority] - rank[b.priority] || String(a.due || "9999").localeCompare(String(b.due || "9999"));
   }), [state.tasks]);
   const currentDateKey = now ? dateKey(now) : "";
-  const todayEvents = useMemo(() => state.events.filter(event => currentDateKey && event.date === currentDateKey).sort((a, b) => String(a.start).localeCompare(String(b.start))), [state.events, currentDateKey]);
+  const todayEvents = useMemo(() => currentDateKey ? dayAgenda(state,currentDateKey) : [], [state.events,state.schedule,currentDateKey]);
   const filteredTasks = useMemo(() => state.tasks.filter(task => task.title.toLowerCase().includes(taskQuery.toLowerCase())), [state.tasks, taskQuery]);
   const agendaEvents = useMemo(() => [...state.events].sort((a,b) => a.date.localeCompare(b.date)), [state.events]);
   const nextTask = activeTasks[0];
