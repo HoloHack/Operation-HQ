@@ -174,7 +174,7 @@ export default function Dashboard({ displayName, signedIn, accountId }: { displa
     style.setProperty("--support-hue", String(state.settings.supportHue));
     return () => { style.removeProperty("--hue"); style.removeProperty("--support-hue"); };
   }, [state.settings.accentHue, state.settings.supportHue]);
-  useEffect(() => { const escape = (event: KeyboardEvent) => { if (event.key === "Escape") setCinema(false); if((event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==="k"){event.preventDefault();setCinema(false);setPanel(null);setTimeout(()=>document.getElementById("nexus-command")?.focus(),0);} }; addEventListener("keydown", escape); return () => removeEventListener("keydown", escape); }, []);
+  useEffect(() => { const escape = (event: KeyboardEvent) => { if (event.key === "Escape") setCinema(false); if((event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==="k"){event.preventDefault();setCinema(false);setPanel(null);importEpoch.current++;setImportReview(false);setRecoveryReview(false);setTimeout(()=>document.getElementById("nexus-command")?.focus(),0);} }; addEventListener("keydown", escape); return () => removeEventListener("keydown", escape); }, []);
   useEffect(() => {
     const current = new Date(); setNow(current);
     const refresh = () => { if (!document.hidden) setNow(new Date()); };
