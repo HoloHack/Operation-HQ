@@ -67,3 +67,7 @@ test('rapid edits retain only the active device write and newest pending recover
  for(let i=0;i<100;i++)c.change(s=>({...s,notes:{plain:'Edit '+i,updatedAt:i+1}}));
  gate.resolve();await c.checkpointSettled();assert.deepEqual(copies,['Edit 0','Edit 99']);assert.equal(c.journaledGeneration,c.generation);assert.equal(c.state.notes.plain,'Edit 99');c.dispose();
 });
+
+test('re-pairing recognizes dashboard-origin native IDs instead of duplicating them',()=>{
+ const current={...base(),tasks:[task('existing')],events:[{id:'event',title:'Event',date:'2026-10-13',updatedAt:1}]};const native={...source(),tasks:[task('dashboard:existing')],events:[{id:'sync:event',title:'Event',date:'2026-10-13',updatedAt:1}]};const first=applyBrowserImport(current,native);assert.equal(first.tasks.length,1);assert.equal(first.events.length,1);assert.equal(browserImportSummary(current,native).newTasks,0);native.events[0].id='event:sync:event:0';assert.equal(applyBrowserImport(current,native).events.length,1);
+});

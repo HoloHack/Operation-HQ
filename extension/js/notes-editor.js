@@ -105,6 +105,7 @@ const NotesEditor = {
   },
 
   async writeDocument(doc, { keepRevision = false } = {}) {
+    this._pendingWrites=(this._pendingWrites||0)+1;
     const normalized = keepRevision ? { ...doc } : this.createDocument(doc.html, doc.plain, doc.revision, doc.source);
     this._saveChain = this._saveChain.catch(() => {}).then(async () => navigator.locks.request("hq-planning-write", async () => {
       const stored=(await chrome.storage.local.get(this.DOC_KEY))[this.DOC_KEY];
@@ -120,7 +121,7 @@ const NotesEditor = {
       this.refreshMeta();
       return normalized;
     }));
-    return this._saveChain;
+    return this._saveChain.finally(()=>{this._pendingWrites--;});
   },
 
   editorSnapshot(source = "editor") {
@@ -137,10 +138,10 @@ const NotesEditor = {
   debouncedPersist() {
     this.setSaveStatus("Saving…");
     clearTimeout(this._debounceTimer);
-    this._debounceTimer = setTimeout(() => this.persist().catch(error => {
+    this._debounceTimer = setTimeout(() => { this._debounceTimer=null;void this.persist().catch(error => {
       console.error("Notes save failed:", error);
       this.setSaveStatus("Save failed — retrying on next edit", true);
-    }), 350);
+    }); }, 350);
   },
 
   async appendExternal(value, source = "capture") {
@@ -287,7 +288,7 @@ const NotesEditor = {
       if (area !== "local") return;
       const incoming = changes[this.DOC_KEY]?.newValue;
       if (!this.validDocument(incoming) || incoming.revision <= Number(this.document?.revision || 0)) return;
-      if(this._debounceTimer&&this.document?.plain!==incoming.plain){void chrome.storage.local.set({hq_notes_sync_conflict_v1:{local:this.document,remote:incoming}}).catch(()=>{});this.setSaveStatus("Notes changed elsewhere. Your pending draft was kept for review.");return;}
+      if((this._debounceTimer||this._pendingWrites)&&this.document?.plain!==incoming.plain){void chrome.storage.local.set({hq_notes_sync_conflict_v1:{local:this.document,remote:incoming}}).catch(()=>{});this.setSaveStatus("Notes changed elsewhere. Your pending draft was kept for review.");return;}
       this._savedPlain=incoming.plain;
       this.applyDocument(incoming);
     });
