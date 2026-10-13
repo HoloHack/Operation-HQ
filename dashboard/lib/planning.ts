@@ -3,11 +3,16 @@ export const localDate=(d:Date)=>`${d.getFullYear()}-${String(d.getMonth()+1).pa
 export function shiftDate(key:string,days:number){if(!validDate(key))throw Error('Choose a valid date.');const d=new Date(`${key}T12:00:00`);d.setDate(d.getDate()+days);return localDate(d);}
 export const minute=(time:string)=>Number(time.slice(0,2))*60+Number(time.slice(3));
 export const clock=(n:number)=>`${String(Math.floor(n/60)).padStart(2,'0')}:${String(n%60).padStart(2,'0')}`;
+export function isStudyAvailability(title:string){
+ const text=title.toLowerCase();
+ if(/school|class|tuition|appointment|meeting|transit|travel|park|sport|workout|training|basketball|soccer|cricket|singing|piano|chess|language|breakfast|lunch|dinner|sleep|wind down|rest|run\b/.test(text))return false;
+ return /flex|study|coding|business|catch-up|practice|competition/.test(text);
+}
 export function dayAgenda(state:HQState,date:string):HQEvent[]{
  const day=new Date(`${date}T12:00:00`).getDay();
- return [...state.events.filter(e=>e.date===date),...state.schedule.filter(b=>b.day===day&&(b.weekParity===undefined||!b.altAnchor||((Math.floor((Date.parse(date)-Date.parse(b.altAnchor))/604800000)%2+2)%2)===b.weekParity)).map(b=>({...b,id:`timetable:${b.id}:${date}`,date,category:'timetable'}))].sort((a,b)=>String(a.start||'00:00').localeCompare(String(b.start||'00:00')));
+ return [...state.events.filter(e=>e.date===date),...state.schedule.filter(b=>b.day===day&&(b.weekParity===undefined||!b.altAnchor||((Math.floor((Date.parse(date)-Date.parse(b.altAnchor))/604800000)%2+2)%2)===b.weekParity)).map(b=>({...b,id:`timetable:${b.id}:${date}`,date,category:isStudyAvailability(b.title)?'availability':'timetable'}))].sort((a,b)=>String(a.start||'00:00').localeCompare(String(b.start||'00:00')));
 }
-export function contextNow(state:HQState,now:Date){const date=localDate(now),time=clock(now.getHours()*60+now.getMinutes()),agenda=dayAgenda(state,date);return {current:agenda.find(e=>e.start&&e.end&&e.start<=time&&e.end>time),next:agenda.find(e=>e.start&&e.start>time),tomorrow:dayAgenda(state,shiftDate(date,1))};}
+export function contextNow(state:HQState,now:Date){const date=localDate(now),time=clock(now.getHours()*60+now.getMinutes()),agenda=dayAgenda(state,date);return {current:agenda.filter(e=>e.start&&e.end&&e.start<=time&&e.end>time).sort((a,b)=>Number(a.category==='availability')-Number(b.category==='availability'))[0],next:agenda.find(e=>e.start&&e.start>time&&e.category!=='availability')||agenda.find(e=>e.start&&e.start>time),tomorrow:dayAgenda(state,shiftDate(date,1))};}
 export function makeEvent(input:Partial<HQEvent>,id:string,now:number):HQEvent{
  const title=input.title?.trim();if(!title||title.length>500||!validDate(input.date||''))throw Error('Add an event title and valid date.');
  if(Boolean(input.start)!==Boolean(input.end)||input.start&&(!validTime(input.start)||!validTime(input.end!)||input.end!<=input.start))throw Error('Choose an end time after the start; overnight events need separate daily entries.');
@@ -25,7 +30,7 @@ export function planCapacity(state:HQState,options:{from:string;until:string;sub
  const working={...state,events:existing};
  for(const task of tasks){let remaining=task.estimateMinutes||25;const chunks:HQEvent[]=[];
   for(let i=0;i<days&&remaining;i++){const date=shiftDate(options.from,i);if(task.due&&date>task.due.slice(0,10))break;
-   const occupied=dayAgenda(working,date).concat(events.filter(e=>e.date===date),chunks.filter(e=>e.date===date));
+   const occupied=dayAgenda(working,date).filter(e=>e.category!=='availability').concat(events.filter(e=>e.date===date),chunks.filter(e=>e.date===date));
    if(occupied.some(e=>!e.start||!e.end))continue; // All-day commitments reserve the day.
    let cursor=minute(options.start),end=minute(options.end);const instant=new Date(now);if(date===localDate(instant))cursor=Math.max(cursor,instant.getHours()*60+instant.getMinutes()+1);
    const spans=occupied.map(e=>({start:minute(e.start!),end:minute(e.end!)})).sort((a,b)=>a.start-b.start);

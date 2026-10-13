@@ -1,6 +1,6 @@
 import test from 'node:test';import assert from 'node:assert/strict';
 import {emptyHQState,mergeHQState,recordRemovals,sanitizeHQState} from '../lib/hq-state.ts';
-import {shiftDate,dayAgenda,contextNow,makeEvent,planCapacity,applyCapacity,exportICS} from '../lib/planning.ts';
+import {shiftDate,dayAgenda,contextNow,makeEvent,planCapacity,applyCapacity,exportICS,isStudyAvailability} from '../lib/planning.ts';
 import {normalizeRelease,countdown,refreshDue,parseViz,searchAlias} from '../lib/release-tracker.ts';
 const task=(id,minutes=45)=>({id,title:id,subject:'Mathematics',priority:'high',completed:false,estimateMinutes:minutes,due:'2026-10-15',updatedAt:1});
 test('tombstones prevent stale writers from resurrecting removed tasks and releases',()=>{const before={...emptyHQState(),tasks:[task('a')],releases:[{id:'anime:1',title:'Test series',kind:'ANIME',status:'RELEASING',checkedAt:0,updatedAt:1}]};const removed=recordRemovals(before,{...before,tasks:[],releases:[]},10);const result=mergeHQState(before,removed);assert.equal(result.tasks.length,0);assert.equal(result.releases.length,0);assert.equal(removed.tombstones.length,2);assert.equal(recordRemovals(before,removed,11).tombstones.length,2);});
@@ -17,3 +17,13 @@ test('publisher parser distinguishes a real next-date hint from no schedule',()=
 test('near releases refresh hourly, others six-hourly and manual dates are untouched',()=>{const now=Date.now();assert(refreshDue({manual:false,checkedAt:now-3600001,nextAt:now+7200000},now));assert(!refreshDue({manual:false,checkedAt:now-3600001},now));assert(!refreshDue({manual:true,checkedAt:0},now));});
 
 test('publisher counts cannot be contaminated by another series links',()=>{const p=parseViz('<a href="/jujutsu-kaisen-modulo-chapter-25/chapter/1">Ch. 25</a><a href="/one-piece-chapter-1193/chapter/2">Ch. 1193</a>','jujutsu-kaisen-modulo',Date.now());assert.equal(p.latest,25);});
+
+test('flexible study blocks provide capacity while classes and sport remain fixed',()=>{
+ const s={...emptyHQState(),tasks:[task('math')],schedule:[{id:'flex',title:'PM flex / study',day:2,start:'19:00',end:'21:00',updatedAt:1},{id:'class',title:'Tuition',day:2,start:'16:00',end:'18:00',updatedAt:1},{id:'sport',title:'Basketball practice',day:2,start:'18:00',end:'19:00',updatedAt:1}]};
+ const p=planCapacity(s,{from:'2026-10-13',until:'2026-10-13',start:'16:00',end:'21:00',breakMinutes:10},()=>crypto.randomUUID(),new Date('2026-10-13T08:00').getTime());
+ assert.equal(p.unscheduled.length,0);assert(p.events.every(e=>e.start>='19:10'&&e.end<='21:00'));assert.equal(s.schedule.length,3);
+ const planned=applyCapacity(s,p,1);assert.equal(contextNow(planned,new Date('2026-10-13T19:30')).current.title,'math');
+});
+test('availability inference never turns school, meetings or sport into task slots',()=>{
+ assert.equal(isStudyAvailability('School study class'),false);assert.equal(isStudyAvailability('Competition meeting'),false);assert.equal(isStudyAvailability('Basketball practice'),false);assert.equal(isStudyAvailability('Evening run practice'),false);assert.equal(isStudyAvailability('PM flex / coding'),true);
+});
