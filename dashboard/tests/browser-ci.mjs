@@ -37,7 +37,7 @@ try{
  const openImport=async()=>{await page.getByRole('button',{name:'Import from extension',exact:true}).click();await page.getByRole('button',{name:'Read preview from extension',exact:true}).click();};
  const popup=await context.newPage();await popup.goto(extensionBase+'popup.html');
  await check('Disabled bridge reports its actual reason and cannot import',async()=>{
-  await openImport();await page.getByRole('dialog').getByText(/Enable dashboard access in the extension popup/).waitFor();assert.equal(await page.getByRole('button',{name:'Import into my account'}).count(),0);assert.equal(writes,0);await page.getByRole('button',{name:'Close import'}).click();
+  assert.equal(await page.locator('.bridge-card h2').innerText(),'Browser tools not checked');await openImport();await page.getByRole('dialog').getByText(/Enable dashboard access in the extension popup/).waitFor();assert.equal(await page.getByRole('button',{name:'Import into my account'}).count(),0);assert.equal(writes,0);await page.getByRole('button',{name:'Close import'}).click();
  });
  await popup.locator('#bridge-enabled').check();await poll(()=>worker.evaluate(()=>chrome.storage.local.get('hq_dashboard_bridge_enabled_v1')),v=>v.hq_dashboard_bridge_enabled_v1===true);
  await check('Actual extension preview waits for approval and preserves dashboard preferences',async()=>{
