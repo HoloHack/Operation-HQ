@@ -11,7 +11,12 @@ const PlanningSync={
   for(const key of ['notes','focus','settings']){if(!snapshot[key]||typeof snapshot[key]!=='object')throw Error('Missing '+key+'.');result[key]=structuredClone(snapshot[key]);}return result;
  },
  canonicalId(id,key){id=String(id);if(key==='tasks'&&id.startsWith('dashboard:'))return id.slice(10);if(key==='events'&&id.startsWith('event:sync:')&&id.endsWith(':0'))return id.slice(11,-2);if(key==='events'&&id.startsWith('sync:'))return id.slice(5);return 'browser:'+id;},
- comparable(value){if(!value)return '';const copy={...value};delete copy.updatedAt;return JSON.stringify(copy);},
+ comparable(value){
+  if(!value)return '';
+  // Chrome's Value::Dict storage may reorder keys. Compare content, not insertion order.
+  const stable=v=>Array.isArray(v)?v.map(stable):v&&typeof v==='object'?Object.fromEntries(Object.keys(v).filter(k=>v[k]!==undefined).sort().map(k=>[k,stable(v[k])])):v;
+  const copy={...value};delete copy.updatedAt;return JSON.stringify(stable(copy));
+ },
  merge(base,left,right){
   const output={...right},conflicts=[];for(const key of ['tasks','events','schedule','assignments','exams','habits','captures','releases']){
    const b=new Map((base[key]||[]).map(r=>[r.id,r])),l=new Map((left[key]||[]).map(r=>[r.id,r])),r=new Map((right[key]||[]).map(r=>[r.id,r]));const list=[];
@@ -23,7 +28,7 @@ const PlanningSync={
  },
  async native(){return chrome.storage.local.get(['hq_context','hq_tasks','hq_calendar_events','hq_calendar_details_v2','hq_calendar_entry_ids_v1','hq_calendar_revision_v1','hq_notes_document_v2','hq_notes','hq_schedule_profiles','hq_active_schedule_profile']);},
  readNative(pair,saved){const projection=DashboardBridge.project(saved),out=structuredClone(pair.snapshot),baseline=pair.native||{};
-  for(const key of ['tasks','events','schedule']){const latest=projection[key],before=baseline[key]||[],map=new Map(out[key].map(r=>[r.id,r]));for(const item of latest){const id=this.canonicalId(item.id,key);const old=before.find(r=>r.id===item.id);if(!old||this.comparable(item)!==this.comparable(old))map.set(id,{...map.get(id),...item,id,updatedAt:Date.now()});}for(const old of before){if(!latest.some(r=>this.canonicalId(r.id,key)===this.canonicalId(old.id,key))){const id=this.canonicalId(old.id,key);map.delete(id);out.tombstones.push({id,collection:key,updatedAt:Date.now()});}}out[key]=[...map.values()];const ts=new Map(out.tombstones.map(t=>[t.collection+':'+t.id,t]));out.tombstones=[...ts.values()];}
+  for(const key of ['tasks','events','schedule']){const latest=projection[key],before=baseline[key]||[],map=new Map(out[key].map(r=>[r.id,r]));for(const item of latest){const id=this.canonicalId(item.id,key),old=before.find(r=>r.id===item.id);if(!old){map.set(id,{...map.get(id),...item,id,updatedAt:Date.now()});continue;}const changes={};for(const field of new Set([...Object.keys(item),...Object.keys(old)])){if(field==='id'||field==='updatedAt')continue;if(this.comparable({value:item[field]})!==this.comparable({value:old[field]}))changes[field]=item[field];}if(Object.keys(changes).length)map.set(id,{...map.get(id),...changes,id,updatedAt:Date.now()});}for(const old of before){if(!latest.some(r=>this.canonicalId(r.id,key)===this.canonicalId(old.id,key))){const id=this.canonicalId(old.id,key);map.delete(id);out.tombstones.push({id,collection:key,updatedAt:Date.now()});}}out[key]=[...map.values()];const ts=new Map(out.tombstones.map(t=>[t.collection+':'+t.id,t]));out.tombstones=[...ts.values()];}
   if(projection.notes.plain!==(baseline.notes?.plain||''))out.notes={...projection.notes,updatedAt:Date.now()};return this.clean(out);
  },
  mirror(snapshot,saved){const values={};const original=DashboardBridge.project(saved);for(const block of original.schedule){const incoming=snapshot.schedule.find(b=>b.id==='browser:'+block.id);if(!incoming||incoming.title!==block.title||incoming.start!==block.start||incoming.end!==block.end||incoming.day!==block.day)throw Error('Edit imported browser timetable blocks in the browser Schedule tool; their alternating-week profile is preserved.');}
