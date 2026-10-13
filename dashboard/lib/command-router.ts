@@ -8,8 +8,8 @@ export function routeCommand(raw:string){
  if(/\b(theme|palette|colou?r(?:s|\s+scheme)?)\b/i.test(text))return {kind:'theme' as const};
  if(/anime|manga|release/i.test(text))return {kind:'panel' as const,panel:'releases' as const};
  if(/calendar|schedule|timetable|reschedule/i.test(text))return {kind:'panel' as const,panel:'calendar' as const,subject};
- if(/bookmark/i.test(text))return {kind:'browser' as const,tool:'bookmarks'};
- if(/tabs?|workspace|saved groups/i.test(text))return {kind:'browser' as const,tool:'tabs'};
+ if(/\bbookmarks?\b/i.test(text))return {kind:'browser' as const,tool:'bookmarks'};
+ if(/\btabs?\b|\bworkspaces?\b|\bsaved groups\b/i.test(text))return {kind:'browser' as const,tool:'tabs'};
  if(/gleam|confidence|social.*skills|conversation.*practice/i.test(text))return {kind:'browser' as const,tool:'gleam'};
  if(/gmail|email|\bmail\b/i.test(text))return {kind:'browser' as const,tool:'gmail'};
  if(/notes?/i.test(text))return {kind:'panel' as const,panel:'notes' as const};
