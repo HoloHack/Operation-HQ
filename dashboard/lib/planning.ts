@@ -63,4 +63,10 @@ export function undoCapacity(state:HQState,inverse:{added:HQEvent[];removed:HQEv
  const removed=inverse.removed.filter(e=>!currentIds.has(e.id)).map(e=>({...e,updatedAt:Math.max(now,e.updatedAt+1,...state.tombstones.filter(t=>t.collection==='events'&&t.id===e.id).map(t=>t.updatedAt+1))}));
  return {...state,events:[...state.events.filter(e=>!additions.has(e.id)),...removed]};
 }
+export function restoreCalendarItem(state:HQState,kind:'events'|'schedule',record:HQEvent|HQState['schedule'][number],now:number):HQState{
+ if(state[kind].some(e=>e.id===record.id))throw Error('This commitment is already present. Its current version was kept.');
+ const deletedAt=state.tombstones.filter(t=>t.collection===kind&&t.id===record.id).reduce((max,t)=>Math.max(max,t.updatedAt),0);
+ const restored={...record,updatedAt:Math.max(now,record.updatedAt+1,deletedAt+1)};
+ return kind==='events'?{...state,events:[...state.events,restored as HQEvent]}:{...state,schedule:[...state.schedule,restored as HQState['schedule'][number]]};
+}
 export function exportICS(events:HQEvent[]){const escape=(s:string)=>s.replace(/\\/g,'\\\\').replace(/\n/g,'\\n').replace(/,/g,'\\,').replace(/;/g,'\\;');const stamp=(e:HQEvent,t?:string)=>e.date.replaceAll('-','')+(t?'T'+t.replace(':','')+'00':'');return ['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//Operation HQ//Calendar//EN',...events.flatMap(e=>['BEGIN:VEVENT',`UID:${escape(e.id)}@operation-hq`,e.start?`DTSTART:${stamp(e,e.start)}`:`DTSTART;VALUE=DATE:${stamp(e)}`,e.end?`DTEND:${stamp(e,e.end)}`:`DTEND;VALUE=DATE:${shiftDate(e.date,1).replaceAll('-','')}`,`SUMMARY:${escape(e.title)}`,...(e.notes?[`DESCRIPTION:${escape(e.notes)}`]:[]),'END:VEVENT']),'END:VCALENDAR'].join('\r\n');}
