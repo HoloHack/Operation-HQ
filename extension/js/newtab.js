@@ -1388,7 +1388,7 @@ function wireBookmarkSorter() {
   };
 }
 
-const EXPORTABLE_KEYS = BackupPolicy.KEYS; // Workspace-only; no credentials, pairing or folder ownership.
+// BackupPolicy is demand-loaded only when a backup action is requested.
 
 function wireDataBackup() {
   const encryptToggle = document.getElementById("toggle-encrypt-backup");
@@ -1396,6 +1396,8 @@ function wireDataBackup() {
   encryptToggle.onchange = () => encryptFields.classList.toggle("hidden", !encryptToggle.checked);
 
   document.getElementById("export-data-btn").onclick = async () => {
+    try {
+    await ScriptLoader.load("js/backup-policy.js");
     const all = await chrome.storage.local.get(null);
     const json = JSON.stringify({format:"operation-hq-workspace",version:1,data:BackupPolicy.select(all)}, null, 2);
     let outputText = json;
@@ -1418,13 +1420,16 @@ function wireDataBackup() {
     a.download = `operation-hq-backup-${new Date().toISOString().slice(0, 10)}${filenameSuffix}.json`;
     a.click();
     URL.revokeObjectURL(url);
-    Wallpaper.toast(encryptToggle.checked ? "Encrypted backup downloaded." : "Backup downloaded.");
+    Wallpaper.toast(encryptToggle.checked ? "Encrypted workspace backup downloaded." : "Workspace backup downloaded.");
+    } catch(error) { Wallpaper.toast(error.message || "Backup could not be exported."); }
   };
 
   document.getElementById("import-data-input").onchange = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
     try {
+      if(file.size>5000000)throw new Error("Backup exceeds the 5 MB workspace limit.");
+      await ScriptLoader.load("js/backup-policy.js");
       const text = await file.text();
       const parsed = JSON.parse(text);
 
