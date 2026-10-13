@@ -12,6 +12,14 @@ export function dayAgenda(state:HQState,date:string):HQEvent[]{
  const day=new Date(`${date}T12:00:00`).getDay();
  return [...state.events.filter(e=>e.date===date),...state.schedule.filter(b=>b.day===day&&(b.weekParity===undefined||!b.altAnchor||((Math.floor((Date.parse(date)-Date.parse(b.altAnchor))/604800000)%2+2)%2)===b.weekParity)).map(b=>({...b,id:`timetable:${b.id}:${date}`,date,category:isStudyAvailability(b.title)?'availability':'timetable'}))].sort((a,b)=>String(a.start||'00:00').localeCompare(String(b.start||'00:00')));
 }
+export function rangeAgenda(state:HQState,from:string,days=30){
+ if(!Number.isInteger(days)||days<1||days>90)throw Error('Show between 1 and 90 agenda days.');
+ return Array.from({length:days},(_,i)=>dayAgenda(state,shiftDate(from,i))).flat();
+}
+export function subjectMatches(subject:string,text:string){
+ const normalized=(s:string)=>s.toLowerCase().replace(/mathematics|maths?/g,'math').replace(/history|geography/g,'hsie');
+ return normalized(text).includes(normalized(subject).trim());
+}
 export function contextNow(state:HQState,now:Date){const date=localDate(now),time=clock(now.getHours()*60+now.getMinutes()),agenda=dayAgenda(state,date);return {current:agenda.filter(e=>e.start&&e.end&&e.start<=time&&e.end>time).sort((a,b)=>Number(a.category==='availability')-Number(b.category==='availability'))[0],next:agenda.find(e=>e.start&&e.start>time&&e.category!=='availability')||agenda.find(e=>e.start&&e.start>time),tomorrow:dayAgenda(state,shiftDate(date,1))};}
 export function makeEvent(input:Partial<HQEvent>,id:string,now:number):HQEvent{
  const title=input.title?.trim();if(!title||title.length>500||!validDate(input.date||''))throw Error('Add an event title and valid date.');
@@ -23,13 +31,16 @@ export function planCapacity(state:HQState,options:{from:string;until:string;sub
  const days=Math.round((Date.parse(options.until)-Date.parse(options.from))/86400000)+1;if(days>90)throw Error('Plan at most 90 days at a time.');
  const breaks=Math.max(0,Math.min(30,options.breakMinutes));
  const tasks=state.tasks.filter(t=>!t.completed).sort((a,b)=>{
-  const prefer=(t:typeof a)=>options.subject&&`${t.subject||''} ${t.title}`.toLowerCase().includes(options.subject.toLowerCase())?0:1;
+  const prefer=(t:typeof a)=>options.subject&&subjectMatches(options.subject,`${t.subject||''} ${t.title}`)?0:1;
   const rank={critical:0,high:1,normal:2,low:3};return prefer(a)-prefer(b)||rank[a.priority]-rank[b.priority]||String(a.due||'9999').localeCompare(String(b.due||'9999'));
  });
- const events:HQEvent[]=[],unscheduled:string[]=[];const existing=state.events.filter(e=>e.category!=='study-plan');
+ const instant=new Date(now),today=localDate(instant),nowMinute=instant.getHours()*60+instant.getMinutes();
+ const replaced=state.events.filter(e=>e.category==='study-plan'&&e.date>=options.from&&e.date<=options.until&&(e.date>today||(e.date===today&&Boolean(e.start)&&minute(e.start!)>nowMinute)));
+ const replacedIds=new Set(replaced.map(e=>e.id));
+ const events:HQEvent[]=[],unscheduled:string[]=[];const existing=state.events.filter(e=>!replacedIds.has(e.id));
  const working={...state,events:existing};
  for(const task of tasks){let remaining=task.estimateMinutes||25;const chunks:HQEvent[]=[];
-  for(let i=0;i<days&&remaining;i++){const date=shiftDate(options.from,i);if(task.due&&date>task.due.slice(0,10))break;
+  for(let i=0;i<days&&remaining;i++){const date=shiftDate(options.from,i);if(date<today)continue;if(task.due&&date>task.due.slice(0,10))break;
    const occupied=dayAgenda(working,date).filter(e=>e.category!=='availability').concat(events.filter(e=>e.date===date),chunks.filter(e=>e.date===date));
    if(occupied.some(e=>!e.start||!e.end))continue; // All-day commitments reserve the day.
    let cursor=minute(options.start),end=minute(options.end);const instant=new Date(now);if(date===localDate(instant))cursor=Math.max(cursor,instant.getHours()*60+instant.getMinutes()+1);
@@ -38,11 +49,24 @@ export function planCapacity(state:HQState,options:{from:string;until:string;sub
   }
   if(remaining){unscheduled.push(`${task.title}: ${remaining} minutes do not fit before its deadline.`);}events.push(...chunks);
  }
- return {events,unscheduled,basis:JSON.stringify({tasks:state.tasks,events:state.events,schedule:state.schedule}),replaced:state.events.filter(e=>e.category==='study-plan')};
+ return {events,unscheduled,basis:JSON.stringify({tasks:state.tasks,events:state.events,schedule:state.schedule}),replaced};
 }
 export function applyCapacity(state:HQState,plan:ReturnType<typeof planCapacity>,now:number){
  if(plan.basis!==JSON.stringify({tasks:state.tasks,events:state.events,schedule:state.schedule}))throw Error("Your tasks or commitments changed. Generate another preview.");
- const current=state.events.filter(e=>e.category==='study-plan');if(JSON.stringify(current)!==JSON.stringify(plan.replaced))throw Error('Your plan changed. Generate another preview.');
- return {...state,events:[...state.events.filter(e=>e.category!=='study-plan'),...plan.events]};
+ const ids=new Set(plan.replaced.map(e=>e.id));
+ return {...state,events:[...state.events.filter(e=>!ids.has(e.id)),...plan.events]};
+}
+export function undoCapacity(state:HQState,inverse:{added:HQEvent[];removed:HQEvent[]},now:number){
+ const additions=new Map(inverse.added.map(e=>[e.id,e])),current=state.events.filter(e=>additions.has(e.id));
+ if(current.length!==additions.size||current.some(e=>JSON.stringify(e)!==JSON.stringify(additions.get(e.id))))throw Error('A planned event was edited or removed. Undo stopped to preserve that change.');
+ const currentIds=new Set(state.events.map(e=>e.id));
+ const removed=inverse.removed.filter(e=>!currentIds.has(e.id)).map(e=>({...e,updatedAt:Math.max(now,e.updatedAt+1,...state.tombstones.filter(t=>t.collection==='events'&&t.id===e.id).map(t=>t.updatedAt+1))}));
+ return {...state,events:[...state.events.filter(e=>!additions.has(e.id)),...removed]};
+}
+export function restoreCalendarItem(state:HQState,kind:'events'|'schedule',record:HQEvent|HQState['schedule'][number],now:number):HQState{
+ if(state[kind].some(e=>e.id===record.id))throw Error('This commitment is already present. Its current version was kept.');
+ const deletedAt=state.tombstones.filter(t=>t.collection===kind&&t.id===record.id).reduce((max,t)=>Math.max(max,t.updatedAt),0);
+ const restored={...record,updatedAt:Math.max(now,record.updatedAt+1,deletedAt+1)};
+ return kind==='events'?{...state,events:[...state.events,restored as HQEvent]}:{...state,schedule:[...state.schedule,restored as HQState['schedule'][number]]};
 }
 export function exportICS(events:HQEvent[]){const escape=(s:string)=>s.replace(/\\/g,'\\\\').replace(/\n/g,'\\n').replace(/,/g,'\\,').replace(/;/g,'\\;');const stamp=(e:HQEvent,t?:string)=>e.date.replaceAll('-','')+(t?'T'+t.replace(':','')+'00':'');return ['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//Operation HQ//Calendar//EN',...events.flatMap(e=>['BEGIN:VEVENT',`UID:${escape(e.id)}@operation-hq`,e.start?`DTSTART:${stamp(e,e.start)}`:`DTSTART;VALUE=DATE:${stamp(e)}`,e.end?`DTEND:${stamp(e,e.end)}`:`DTEND;VALUE=DATE:${shiftDate(e.date,1).replaceAll('-','')}`,`SUMMARY:${escape(e.title)}`,...(e.notes?[`DESCRIPTION:${escape(e.notes)}`]:[]),'END:VEVENT']),'END:VCALENDAR'].join('\r\n');}

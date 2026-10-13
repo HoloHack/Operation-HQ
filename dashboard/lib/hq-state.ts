@@ -73,7 +73,7 @@ export function emptyHQState(): HQState {
     exams: [],
     habits: [],
     captures: [],
-    settings: { accentHue: 264, supportHue: 198, motion: "balanced", density: "balanced", updatedAt: 0 },
+    settings: { accentHue: 152, supportHue: 152, motion: "balanced", density: "balanced", updatedAt: 0 },
     focus: { mission: "", minutes: 25, chapters: [], updatedAt: 0 },
   };
 }
@@ -169,7 +169,8 @@ export function mergeHQState(leftInput: unknown, rightInput: unknown): HQState {
   const left = sanitizeHQState(leftInput, { preserveOverflow: true });
   const right = sanitizeHQState(rightInput, { preserveOverflow: true });
   const tombstones=mergeById(left.tombstones.map(t=>({...t,id:t.collection+":"+t.id,entityId:t.id})),right.tombstones.map(t=>({...t,id:t.collection+":"+t.id,entityId:t.id}))).map(t=>({id:t.entityId,collection:t.collection,updatedAt:t.updatedAt}));
-  const alive=<T extends {id:string;updatedAt:number}>(key:string,items:T[])=>items.filter(item=>!tombstones.some(t=>t.collection===key&&t.id===item.id&&t.updatedAt>=item.updatedAt));
+  const deletedAt=new Map(tombstones.map(t=>[t.collection+':'+t.id,t.updatedAt]));
+  const alive=<T extends {id:string;updatedAt:number}>(key:string,items:T[])=>items.filter(item=>(deletedAt.get(key+':'+item.id)??-1)<item.updatedAt);
   return sanitizeHQState({
     ...left,
     ...right,
