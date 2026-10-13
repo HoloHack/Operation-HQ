@@ -1503,7 +1503,7 @@
       <input type="password" id="backup-export-passphrase-confirm" placeholder="Confirm passphrase" aria-label="Confirm backup passphrase" style="width:100%;" autocomplete="new-password">
       <p class="settings-note" style="margin:6px 0 0;">There's no recovery if you forget this — it's not stored anywhere, including by this extension.</p>
     </div>
-    <button id="export-data-btn">Export All Data (JSON)</button>
+    <button id="export-data-btn">Export workspace backup (JSON)</button>
     <label style="margin-top:8px;">Import from backup</label>
     <input type="file" id="import-data-input" accept=".json" aria-label="Import backup JSON">
   </div>
@@ -1524,6 +1524,7 @@
   </div>
 </div>
 
+<script src="js/backup-policy.js"></script>
 <script src="js/newtab.js"></script>
 </body>
 </html>
