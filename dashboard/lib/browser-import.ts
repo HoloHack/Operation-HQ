@@ -3,6 +3,7 @@ import type { HQState } from './hq-state.ts';
 
 export type NotesChoice = 'keep' | 'browser' | 'both';
 const prefix = 'browser:';
+const importId=(key:string,id:string)=>key==='tasks'&&id.startsWith('dashboard:')?id.slice(10):key==='events'&&id.startsWith('sync:')?id.slice(5):key==='events'&&id.startsWith('event:sync:')&&id.endsWith(':0')?id.slice(11,-2):prefix+id;
 
 /** Only import planning fields. Browser defaults cannot reset dashboard preferences. */
 export function reviewBrowserImport(input: unknown): HQState {
@@ -26,9 +27,9 @@ export function reviewBrowserImport(input: unknown): HQState {
 export function applyBrowserImport(current: HQState, source: HQState, notesChoice: NotesChoice = 'keep', now = Date.now()): HQState {
   source = reviewBrowserImport(source);
   // Existing dashboard edits always win. Re-imports cannot duplicate or overwrite them.
-  const merge = <T extends {id: string}>(existing: T[], incoming: T[]) => {
+  const merge = <T extends {id: string}>(existing: T[], incoming: T[],key:string) => {
     const ids = new Set(existing.map(item => item.id));
-    return [...existing, ...incoming.map(item => ({...item, id: prefix + item.id})).filter(item => !ids.has(item.id))];
+    return [...existing, ...incoming.map(item => ({...item, id: importId(key,item.id)})).filter(item => !ids.has(item.id))];
   };
   let notes = current.notes;
   if (!notes.plain && source.notes.plain) notes = {...source.notes, updatedAt: now};
@@ -36,12 +37,12 @@ export function applyBrowserImport(current: HQState, source: HQState, notesChoic
     if (notesChoice === 'browser') notes = {plain: source.notes.plain, updatedAt: now};
     if (notesChoice === 'both' && !notes.plain.endsWith('\n\n--- Browser notes ---\n\n' + source.notes.plain)) notes = {plain: notes.plain + '\n\n--- Browser notes ---\n\n' + source.notes.plain, updatedAt: now};
   }
-  const result = {...current, tasks: merge(current.tasks, source.tasks), events: merge(current.events, source.events), notes};
+  const result = {...current, tasks: merge(current.tasks, source.tasks,"tasks"), events: merge(current.events, source.events,"events"), schedule:merge(current.schedule,source.schedule,"schedule"), notes};
   assertHQCapacity(result); // Reject the whole import if the union cannot be saved.
   return result;
 }
 
 export function browserImportSummary(current: HQState, source: HQState) {
-  const count = <T extends {id: string}>(existing: T[], incoming: T[]) => incoming.filter(item => !existing.some(saved => saved.id === prefix + item.id)).length;
-  return {newTasks: count(current.tasks, source.tasks), newEvents: count(current.events, source.events), notesDiffer: Boolean(current.notes.plain && source.notes.plain && current.notes.plain !== source.notes.plain)};
+  const count = <T extends {id: string}>(existing: T[], incoming: T[],key:string) => incoming.filter(item => !existing.some(saved => saved.id === importId(key,item.id))).length;
+  return {newTasks: count(current.tasks, source.tasks,"tasks"), newEvents: count(current.events, source.events,"events"), notesDiffer: Boolean(current.notes.plain && source.notes.plain && current.notes.plain !== source.notes.plain)};
 }

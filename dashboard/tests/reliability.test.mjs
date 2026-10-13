@@ -149,3 +149,8 @@ test('chapter plan requires real deadline and estimates and reuses existing acti
 test('API account binding rejects a stale tab after another account signs in',async()=>{
  const r=routeHarness();const request=req({baseRevision:0,snapshot:emptyHQState()});request.headers.set('x-hq-account','another-user');assert.equal((await r.PUT(request)).status,403);assert.equal((await r.GET(new Request('https://hq.test/api/state',{headers:{'x-hq-account':'another-user'}}))).status,403);assert.equal(r.db.prepare('SELECT count(*) AS n FROM hq_state').get().n,0);r.db.close();
 });
+
+test('older clients cannot discard newly introduced collections or deletion history',async()=>{
+ const r=routeHarness();const saved={...emptyHQState(),tombstones:[{id:'removed',collection:'tasks',updatedAt:2}]};assert.equal((await r.PUT(req({baseRevision:0,snapshot:saved}))).status,200);
+ const old={...emptyHQState()};delete old.tombstones;delete old.releases;assert.equal((await r.PUT(req({baseRevision:1,snapshot:old}))).status,422);assert.equal((await (await r.GET()).json()).snapshot.tombstones.length,1);r.db.close();
+});

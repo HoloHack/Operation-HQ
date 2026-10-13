@@ -1,4 +1,4 @@
-# Operation HQ — Browser Companion 3.1.0
+# Operation HQ — Browser Companion 3.2.0
 
 This is the recoverable-source reconstruction. It opens browser tools on demand and leaves ordinary new tabs alone. Start with [the current release and limits](docs/BROWSER-COMPANION-2026-10-08.md). The original 3.0 archive could not be downloaded; unseen additions are not claimed as preserved.
 
@@ -305,3 +305,6 @@ Mods, Universal Capture, Forgotten Bookmark, Weekly Stats (bundled Chart.js),
 streak-freeze, sound cues, Today's Plan, Completion Detection, Chrome
 Optimizer, Lockdown Mode, idle-triggered auto-privacy, PIN-gated reveal —
 unchanged this pass, see earlier README sections in the chat history.
+
+## Paired planning (3.2)
+Enable dashboard access in the popup, then explicitly pair your signed-in account in dashboard Settings. Tasks/notes exchange every 30 seconds while visible; complete dashboard planning metadata is retained locally. Recurring browser calendar and alternating timetable definitions keep their native editor. Conflicts pause without guessing. Disconnect in Settings or the popup; copies remain. No additional Chrome permission is requested.

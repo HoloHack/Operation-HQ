@@ -104,20 +104,30 @@ const NotesEditor = {
     return doc;
   },
 
+  async keepConflict(local, remote) {
+    const saved=await chrome.storage.local.get(this.RECOVERY_KEY);
+    await chrome.storage.local.set({hq_notes_sync_conflict_v1:{local,remote},[this.RECOVERY_KEY]:{document:local,remote,previousDocument:saved[this.RECOVERY_KEY]?.document,detectedAt:Date.now(),reason:"paired-conflict"}});
+    document.getElementById("notes-restore-recovery")?.classList.remove("hidden");
+  },
+
   async writeDocument(doc, { keepRevision = false } = {}) {
+    this._pendingWrites=(this._pendingWrites||0)+1;
     const normalized = keepRevision ? { ...doc } : this.createDocument(doc.html, doc.plain, doc.revision, doc.source);
-    this._saveChain = this._saveChain.catch(() => {}).then(async () => {
+    this._saveChain = this._saveChain.catch(() => {}).then(async () => navigator.locks.request("hq-planning-write", async () => {
+      const stored=(await chrome.storage.local.get(this.DOC_KEY))[this.DOC_KEY];
+      if(this._savedPlain!==undefined && stored?.plain!==this._savedPlain && stored?.plain!==normalized.plain){await this.keepConflict(normalized,stored);throw new Error("Notes changed in the paired dashboard. Both versions were kept; reload and review before saving.");}
       await chrome.storage.local.set({
         [this.DOC_KEY]: normalized,
         hq_notes_html: normalized.html,
         hq_notes: normalized.plain,
       });
+      this._savedPlain=normalized.plain;
       this.document = normalized;
       this.setSaveStatus("Saved locally");
       this.refreshMeta();
       return normalized;
-    });
-    return this._saveChain;
+    }));
+    return this._saveChain.finally(()=>{this._pendingWrites--;});
   },
 
   editorSnapshot(source = "editor") {
@@ -134,10 +144,10 @@ const NotesEditor = {
   debouncedPersist() {
     this.setSaveStatus("Saving…");
     clearTimeout(this._debounceTimer);
-    this._debounceTimer = setTimeout(() => this.persist().catch(error => {
+    this._debounceTimer = setTimeout(() => { this._debounceTimer=null;void this.persist().catch(error => {
       console.error("Notes save failed:", error);
       this.setSaveStatus("Save failed — retrying on next edit", true);
-    }), 350);
+    }); }, 350);
   },
 
   async appendExternal(value, source = "capture") {
@@ -255,16 +265,19 @@ const NotesEditor = {
     if (search) search.oninput = () => this.search(search.value);
     const recovery = document.getElementById("notes-restore-recovery");
     if (recovery) recovery.onclick = async () => {
-      const saved = await chrome.storage.local.get(this.RECOVERY_KEY);
-      const doc = saved[this.RECOVERY_KEY]?.document;
-      if (!this.validDocument(doc)) return;
-      const restored = this.createDocument(doc.html, doc.plain, this.document?.revision, "manual-recovery");
-      await this.writeDocument(restored, { keepRevision: true });
-      this.applyDocument(restored);
-      await chrome.storage.local.remove(this.RECOVERY_KEY);
-      recovery.classList.add("hidden");
-      this.setSaveStatus("Previous copy restored");
+      try {
+        const saved = await chrome.storage.local.get([this.RECOVERY_KEY,this.DOC_KEY]);
+        const copy=saved[this.RECOVERY_KEY],doc=copy?.document;
+        if(!this.validDocument(doc))return;
+        if(copy.reason==="paired-conflict"&&!confirm("Restore your pending draft? The currently saved version will be kept as a recovery backup."))return;
+        this._savedPlain=saved[this.DOC_KEY]?.plain;
+        await chrome.storage.local.set({hq_notes_recovery_previous_v1:{document:saved[this.DOC_KEY],previousDocument:copy.previousDocument,restoredAt:Date.now()}});
+        const restored=this.createDocument(doc.html,doc.plain,this.document?.revision,"manual-recovery");
+        await this.writeDocument(restored,{keepRevision:true});this.applyDocument(restored);
+        await chrome.storage.local.remove(this.RECOVERY_KEY);recovery.classList.add("hidden");this.setSaveStatus("Previous copy restored; the other version is backed up");
+      } catch(error){this.setSaveStatus(error.message||"Recovery stopped. Both copies are kept.",true);}
     };
+
     const exportButton = document.getElementById("notes-export");
     if (exportButton) exportButton.onclick = () => {
       const blob = new Blob([this.document?.plain || ""], { type: "text/plain;charset=utf-8" });
@@ -284,6 +297,8 @@ const NotesEditor = {
       if (area !== "local") return;
       const incoming = changes[this.DOC_KEY]?.newValue;
       if (!this.validDocument(incoming) || incoming.revision <= Number(this.document?.revision || 0)) return;
+      if((this._debounceTimer||this._pendingWrites)&&this.document?.plain!==incoming.plain){void this.keepConflict(this.document,incoming).catch(()=>{});this.setSaveStatus("Notes changed elsewhere. Your pending draft was kept for review.");return;}
+      this._savedPlain=incoming.plain;
       this.applyDocument(incoming);
     });
   },

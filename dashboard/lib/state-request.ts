@@ -31,6 +31,7 @@ export async function readStateRequest(request: Request) {
   for (const [key, limit] of Object.entries(limits)) {
     if (!Array.isArray(snapshot[key]) || snapshot[key].length > limit) throw new StateRequestError(`Invalid or oversized ${key} collection.`, 422);
   }
+  for(const [key,limit] of [["releases",100],["tombstones",20000]] as const) if(snapshot[key]!==undefined&&(!Array.isArray(snapshot[key])||snapshot[key].length>limit))throw new StateRequestError(`Invalid or oversized ${key} collection.`,422);
   if (!snapshot.notes || typeof snapshot.notes !== "object" || Array.isArray(snapshot.notes) || typeof (snapshot.notes as {plain?:unknown}).plain !== "string" || ((snapshot.notes as {plain:string}).plain.length > 200000)) throw new StateRequestError("Invalid or oversized notes document.", 422);
   return { baseRevision: body.baseRevision, snapshot };
 }

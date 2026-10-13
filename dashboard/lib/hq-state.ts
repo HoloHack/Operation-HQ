@@ -1,3 +1,4 @@
+import {normalizeRelease,type ReleaseEntry} from "./release-tracker.ts";
 export type Priority = "critical" | "high" | "normal" | "low";
 
 export type HQTask = {
@@ -25,10 +26,12 @@ export type HQEvent = {
 
 export type HQState = {
   schemaVersion: 1;
+  releases: ReleaseEntry[];
+  tombstones: Array<{id:string;collection:string;updatedAt:number}>;
   tasks: HQTask[];
   events: HQEvent[];
   notes: { plain: string; updatedAt: number };
-  schedule: Array<{ id: string; title: string; day: number; start: string; end: string; subject?: string; updatedAt: number }>;
+  schedule: Array<{ id: string; title: string; day: number; start: string; end: string; subject?: string; altAnchor?:string; weekParity?:number; updatedAt: number }>;
   assignments: Array<{ id: string; title: string; subject?: string; due?: string; progress?: number; updatedAt: number }>;
   exams: Array<{ id: string; title: string; date: string; subject?: string; updatedAt: number }>;
   habits: Array<{ id: string; title: string; completedDates: string[]; updatedAt: number }>;
@@ -61,6 +64,7 @@ export function validTime(value: string) { return /^(?:[01]\d|2[0-3]):[0-5]\d$/.
 export function emptyHQState(): HQState {
   return {
     schemaVersion: 1,
+    releases: [], tombstones: [],
     tasks: [],
     events: [],
     notes: { plain: "", updatedAt: 0 },
@@ -74,7 +78,7 @@ export function emptyHQState(): HQState {
   };
 }
 
-export const HQ_COLLECTION_LIMITS = { tasks: 2000, events: 3000, schedule: 1000, assignments: 1000, exams: 300, habits: 300, captures: 2000 } as const;
+export const HQ_COLLECTION_LIMITS = { tasks: 2000, events: 3000, schedule: 1000, assignments: 1000, exams: 300, habits: 300, captures: 2000, releases: 100, tombstones: 20000 } as const;
 export const HQ_NOTES_LIMIT = 200000;
 
 /** Refuse oversized writes instead of silently discarding user records. */
@@ -99,6 +103,8 @@ export function sanitizeHQState(input: unknown, options: { preserveOverflow?: bo
 
   return {
     schemaVersion: 1,
+    releases: array("releases",100).map(normalizeRelease).filter((r): r is ReleaseEntry=>Boolean(r)),
+    tombstones: array("tombstones",20000).map(raw=>{const r=raw as Record<string,unknown>;return {id:safeText(r?.id,120),collection:safeText(r?.collection,30),updatedAt:Math.max(0,finite(r?.updatedAt))};}).filter(r=>r.id&&r.collection&&r.updatedAt),
     tasks: array("tasks", 2000).map(raw => {
       const item = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
       const priority = ["critical", "high", "normal", "low"].includes(String(item.priority)) ? item.priority as Priority : "normal";
@@ -115,7 +121,7 @@ export function sanitizeHQState(input: unknown, options: { preserveOverflow?: bo
     },
     schedule: array("schedule", 1000).map(raw => {
       const item = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
-      return { id: id(item.id), title: safeText(item.title, 300), day: Math.max(0, Math.min(6, finite(item.day))), start: safeText(item.start, 8), end: safeText(item.end, 8), subject: safeText(item.subject, 120) || undefined, updatedAt: Math.max(0, finite(item.updatedAt, Date.now())) };
+      return { id: id(item.id), title: safeText(item.title, 300), day: Math.max(0, Math.min(6, finite(item.day))), start: safeText(item.start, 8), end: safeText(item.end, 8), subject: safeText(item.subject, 120) || undefined, altAnchor:validDate(String(item.altAnchor))?String(item.altAnchor):undefined, weekParity:item.weekParity===0||item.weekParity===1?item.weekParity:undefined, updatedAt: Math.max(0, finite(item.updatedAt, Date.now())) };
     }).filter(item => item.title && validTime(item.start) && validTime(item.end) && item.end > item.start),
     assignments: array("assignments", 1000).map(raw => {
       const item = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
@@ -162,18 +168,27 @@ function mergeById<T extends { id: string; updatedAt: number }>(left: T[], right
 export function mergeHQState(leftInput: unknown, rightInput: unknown): HQState {
   const left = sanitizeHQState(leftInput, { preserveOverflow: true });
   const right = sanitizeHQState(rightInput, { preserveOverflow: true });
+  const tombstones=mergeById(left.tombstones.map(t=>({...t,id:t.collection+":"+t.id,entityId:t.id})),right.tombstones.map(t=>({...t,id:t.collection+":"+t.id,entityId:t.id}))).map(t=>({id:t.entityId,collection:t.collection,updatedAt:t.updatedAt}));
+  const alive=<T extends {id:string;updatedAt:number}>(key:string,items:T[])=>items.filter(item=>!tombstones.some(t=>t.collection===key&&t.id===item.id&&t.updatedAt>=item.updatedAt));
   return sanitizeHQState({
     ...left,
     ...right,
-    tasks: mergeById(left.tasks, right.tasks),
-    events: mergeById(left.events, right.events),
-    schedule: mergeById(left.schedule, right.schedule),
-    assignments: mergeById(left.assignments, right.assignments),
-    exams: mergeById(left.exams, right.exams),
-    habits: mergeById(left.habits, right.habits),
-    captures: mergeById(left.captures, right.captures),
+    tombstones,
+    releases: alive("releases",mergeById(left.releases,right.releases)),
+    tasks: alive("tasks",mergeById(left.tasks, right.tasks)),
+    events: alive("events",mergeById(left.events, right.events)),
+    schedule: alive("schedule",mergeById(left.schedule, right.schedule)),
+    assignments: alive("assignments",mergeById(left.assignments, right.assignments)),
+    exams: alive("exams",mergeById(left.exams, right.exams)),
+    habits: alive("habits",mergeById(left.habits, right.habits)),
+    captures: alive("captures",mergeById(left.captures, right.captures)),
     notes: left.notes.updatedAt > right.notes.updatedAt ? left.notes : right.notes,
     focus: left.focus.updatedAt > right.focus.updatedAt ? left.focus : right.focus,
     settings: left.settings.updatedAt > right.settings.updatedAt ? left.settings : right.settings,
   }, { preserveOverflow: true });
+}
+
+export function recordRemovals(previous:HQState,next:HQState,now=Date.now()):HQState {
+ const removed=[];for(const key of ["tasks","events","schedule","assignments","exams","habits","captures","releases"] as const){const ids=new Set(next[key].map(r=>r.id));for(const item of previous[key])if(!ids.has(item.id))removed.push({id:item.id,collection:key,updatedAt:Math.max(now,item.updatedAt+1)});}
+ const map=new Map<string,{id:string;collection:string;updatedAt:number}>();for(const t of [...next.tombstones,...removed]){const key=t.collection+":"+t.id;if(!map.has(key)||map.get(key)!.updatedAt<t.updatedAt)map.set(key,t);}return {...next,tombstones:[...map.values()]};
 }
