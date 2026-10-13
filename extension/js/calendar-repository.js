@@ -177,7 +177,8 @@ const CalendarRepository = {
       });
       return { state, inverse };
     };
-    const result = this._writeQueue.then(run, run);
+    const locked = () => globalThis.navigator?.locks?.request ? navigator.locks.request("hq-planning-write",run) : run();
+    const result = this._writeQueue.then(locked, locked);
     this._writeQueue = result.catch(() => {});
     return result;
   },

@@ -1,4 +1,5 @@
 importScripts("dashboard-bridge.js");
+importScripts("planning-sync.js");
 // background.js — service worker.
 // 1) Real-time bookmark sort on creation (same Classifier as bulk sort).
 // 2) Learns from manual re-files (chrome.bookmarks.onMoved), ignoring moves
@@ -549,6 +550,7 @@ chrome.alarms.create("hq_completion_tick", { periodInMinutes: 1 });
 chrome.alarms.onAlarm.addListener(safely("Completion tracking", async (alarm) => {
   if (alarm.name !== "hq_completion_tick") return;
 
+  return navigator.locks.request("hq-planning-write",async()=>{
   const { hq_tasks } = await chrome.storage.local.get("hq_tasks");
   const tasks = hq_tasks || [];
   const tracked = tasks.filter(t => t.activeSince && t.trackUrl && !t.done);
@@ -582,6 +584,7 @@ chrome.alarms.onAlarm.addListener(safely("Completion tracking", async (alarm) =>
   if (changed) {
     await chrome.storage.local.set({ hq_tasks: tasks, hq_completion_prompts: prompts });
   }
+  });
 }));
 
 chrome.runtime.onMessageExternal.addListener((message,sender,respond)=>{

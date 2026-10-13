@@ -4,6 +4,7 @@
   const action=async(fn)=>{try{await fn();status.textContent='Ready.';}catch(error){status.textContent=String(error.message||error);}};
   await action(async()=>{enabled.checked=Boolean((await chrome.storage.local.get(DashboardBridge.ENABLED_KEY))[DashboardBridge.ENABLED_KEY]);});
   enabled.addEventListener('change',()=>action(()=>chrome.storage.local.set({[DashboardBridge.ENABLED_KEY]:enabled.checked})));
+  document.getElementById('disconnect-sync').addEventListener('click',()=>action(()=>navigator.locks.request('hq-planning-write',()=>chrome.storage.local.remove('hq_planning_pair_v2'))));
   document.getElementById('open-dashboard').addEventListener('click',()=>action(async()=>{
     const tabs=await chrome.tabs.query({});const found=tabs.find(t=>t.url?.startsWith(DashboardBridge.ORIGIN+'/'));
     if(found){await chrome.tabs.update(found.id,{active:true});await chrome.windows.update(found.windowId,{focused:true});}

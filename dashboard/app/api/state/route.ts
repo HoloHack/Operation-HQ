@@ -49,8 +49,10 @@ export async function PUT(request: Request) {
     const input = body.snapshot[key] as unknown[];
     if (snapshot[key].length !== input.length || new Set(snapshot[key].map(item => item.id)).size !== input.length) throw new StateRequestError(`Invalid or duplicate records in ${key}.`, 422);
   }
+  for(const key of ["releases","tombstones"] as const){const input=body.snapshot[key] as unknown[]|undefined;if(input&&(snapshot[key].length!==input.length||new Set(snapshot[key].map(item=>key==="tombstones"?(item as {collection:string}).collection+":"+item.id:item.id)).size!==input.length))throw new StateRequestError(`Invalid or duplicate ${key}.`,422);}
   // Validate the existing payload before allowing any overwrite, including a matching revision.
   const existing = await current(user.userId);
+  for(const key of ["releases","tombstones"] as const)if(existing.snapshot[key].length&&body.snapshot[key]===undefined)throw new StateRequestError("This tab is running an older client. Reload before saving; newer planning data was kept.",422);
   if (existing.revision !== baseRevision) return Response.json({ error: "Your dashboard changed somewhere else.", ...existing, accountId:user.userId }, { status: 409 });
 
   const now = Date.now();

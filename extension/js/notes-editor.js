@@ -106,17 +106,20 @@ const NotesEditor = {
 
   async writeDocument(doc, { keepRevision = false } = {}) {
     const normalized = keepRevision ? { ...doc } : this.createDocument(doc.html, doc.plain, doc.revision, doc.source);
-    this._saveChain = this._saveChain.catch(() => {}).then(async () => {
+    this._saveChain = this._saveChain.catch(() => {}).then(async () => navigator.locks.request("hq-planning-write", async () => {
+      const stored=(await chrome.storage.local.get(this.DOC_KEY))[this.DOC_KEY];
+      if(this._savedPlain!==undefined && stored?.plain!==this._savedPlain && stored?.plain!==normalized.plain){await chrome.storage.local.set({hq_notes_sync_conflict_v1:{local:normalized,remote:stored}});throw new Error("Notes changed in the paired dashboard. Both versions were kept; reload and review before saving.");}
       await chrome.storage.local.set({
         [this.DOC_KEY]: normalized,
         hq_notes_html: normalized.html,
         hq_notes: normalized.plain,
       });
+      this._savedPlain=normalized.plain;
       this.document = normalized;
       this.setSaveStatus("Saved locally");
       this.refreshMeta();
       return normalized;
-    });
+    }));
     return this._saveChain;
   },
 
@@ -284,6 +287,8 @@ const NotesEditor = {
       if (area !== "local") return;
       const incoming = changes[this.DOC_KEY]?.newValue;
       if (!this.validDocument(incoming) || incoming.revision <= Number(this.document?.revision || 0)) return;
+      if(this._debounceTimer&&this.document?.plain!==incoming.plain){void chrome.storage.local.set({hq_notes_sync_conflict_v1:{local:this.document,remote:incoming}}).catch(()=>{});this.setSaveStatus("Notes changed elsewhere. Your pending draft was kept for review.");return;}
+      this._savedPlain=incoming.plain;
       this.applyDocument(incoming);
     });
   },

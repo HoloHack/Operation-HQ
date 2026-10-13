@@ -30,7 +30,7 @@ const Tasks = {
   },
 
   async init() {
-    const stored = await chrome.storage.local.get(["hq_tasks", "hq_ventures"]);
+    const stored = await navigator.locks.request("hq-planning-write", async()=>{const value=await chrome.storage.local.get(["hq_tasks", "hq_ventures"]);if((value.hq_tasks||[]).some(t=>!t.priority)){value.hq_tasks=(value.hq_tasks||[]).map(t=>t.priority?t:{...t,...this.inferTask(t.text)});await chrome.storage.local.set({hq_tasks:value.hq_tasks});}return value;});
     const needsPriorityMigration = (stored.hq_tasks || []).some(task => !task.priority);
     this.data = (stored.hq_tasks || []).map(task => {
       if (task.priority) return task;
@@ -38,6 +38,8 @@ const Tasks = {
       return { ...task, ...inferred };
     });
     if (needsPriorityMigration) await chrome.storage.local.set({ hq_tasks: this.data });
+    this._lastIntent = structuredClone(this.data);
+    if(!this._listenerBound){this._listenerBound=true;chrome.storage.onChanged.addListener((changes,area)=>{if(area!=="local"||!Array.isArray(changes.hq_tasks?.newValue)||this._saving)return;this.data=structuredClone(changes.hq_tasks.newValue);this._lastIntent=structuredClone(this.data);this.render();this.syncContext();});}
     this.ventures = Array.isArray(stored.hq_ventures) ? stored.hq_ventures : DEFAULT_VENTURES;
     this.renderVentureOptions();
     this.render();
@@ -45,9 +47,19 @@ const Tasks = {
   },
 
   async save() {
-    await chrome.storage.local.set({ hq_tasks: this.data });
-    this.render();
-    this.syncContext();
+    this._saving=true;
+    const before=structuredClone(this._lastIntent || []), desired=structuredClone(this.data);
+    this._lastIntent=desired;const generation=this._generation=(this._generation||0)+1;
+    const run=async()=>navigator.locks.request('hq-planning-write',async()=>{
+      const saved=(await chrome.storage.local.get('hq_tasks')).hq_tasks||[], map=new Map(saved.map(t=>[t.id,t]));
+      for(const previous of before){if(!desired.some(t=>t.id===previous.id)){const current=map.get(previous.id);if(current&&JSON.stringify(current)!==JSON.stringify(previous))throw Error('Task changed elsewhere; deletion stopped. Reload before retrying.');map.delete(previous.id);}}
+      for(const item of desired){const previous=before.find(t=>t.id===item.id),current=map.get(item.id);if(!previous){if(current&&JSON.stringify(current)!==JSON.stringify(item))throw Error('Task identifier collision; nothing changed.');map.set(item.id,item);continue;}const changes={};for(const key of new Set([...Object.keys(previous),...Object.keys(item)])){if(JSON.stringify(previous[key])!==JSON.stringify(item[key])){if(current&&JSON.stringify(current[key])!==JSON.stringify(previous[key])&&JSON.stringify(current[key])!==JSON.stringify(item[key]))throw Error('Task changed elsewhere; both versions are retained. Reload before retrying.');changes[key]=item[key];}}if(Object.keys(changes).length){if(!current)throw Error('Task was removed elsewhere. Reload before recreating it.');map.set(item.id,{...current,...changes,updatedAt:Date.now()});}}
+      const data=[...map.values()];await chrome.storage.local.set({hq_tasks:data});return data;
+    });
+    const flight=(this._saveChain||Promise.resolve()).then(run,run);this._saveChain=flight.catch(()=>{});
+    try {const data=await flight;if(generation===this._generation){this.data=data;this._lastIntent=structuredClone(data);}this.render();this.syncContext();}
+    catch(error){this._lastIntent=before;console.warn('Task save stopped:',error.message);const status=document.getElementById('task-progress-label');if(status)status.textContent=error.message;}
+    finally{if(generation===this._generation)this._saving=false;}
   },
 
   // Context Bus v0 — keeps the shared "what's true right now" snapshot

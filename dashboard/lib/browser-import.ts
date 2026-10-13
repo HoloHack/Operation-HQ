@@ -36,7 +36,7 @@ export function applyBrowserImport(current: HQState, source: HQState, notesChoic
     if (notesChoice === 'browser') notes = {plain: source.notes.plain, updatedAt: now};
     if (notesChoice === 'both' && !notes.plain.endsWith('\n\n--- Browser notes ---\n\n' + source.notes.plain)) notes = {plain: notes.plain + '\n\n--- Browser notes ---\n\n' + source.notes.plain, updatedAt: now};
   }
-  const result = {...current, tasks: merge(current.tasks, source.tasks), events: merge(current.events, source.events), notes};
+  const result = {...current, tasks: merge(current.tasks, source.tasks), events: merge(current.events, source.events), schedule:merge(current.schedule,source.schedule), notes};
   assertHQCapacity(result); // Reject the whole import if the union cannot be saved.
   return result;
 }

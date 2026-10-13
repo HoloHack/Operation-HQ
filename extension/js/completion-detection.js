@@ -45,6 +45,7 @@ const CompletionDetection = {
   },
 
   async resolve(id, action) {
+    return navigator.locks.request("hq-planning-write",async()=>{
     const { hq_completion_prompts, hq_tasks } = await chrome.storage.local.get(["hq_completion_prompts", "hq_tasks"]);
     const prompts = (hq_completion_prompts || []).filter(x => x !== id);
     const tasks = hq_tasks || [];
@@ -68,7 +69,9 @@ const CompletionDetection = {
     await chrome.storage.local.set({ hq_completion_prompts: prompts, hq_tasks: tasks });
     this.render();
     Tasks.data = tasks;
+    Tasks._lastIntent=structuredClone(tasks);
     Tasks.render();
+    });
   },
 
   init() {
