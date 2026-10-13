@@ -1,6 +1,6 @@
 # Study desk release — 14 October 2026 (Sydney)
 
-**Live dashboard: version 6.** https://operation-hq-command-center.shour-ya11.chatgpt.site
+**Live dashboard: version 7.** https://operation-hq-command-center.shour-ya11.chatgpt.site
 
 This release replaces the glowing, repetitive dashboard shell with an editorial study desk and closes several task, planning and pairing defects. It is not completion of the entire original roadmap.
 
@@ -44,10 +44,10 @@ A controlled companion test measured **15,669,300 bytes JavaScript heap**. That 
 
 All 141 dashboard files matched the tested GitHub source before packaging. Existing Site identity, audience and D1 DB binding retained.
 
-Sites source: 5267027af0972db0c24bf905286ee9a42595d3a0.
-Version ID: appgprj_6aadff7e3da0819187238acbe434e132~appgver_40579a68d6e881918d040e94f4c9e8f8.
-Native deployment: appgdep_6acebcf4d2a881918a2e82ca7dc4b59b; returned **succeeded** at 2026-10-13T23:21:34.167912+00:00.
-Archive: 1853440 bytes, 75 files, sha256:a9f1784fb148db7a3501448d7adec1e84106e73ed035d9c5886c01ab8a4cc322.
+Sites source: f781b9307d639bc67f7c7b39fa0583a981f29f13.
+Version ID: appgprj_6aadff7e3da0819187238acbe434e132~appgver_4769cf5ccc40819192f66a4068a64023.
+Native deployment: appgdep_6acebfcd2fa8819182ea46dcf80da107; returned **succeeded** at 2026-10-13T23:33:45.938024+00:00.
+Archive: 1853440 bytes, 75 files, sha256:3d38b42a805cf8faf20b65d37caeb432bf9c5d921d96f38a966295254dd6329d.
 
 GitHub and Sites are separate source authorities. Do not substitute a GitHub commit SHA for a Sites source commit.
 
@@ -77,3 +77,9 @@ Current whole-roadmap percentage is unmeasured; the historical 75% estimate is n
 Site version 5 is retained. Disconnect pairing and export planning before reverting either client. Keep canonical documents and deletion history; rolling back UI code is not permission to remove new records.
 
 Next priorities: durable deletion/history with recovery tests; richer calendar/Study ports with metadata-preserving sync; live provider and target-device performance acceptance. Existing weekly review remains unchanged. Upgrades go through isolated branches, tests and review; no unsupervised production self-modification.
+
+## Final status-label follow-up
+
+[PR #9](https://github.com/HoloHack/Operation-HQ/pull/9), merge 4bea80e635fdd747942c87f441926cc13a8e9296, changes the initial connection state to **Browser tools not checked**. It no longer reports a failed detection before attempting access. A stored pairing is not misrepresented as a missing extension. Screenshot captures wait for transitions to settle and start at the top of the viewport.
+
+Final dashboard head 06cab9096472886c571a3fba45208d9fa82c3e1e passed all 68 regressions, TypeScript/build/audit and 20 Chrome journeys in [run 38484414144](https://github.com/HoloHack/Operation-HQ/actions/runs/38484414144). Companion 3.2.1 is unchanged from its tested 4a0415d source. Native publication confirmed version 7; the protected dashboard remains a fixture-based acceptance test rather than a live-account test. Site version 6 is also retained as the immediately preceding version.
