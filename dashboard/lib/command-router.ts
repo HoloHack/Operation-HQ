@@ -1,5 +1,6 @@
 import {parseChapters} from './focus-clock.ts';
 export const commandExamples=['Show unfinished tasks','Show my timetable','Reschedule for maths','Study maths chapters 5, 7, 8 and 10','Show exam countdowns','Open notes','Find manga releases','Change theme for HSIE','Open bookmarks','Open Gmail','Review tab groups','Practise social skills','Refresh weather','Open local AI','Pause focus timer'];
+/** Classify supported local commands without executing actions or inventing model responses. */
 export function routeCommand(raw:string){
  const text=raw.trim(),subject=/math/i.test(text)?'Mathematics':/science/i.test(text)?'Science':/hsie|history|geography/i.test(text)?'HSIE':/english/i.test(text)?'English':undefined;
  const chapters=parseChapters(text);

@@ -61,6 +61,7 @@ async function cloudRequest(snapshot?: HQState, baseRevision?: number, accountId
   return { snapshot: sanitizeHQState(data.snapshot), revision: data.revision, conflict: response.status === 409 };
 }
 
+/** Send a bounded, read-only handoff or planning message to the fixed companion ID. */
 function extensionCall<T = unknown>(message: unknown, timeout = 2500): Promise<T> {
   return requestExtension<T>(EXTENSION_ID,message,timeout);
 }
@@ -104,6 +105,7 @@ function Empty({ title, detail }: { title: string; detail: string }) {
   return <div className="empty-state"><Circle size={13} /><div><strong>{title}</strong><span>{detail}</span></div></div>;
 }
 
+/** Account-isolated study desk; browser mutations stay behind explicit companion actions. */
 export default function Dashboard({ displayName, signedIn, accountId }: { displayName: string; signedIn: boolean; accountId: string }) {
   const [, renderSync] = useState(0);
   const journal = useRef<DraftJournal | null>(null);
@@ -115,6 +117,7 @@ export default function Dashboard({ displayName, signedIn, accountId }: { displa
   const [browserTitle,setBrowserTitle]=useState('Open your browser workspace');
   const toolEpoch=useRef(0);
   const firstName=displayFirstName(displayName);
+  const cancelBrowserHandoff=useCallback(()=>{toolEpoch.current++;setBridge(value=>value==='checking'?'idle':value);},[]);
   const [importReview, setImportReview] = useState(false);
   const [importCandidate, setImportCandidate] = useState<HQState | null>(null);
   const [notesChoice, setNotesChoice] = useState<NotesChoice>('keep');
@@ -172,7 +175,7 @@ export default function Dashboard({ displayName, signedIn, accountId }: { displa
     style.setProperty("--support-hue", String(state.settings.supportHue));
     return () => { style.removeProperty("--hue"); style.removeProperty("--support-hue"); };
   }, [state.settings.accentHue, state.settings.supportHue]);
-  useEffect(() => { const escape = (event: KeyboardEvent) => { if (event.key === "Escape") setCinema(false); if((event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==="k"){event.preventDefault();setCinema(false);setPanel(null);importEpoch.current++;setImportReview(false);setRecoveryReview(false);setTimeout(()=>document.getElementById("nexus-command")?.focus(),0);} }; addEventListener("keydown", escape); return () => removeEventListener("keydown", escape); }, []);
+  useEffect(() => { const escape = (event: KeyboardEvent) => { if (event.key === "Escape") setCinema(false); if((event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==="k"){event.preventDefault();setCinema(false);cancelBrowserHandoff();setPanel(null);importEpoch.current++;setImportReview(false);setRecoveryReview(false);setTimeout(()=>document.getElementById("nexus-command")?.focus(),0);} }; addEventListener("keydown", escape); return () => removeEventListener("keydown", escape); }, [cancelBrowserHandoff]);
   useEffect(() => {
     const current = new Date(); setNow(current);
     const refresh = () => { if (!document.hidden) setNow(new Date()); };
@@ -246,10 +249,10 @@ export default function Dashboard({ displayName, signedIn, accountId }: { displa
     setImportReview(false); setImportCandidate(null);
   };
 
-  const openImport = () => {setPanel(null);setImportCandidate(null);setOwnProfile(false);setImportReview(true);};
+  const openImport = () => {cancelBrowserHandoff();setPanel(null);setImportCandidate(null);setOwnProfile(false);setImportReview(true);};
   const closeImport = () => {importEpoch.current++;setImportReview(false);setImportCandidate(null);setBridge(value=>value==='checking'?'missing':value);};
   const openRecovery = async () => {
-    setPanel(null);setRecoveryReview(true);setRecoveryMessage('Reading recovery copies on this device…');
+    cancelBrowserHandoff();setPanel(null);setRecoveryReview(true);setRecoveryMessage('Reading recovery copies on this device…');
     try {if(!journal.current)throw new Error('Local recovery is unavailable in this browser.');await coordinator.checkpointSettled();setDrafts(await journal.current.list());setRecoveryMessage('Showing up to 20 recovery summaries for your signed-in account. Full documents load only when you choose one.');}
     catch(error){setRecoveryMessage(error instanceof Error ? error.message : 'Could not read recovery copies.');}
   };
@@ -301,6 +304,7 @@ export default function Dashboard({ displayName, signedIn, accountId }: { displa
     setTransition(value => value + 1); setThemes([]);
   };
 
+  /** Route supported commands to reviewed actions; unsupported text cannot mutate work. */
   const runCommand = (event: FormEvent) => {
     event.preventDefault(); const text = command.trim(); if (!text) return;
     setStudyError(""); setStudyDue(""); setThemes([]);
@@ -330,6 +334,7 @@ export default function Dashboard({ displayName, signedIn, accountId }: { displa
     } catch (error) { setStudyError(error instanceof Error ? error.message : "Could not create the study plan."); }
   };
 
+  /** Open one native workspace and discard feedback after the user changes navigation. */
   const openBrowserTool = async (tool: string) => {
     if(!isBrowserTool(tool))return;
     const epoch=++toolEpoch.current;setBrowserTool(tool);setBrowserTitle('Opening '+browserTools[tool]);setBridge('checking');setBridgeMessage('Opening the companion workspace in this browser profile…');
@@ -370,8 +375,8 @@ export default function Dashboard({ displayName, signedIn, accountId }: { displa
         <form className="nexus" onSubmit={runCommand}><span className="nexus-core"><Command/></span><div className="nexus-input"><label htmlFor="nexus-command">COMMANDS · LOCAL TOOLS</label><input id="nexus-command" value={command} onChange={event => setCommand(event.target.value)} placeholder="Study maths chapters 5, 7, 8 and 10" list="hq-command-examples" autoComplete="off"/></div><button type="submit">Run <ArrowRight/></button><datalist id="hq-command-examples">{commandExamples.map(example=><option key={example} value={example}/>)}</datalist></form><div className="command-help"><span>Try:</span>{["Show my timetable","Show unfinished tasks","Change theme for HSIE","Find manga releases"].map(example=><button key={example} onClick={()=>{setCommand(example);document.getElementById("nexus-command")?.focus();}}>{example}</button>)}</div>
         {commandResult && <section className="command-result" aria-live="polite"><button className="result-close" onClick={() => setCommandResult(null)} aria-label="Dismiss result"><X/></button><span className="result-icon"><WandSparkles/></span><div><small>REVIEW BEFORE ACTION</small><h2>{commandResult.title}</h2><p>{commandResult.detail}</p>{commandResult.chapters && <div className="chapter-row">{commandResult.chapters.map(chapter => <span key={chapter}>CH {chapter}</span>)}</div>}{themes.length > 0 && <div className="theme-options">{themes.map(choice => <button key={choice.name} onClick={() => applyTheme(choice)} style={{"--choice":choice.hue} as React.CSSProperties}><i/><span>{choice.name}</span></button>)}</div>}<div className="button-row">{commandResult.chapters && <><div className="study-plan-inputs"><label>Deadline<input type="date" required min={currentDateKey || undefined} value={studyDue} onChange={event => setStudyDue(event.target.value)}/></label><label>Minutes per chapter<input type="number" min={5} max={180} step={1} value={studyMinutes} onChange={event => setStudyMinutes(Number(event.target.value))}/></label></div>{studyError && <p role="alert">{studyError}</p>}<button className="small-button accent" onClick={applyStudyPlan}><Check/>Apply study plan</button></>}{/Browser review/.test(commandResult.title) && <button className="small-button accent" onClick={() => openBrowserTool(commandResult.tool||"bookmarks")}>{commandResult.tool==="gmail"?<Mail/>:commandResult.tool==="settings"?<Settings/>:commandResult.tool==="gleam"?<BrainCircuit/>:commandResult.tool==="tabs"?<Link2/>:<Bookmark/>}Open {browserTools[commandResult.tool||"bookmarks"]}</button>}</div></div></section>}
       </section>
-      <Dialog open={Boolean(panel)} onOpenChange={open => { if (!open) {setPanel(null);toolEpoch.current++;setBridge(v=>v==='checking'?'idle':v);} }}><DialogContent className="module-panel hq-dialog" showCloseButton={false} aria-describedby={undefined} onCloseAutoFocus={event => { event.preventDefault(); panelOpener.current?.focus(); }}><header className="panel-head"><div><small>OPERATION HQ</small><DialogTitle>{panel === "tasks" ? "Tasks" : panel === "calendar" ? "Calendar" : panel === "notes" ? "Notes" : panel === "study" ? "Study overview" : panel === "releases" ? "Release radar" : panel === "browser" ? browserTools[browserTool] : "System settings"}</DialogTitle></div><button onClick={() => {toolEpoch.current++;setPanel(null);setBridge(v=>v==='checking'?'idle':v);}} aria-label="Close panel"><X/></button></header>
-        {panel === "browser" && <BrowserAccess tool={browserTool} status={bridge} title={browserTitle} message={bridgeMessage} retry={()=>void openBrowserTool(browserTool)} settings={()=>{toolEpoch.current++;setBridge(v=>v==='checking'?'idle':v);setPanel('settings');}}/>}
+      <Dialog open={Boolean(panel)} onOpenChange={open => { if (!open) {setPanel(null);cancelBrowserHandoff();} }}><DialogContent className="module-panel hq-dialog" showCloseButton={false} aria-describedby={undefined} onCloseAutoFocus={event => { event.preventDefault(); panelOpener.current?.focus(); }}><header className="panel-head"><div><small>OPERATION HQ</small><DialogTitle>{panel === "tasks" ? "Tasks" : panel === "calendar" ? "Calendar" : panel === "notes" ? "Notes" : panel === "study" ? "Study overview" : panel === "releases" ? "Release radar" : panel === "browser" ? browserTools[browserTool] : "System settings"}</DialogTitle></div><button onClick={() => {cancelBrowserHandoff();setPanel(null);}} aria-label="Close panel"><X/></button></header>
+        {panel === "browser" && <BrowserAccess tool={browserTool} status={bridge} title={browserTitle} message={bridgeMessage} retry={()=>void openBrowserTool(browserTool)} settings={()=>{cancelBrowserHandoff();setPanel('settings');}}/>}
         {panel === "tasks" && <TaskWorkbench state={state} update={update} recovery={recovery}/>}
         {panel === "calendar" && <PlanningCalendar state={state} update={update} recovery={recovery} subject={commandResult?.subject}/>}
         {panel === "releases" && <ReleaseShelf state={state} update={update}/>}
