@@ -23,3 +23,12 @@
 @media(max-width:580px){.status-chip{max-width:60px;white-space:normal;line-height:1.15}input,select,textarea{font-size:16px}}
 
 .hq-dialog{animation:drawer-opacity .18s ease-out}@keyframes drawer-opacity{from{opacity:.6}to{opacity:1}}
+
+/* Recovery reads like a document history; destructive copy removal is deliberate. */
+.action-history{border-block:1px solid var(--line);margin:20px 0;padding:14px 0;min-width:0}
+.action-history summary{cursor:pointer;font-size:13px;font-weight:600;padding:8px 0;min-height:44px}
+.history-content>p,.history-entry>p{color:var(--muted);font-size:12px;line-height:1.65;overflow-wrap:anywhere}
+.history-entry{border-top:1px solid var(--line);padding:18px 0}
+.history-entry h4{font-size:14px;font-weight:600;line-height:1.5;overflow-wrap:anywhere;margin:0 0 5px}
+.history-confirm{margin-top:12px;padding:12px;border-left:2px solid var(--accent);background:var(--wash)}
+.history-confirm p{font-size:12px;line-height:1.6}

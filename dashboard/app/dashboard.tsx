@@ -19,6 +19,7 @@ import PairedSync from "../components/paired-sync";
 import ReleaseShelf from "../components/release-shelf";
 import PlanningCalendar from "../components/planning-calendar";
 import TaskWorkbench from "../components/task-workbench";
+import {ActionJournal,createHistory,historyBasis,sameRecord,restoreHistory,type RecoveryActions} from "../lib/action-history";
 import {routeCommand,commandExamples} from "../lib/command-router";
 import {contextNow,dayAgenda} from "../lib/planning";
 
@@ -197,6 +198,37 @@ export default function Dashboard({ displayName, signedIn, accountId }: { displa
     coordinator.change(current => sanitizeHQState(recordRemovals(current,mutator(current)), { preserveOverflow: true }));
   }, [coordinator]);
 
+  const [actionJournal] = useState(()=>new ActionJournal(accountId));
+  const historyBusy=useRef(false);
+  const withHistoryLock=useCallback(async <T,>(run:()=>Promise<T>):Promise<T>=>{
+    if(historyBusy.current)throw Error('Another recoverable change is running. Wait for it to finish.');
+    historyBusy.current=true;
+    try {
+      if(navigator.locks?.request)return await navigator.locks.request('hq-action-history:'+accountId,{ifAvailable:true},async lock=>{if(!lock)throw Error('Another tab is changing recovery history. Try again in a moment.');return run();});
+      return await run();
+    } finally {historyBusy.current=false;}
+  },[accountId]);
+  const recovery:RecoveryActions=useMemo(()=>({journal:actionJournal,
+    perform:(label,mutator)=>withHistoryLock(async()=>{
+      if(!coordinator.ready)throw Error('Wait for your saved work to load before changing it.');
+      const before=coordinator.state,now=Date.now(),next=sanitizeHQState(recordRemovals(before,mutator(before),now),{preserveOverflow:true});
+      assertHQCapacity(next);
+      const record=createHistory(before,next,accountId,uid(),label,now),summary=await actionJournal.append(record);
+      try {coordinator.change(current=>{
+        if(!sameRecord(historyBasis(current),historyBasis(before)))throw Error('Your work changed while saving recovery. Reopen it and try again.');
+        return {...current,tasks:next.tasks,events:next.events,schedule:next.schedule,tombstones:next.tombstones};
+      });} catch(e){await actionJournal.remove(record.id).catch(()=>{});throw e;}
+      return summary;
+    }),
+    restore:id=>withHistoryLock(async()=>{
+      if(!coordinator.ready)throw Error('Wait for your saved work to load before restoring it.');
+      const record=await actionJournal.read(id);update(current=>restoreHistory(current,record,accountId,Date.now()));
+      await coordinator.checkpointSettled();
+      if(coordinator.pending && coordinator.journaledGeneration<coordinator.generation)throw Error('Restored in this tab; its recovery entry was kept because the draft could not be saved locally. Export before leaving.');
+      try {await actionJournal.remove(id);}catch{throw Error('The change was restored, but its recovery copy could not be cleared. The current copy is protected against a second restore.');}
+    })
+  }),[actionJournal,accountId,coordinator,update,withHistoryLock]);
+
   const pullBridge = useCallback(async () => {
     const epoch=++importEpoch.current;setImportCandidate(null);setOwnProfile(false);setNotesChoice('keep');
     setBridge("checking"); setBridgeMessage("Reading the selected extension data for preview…");
@@ -332,8 +364,8 @@ export default function Dashboard({ displayName, signedIn, accountId }: { displa
         {commandResult && <section className="command-result" aria-live="polite"><button className="result-close" onClick={() => setCommandResult(null)} aria-label="Dismiss result"><X/></button><span className="result-icon"><WandSparkles/></span><div><small>REVIEW BEFORE ACTION</small><h2>{commandResult.title}</h2><p>{commandResult.detail}</p>{commandResult.chapters && <div className="chapter-row">{commandResult.chapters.map(chapter => <span key={chapter}>CH {chapter}</span>)}</div>}{themes.length > 0 && <div className="theme-options">{themes.map(choice => <button key={choice.name} onClick={() => applyTheme(choice)} style={{"--choice":choice.hue} as React.CSSProperties}><i/><span>{choice.name}</span></button>)}</div>}<div className="button-row">{commandResult.chapters && <><div className="study-plan-inputs"><label>Deadline<input type="date" required min={currentDateKey || undefined} value={studyDue} onChange={event => setStudyDue(event.target.value)}/></label><label>Minutes per chapter<input type="number" min={5} max={180} step={1} value={studyMinutes} onChange={event => setStudyMinutes(Number(event.target.value))}/></label></div>{studyError && <p role="alert">{studyError}</p>}<button className="small-button accent" onClick={applyStudyPlan}><Check/>Apply study plan</button></>}{/Browser review/.test(commandResult.title) && <button className="small-button accent" onClick={() => openBrowserTool("bookmarks")}><Bookmark/>Open browser review</button>}</div></div></section>}
       </section>
       <Dialog open={Boolean(panel)} onOpenChange={open => { if (!open) setPanel(null); }}><DialogContent className="module-panel hq-dialog" showCloseButton={false} aria-describedby={undefined} onCloseAutoFocus={event => { event.preventDefault(); panelOpener.current?.focus(); }}><header className="panel-head"><div><small>OPERATION HQ</small><DialogTitle>{panel === "tasks" ? "Tasks" : panel === "calendar" ? "Calendar" : panel === "notes" ? "Notes" : panel === "study" ? "Study overview" : panel === "releases" ? "Release radar" : "System settings"}</DialogTitle></div><button onClick={() => setPanel(null)} aria-label="Close panel"><X/></button></header>
-        {panel === "tasks" && <TaskWorkbench state={state} update={update}/>}
-        {panel === "calendar" && <PlanningCalendar state={state} update={update} subject={commandResult?.subject}/>}
+        {panel === "tasks" && <TaskWorkbench state={state} update={update} recovery={recovery}/>}
+        {panel === "calendar" && <PlanningCalendar state={state} update={update} recovery={recovery} subject={commandResult?.subject}/>}
         {panel === "releases" && <ReleaseShelf state={state} update={update}/>}
         {panel === "notes" && <div className="panel-body notes-body"><div className="notes-status"><ShieldCheck/>One document · check save status before leaving</div>{coordinator.conflict && <section className="notes-conflict"><h3>Two versions need your decision</h3><p>Your current text remains editable below. Export it before choosing another version if you want a separate backup.</p><label htmlFor="remote-notes">Saved elsewhere</label><textarea id="remote-notes" readOnly value={coordinator.conflict.remote}/><div className="button-row"><button className="small-button" onClick={() => coordinator.resolveNotes(state.notes.plain)}>Keep my current text</button><button className="small-button" onClick={() => coordinator.resolveNotes(coordinator.conflict!.remote)}>Use the other version</button><button className="small-button" onClick={() => coordinator.resolveNotes(state.notes.plain + "\n\n--- Other version ---\n\n" + coordinator.conflict!.remote)}>Keep both</button></div></section>}<textarea aria-label="Notes document" maxLength={200000} value={state.notes.plain} onChange={event => update(current => ({...current,notes:{plain:event.target.value,updatedAt:Date.now()}}))} placeholder="Write without fighting the editor…" autoFocus/></div>}
         {panel === "study" && <div className="panel-body study-body"><div className="study-intro"><BrainCircuit/><div><h3>Build today’s mission</h3><p>Ask Nexus for a subject and chapter list. It proposes tasks before you approve. Use Calendar to preview sessions around fixed commitments. Textbook navigation requires your saved chapter links in the browser tools.</p></div></div><div className="study-stats"><div><strong>{state.assignments.length}</strong><span>Assignments</span></div><div><strong>{state.exams.length}</strong><span>Exam plans</span></div><div><strong>{activeTasks.filter(task=>task.subject).length}</strong><span>Study actions</span></div></div><div className="study-records">{state.exams.map(exam=><p key={exam.id}><strong>{exam.title}</strong> {exam.date} · {Math.max(0,Math.ceil((Date.parse(exam.date)-Date.parse(currentDateKey||todayKey()))/86400000))} days left</p>)}{state.assignments.map(a=><p key={a.id}><strong>{a.title}</strong> {a.due||"No deadline"} · {a.progress||0}%</p>)}</div><button className="panel-command" onClick={() => {panelOpener.current = document.getElementById("nexus-command");setPanel(null);}}>Ask Nexus to build a study plan <ArrowRight/></button></div>}

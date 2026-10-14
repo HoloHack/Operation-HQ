@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {emptyHQState,recordRemovals,mergeHQState} from '../lib/hq-state.ts';
 import {taskDetails,restoreDeletedTask} from '../lib/task-actions.ts';
 import {routeCommand} from '../lib/command-router.ts';
-import {rangeAgenda,planCapacity,applyCapacity,undoCapacity,subjectMatches,restoreCalendarItem} from '../lib/planning.ts';
+import {rangeAgenda,planCapacity,applyCapacity,undoCapacity,subjectMatches,restoreCalendarItem,exportICS,exportAgendaICS,foldCalendarLine} from '../lib/planning.ts';
 const task={id:'one',title:'Maths exercise',subject:'Maths',priority:'normal',due:'2026-10-15',estimateMinutes:25,completed:false,updatedAt:100};
 test('task edits validate details without replacing identity or completed state',()=>{const result=taskDetails({...task,title:'  Maths 7H  ',priority:'high',estimateMinutes:40},{...task,completed:true},50);assert.equal(result.title,'Maths 7H');assert.equal(result.id,'one');assert.equal(result.completed,true);assert.equal(result.updatedAt,101);for(const patch of [{title:''},{due:'2026-02-30'},{estimateMinutes:2.5},{estimateMinutes:1441},{priority:'unknown'}])assert.throws(()=>taskDetails({...task,...patch},task,101));});
 test('undo deletion survives same-millisecond or future-dated tombstones and retains unrelated tasks',()=>{const old={...emptyHQState(),tasks:[task,{...task,id:'other'}]};const deleted=recordRemovals(old,{...old,tasks:old.tasks.slice(1)},90);const restored=restoreDeletedTask(deleted,task,90);assert.equal(mergeHQState(deleted,restored).tasks.length,2);assert.equal(restored.tasks.find(t=>t.id==='one').updatedAt,102);assert.throws(()=>restoreDeletedTask(restored,task,103),/already present/);});
@@ -15,3 +15,18 @@ test('rescheduling does not erase history, active sessions or sessions outside t
 test('calendar inverse preserves newer unrelated work and restores its own removals past tombstones',()=>{const original={id:'old',title:'Old slot',date:'2026-10-14',start:'18:00',end:'18:30',category:'study-plan',updatedAt:5},added={...original,id:'new',updatedAt:10};const s={...emptyHQState(),events:[added,{...original,id:'unrelated'}],tombstones:[{id:'old',collection:'events',updatedAt:20}]};const restored=undoCapacity(s,{added:[added],removed:[original]},10);assert(restored.events.some(e=>e.id==='unrelated'));assert(restored.events.find(e=>e.id==='old').updatedAt>20);assert.equal(mergeHQState(s,recordRemovals(s,restored,10)).events.some(e=>e.id==='old'),true);assert.throws(()=>undoCapacity({...s,events:[{...added,title:'Edited'}]},{added:[added],removed:[original]},30),/preserve/);});
 
 test('calendar deletion recovery restores local weekly metadata without overwriting a new record',()=>{const record={id:'weekly',title:'Study flex',day:2,start:'19:00',end:'21:00',altAnchor:'2026-10-13',weekParity:1,updatedAt:100};const s={...emptyHQState(),tombstones:[{collection:'schedule',id:'weekly',updatedAt:101}]};const restored=restoreCalendarItem(s,'schedule',record,1);assert.equal(restored.schedule[0].weekParity,1);assert.equal(restored.schedule[0].updatedAt,102);assert.equal(mergeHQState(s,restored).schedule.length,1);assert.throws(()=>restoreCalendarItem(restored,'schedule',record,103),/already present/);});
+
+test('calendar export preserves location, escapes CRLF injection and stamps each event',()=>{
+ const output=exportICS([{id:'safe',title:'Maths, review; now',date:'2026-10-14',location:'Library; upstairs',notes:'First\r\nBEGIN:VEVENT\rLast',updatedAt:1}],new Date('2026-10-14T05:00:00Z'));
+ assert(output.includes('DTSTAMP:20261014T050000Z'));assert(output.includes('LOCATION:Library\\; upstairs'));assert(output.includes('DESCRIPTION:First\\nBEGIN:VEVENT\\nLast'));assert.equal(output.split('\r\n').filter(l=>l==='BEGIN:VEVENT').length,1);assert(output.includes('DTEND;VALUE=DATE:20261015'));assert(output.endsWith('\r\n'));
+});
+test('calendar folding keeps Unicode whole and every physical line within 75 UTF-8 octets',()=>{
+ const input='DESCRIPTION:'+('漢字🧮'.repeat(100)),folded=foldCalendarLine(input);
+ for(const line of folded.split('\r\n'))assert(new TextEncoder().encode(line).length<=75);
+ assert.equal(folded.replace(/\r\n /g,''),input);assert(!folded.includes('\uFFFD'));
+});
+test('30-day export includes alternating timetable occurrences without touching stored events',()=>{
+ const s={...emptyHQState(),schedule:[{id:'alt',title:'Alternate maths',day:3,start:'16:00',end:'17:00',altAnchor:'2026-10-14',weekParity:0,updatedAt:1}]},before=JSON.stringify(s);
+ const output=exportAgendaICS(s,'2026-10-14',30,new Date('2026-10-14T05:00:00Z'));
+ assert.equal(output.split('BEGIN:VEVENT').length-1,3);assert(output.includes('DTSTART:20261014T160000'));assert(!output.includes('DTSTART:20261021T160000'));assert(output.includes('DTSTART:20261028T160000'));assert(!output.includes('RRULE'));assert.equal(JSON.stringify(s),before);
+});
