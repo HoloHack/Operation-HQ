@@ -37,5 +37,5 @@
 .browser-access>p,.browser-setup p,.browser-setup li{font-size:14px;line-height:1.8;color:var(--muted);overflow-wrap:anywhere}
 .browser-setup{border-top:1px solid var(--line);margin-top:28px;padding-top:24px}
 .browser-setup h4{font-size:15px;font-weight:600;margin:0 0 12px}
-.browser-setup ol{padding-left:22px;margin:0 0 14px}.browser-setup li{padding:6px 0 6px 6px}
+.browser-setup ol{list-style:decimal;padding-left:22px;margin:0 0 14px}.browser-setup li{padding:6px 0 6px 6px}
 .browser-setup code{font-size:12px;color:var(--ink);background:var(--wash);padding:2px 4px;border-radius:2px}
