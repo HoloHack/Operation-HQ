@@ -1,0 +1,26 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+language: en-AU
+early_access: false
+reviews:
+  profile: assertive
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  review_status: true
+  auto_review:
+    enabled: true
+    drafts: false
+  path_filters:
+    - "!dashboard/dist/**"
+    - "!dashboard/node_modules/**"
+    - "!extension/js/lib/**"
+    - "!Operation-HQ 2/**"
+  path_instructions:
+    - path: "dashboard/**"
+      instructions: |
+        Review actual user flows and failure visibility, not just syntax. Protect account-isolated data, serialized saves, offline drafts and deletion recovery. Check keyboard/focus behavior and 320px layouts. Chrome API access requires the companion and explicit access consent. Commands are deterministic until a real model is configured; never label canned routing as general AI. Distinguish fixture tests from live-provider and target-Mac acceptance.
+    - path: "extension/**"
+      instructions: |
+        Protect user bookmarks, original folders, tab groups, pins and saved work. Require serialized mutations and exact reversible operations. Check hash-route reopens, service worker lifetime, safe-mode recovery, lazy loading and animation cleanup. Credentials and PINs must stay out of plaintext exports. Do not widen permissions unnecessarily. Test only isolated browser profiles.
+chat:
+  auto_reply: true
