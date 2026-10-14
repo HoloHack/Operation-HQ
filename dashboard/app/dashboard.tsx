@@ -19,6 +19,9 @@ import PairedSync from "../components/paired-sync";
 import ReleaseShelf from "../components/release-shelf";
 import PlanningCalendar from "../components/planning-calendar";
 import TaskWorkbench from "../components/task-workbench";
+import BrowserAccess from "../components/browser-access";
+import {requestExtension} from "../lib/extension-client";
+import {browserTools,isBrowserTool,bridgeProblem,displayFirstName,type BrowserTool} from "../lib/browser-access";
 import {ActionJournal,createHistory,historyBasis,sameRecord,restoreHistory,type RecoveryActions} from "../lib/action-history";
 import {routeCommand,commandExamples} from "../lib/command-router";
 import {contextNow,dayAgenda} from "../lib/planning";
@@ -30,7 +33,7 @@ const uid = () => typeof crypto.randomUUID === "function"
   ? crypto.randomUUID()
   : `hq-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 11)}`;
 
-type Panel = "tasks" | "calendar" | "notes" | "study" | "settings" | "releases" | null;
+type Panel = "tasks" | "calendar" | "notes" | "study" | "settings" | "releases" | "browser" | null;
 type ThemeChoice = { name: string; hue: number; support: number };
 
 function hash(input: string) {
@@ -58,18 +61,9 @@ async function cloudRequest(snapshot?: HQState, baseRevision?: number, accountId
   return { snapshot: sanitizeHQState(data.snapshot), revision: data.revision, conflict: response.status === 409 };
 }
 
+/** Send a bounded, read-only handoff or planning message to the fixed companion ID. */
 function extensionCall<T = unknown>(message: unknown, timeout = 2500): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const runtime = (window as typeof window & { chrome?: { runtime?: { sendMessage?: Function; lastError?: { message?: string } } } }).chrome?.runtime;
-    if (!runtime?.sendMessage) return reject(new Error("Extension bridge is not available."));
-    const timer = window.setTimeout(() => reject(new Error("Extension did not respond.")), timeout);
-    runtime.sendMessage(EXTENSION_ID, message, (response: T) => {
-      window.clearTimeout(timer);
-      const error = runtime.lastError;
-      if (error) reject(new Error(error.message || "Extension connection failed."));
-      else resolve(response);
-    });
-  });
+  return requestExtension<T>(EXTENSION_ID,message,timeout);
 }
 
 function formatClock(seconds: number) {
@@ -111,6 +105,7 @@ function Empty({ title, detail }: { title: string; detail: string }) {
   return <div className="empty-state"><Circle size={13} /><div><strong>{title}</strong><span>{detail}</span></div></div>;
 }
 
+/** Account-isolated study desk; browser mutations stay behind explicit companion actions. */
 export default function Dashboard({ displayName, signedIn, accountId }: { displayName: string; signedIn: boolean; accountId: string }) {
   const [, renderSync] = useState(0);
   const journal = useRef<DraftJournal | null>(null);
@@ -118,6 +113,11 @@ export default function Dashboard({ displayName, signedIn, accountId }: { displa
   const state = coordinator.state, sync = coordinator.status;
   const [bridge, setBridge] = useState<"idle" | "checking" | "connected" | "disabled" | "missing">("idle");
   const [bridgeMessage, setBridgeMessage] = useState("Browser access has not been checked. Open a browser tool or review an import when you need it.");
+  const [browserTool,setBrowserTool]=useState<BrowserTool>('bookmarks');
+  const [browserTitle,setBrowserTitle]=useState('Open your browser workspace');
+  const toolEpoch=useRef(0);
+  const firstName=displayFirstName(displayName);
+  const cancelBrowserHandoff=useCallback(()=>{toolEpoch.current++;setBridge(value=>value==='checking'?'idle':value);},[]);
   const [importReview, setImportReview] = useState(false);
   const [importCandidate, setImportCandidate] = useState<HQState | null>(null);
   const [notesChoice, setNotesChoice] = useState<NotesChoice>('keep');
@@ -135,7 +135,7 @@ export default function Dashboard({ displayName, signedIn, accountId }: { displa
   useEffect(()=>{document.documentElement.dataset.surface=surface;return ()=>{delete document.documentElement.dataset.surface;};},[surface]);
   const changeSurface=(value:"paper"|"ink")=>{setSurface(value);try{localStorage.setItem("hq-desk-surface:"+accountId,value);}catch{}setTransition(v=>v+1);};
   const [command, setCommand] = useState("");
-  const [commandResult, setCommandResult] = useState<{ title: string; detail: string; chapters?: number[]; subject?: string; reschedule?:boolean } | null>(null);
+  const [commandResult, setCommandResult] = useState<{ title: string; detail: string; chapters?: number[]; subject?: string; reschedule?:boolean; tool?:BrowserTool } | null>(null);
   const [studyDue, setStudyDue] = useState("");
   const [studyMinutes, setStudyMinutes] = useState(25);
   const [studyError, setStudyError] = useState("");
@@ -175,7 +175,7 @@ export default function Dashboard({ displayName, signedIn, accountId }: { displa
     style.setProperty("--support-hue", String(state.settings.supportHue));
     return () => { style.removeProperty("--hue"); style.removeProperty("--support-hue"); };
   }, [state.settings.accentHue, state.settings.supportHue]);
-  useEffect(() => { const escape = (event: KeyboardEvent) => { if (event.key === "Escape") setCinema(false); if((event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==="k"){event.preventDefault();setCinema(false);setPanel(null);importEpoch.current++;setImportReview(false);setRecoveryReview(false);setTimeout(()=>document.getElementById("nexus-command")?.focus(),0);} }; addEventListener("keydown", escape); return () => removeEventListener("keydown", escape); }, []);
+  useEffect(() => { const escape = (event: KeyboardEvent) => { if (event.key === "Escape") setCinema(false); if((event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==="k"){event.preventDefault();setCinema(false);cancelBrowserHandoff();setPanel(null);importEpoch.current++;setImportReview(false);setRecoveryReview(false);setTimeout(()=>document.getElementById("nexus-command")?.focus(),0);} }; addEventListener("keydown", escape); return () => removeEventListener("keydown", escape); }, [cancelBrowserHandoff]);
   useEffect(() => {
     const current = new Date(); setNow(current);
     const refresh = () => { if (!document.hidden) setNow(new Date()); };
@@ -249,10 +249,10 @@ export default function Dashboard({ displayName, signedIn, accountId }: { displa
     setImportReview(false); setImportCandidate(null);
   };
 
-  const openImport = () => {setPanel(null);setImportCandidate(null);setOwnProfile(false);setImportReview(true);};
+  const openImport = () => {cancelBrowserHandoff();setPanel(null);setImportCandidate(null);setOwnProfile(false);setImportReview(true);};
   const closeImport = () => {importEpoch.current++;setImportReview(false);setImportCandidate(null);setBridge(value=>value==='checking'?'missing':value);};
   const openRecovery = async () => {
-    setPanel(null);setRecoveryReview(true);setRecoveryMessage('Reading recovery copies on this device…');
+    cancelBrowserHandoff();setPanel(null);setRecoveryReview(true);setRecoveryMessage('Reading recovery copies on this device…');
     try {if(!journal.current)throw new Error('Local recovery is unavailable in this browser.');await coordinator.checkpointSettled();setDrafts(await journal.current.list());setRecoveryMessage('Showing up to 20 recovery summaries for your signed-in account. Full documents load only when you choose one.');}
     catch(error){setRecoveryMessage(error instanceof Error ? error.message : 'Could not read recovery copies.');}
   };
@@ -304,6 +304,7 @@ export default function Dashboard({ displayName, signedIn, accountId }: { displa
     setTransition(value => value + 1); setThemes([]);
   };
 
+  /** Route supported commands to reviewed actions; unsupported text cannot mutate work. */
   const runCommand = (event: FormEvent) => {
     event.preventDefault(); const text = command.trim(); if (!text) return;
     setStudyError(""); setStudyDue(""); setThemes([]);
@@ -312,7 +313,7 @@ export default function Dashboard({ displayName, signedIn, accountId }: { displa
     if(intent.kind==='chapters'){setCommandResult({title:`${intent.subject} mission ready`,detail:`${intent.chapters.length} chapter tasks, with a deadline and an estimate from you. Review before adding them.${intent.reschedule?' Next, Calendar will let you preview time around your fixed commitments.':''}`,chapters:intent.chapters,subject:intent.subject,reschedule:intent.reschedule});setThemes(themeChoices(text));return;}
     if(intent.kind==='theme'){setThemes(themeChoices(text));setCommandResult({title:"Colour choices ready",detail:"Three generated accents for your desk. Choose one to apply; your work stays as it is."});return;}
     if(intent.kind==='panel'){setPanel(intent.panel);setCommandResult({title:intent.panel==='calendar'?'Calendar opened':intent.panel==='tasks'?'Tasks opened':intent.panel==='study'?'Study opened':intent.panel==='releases'?'Release radar opened':'Notes opened',subject:intent.subject,detail:intent.panel==='calendar'?'Choose your study window and preview before applying. Classes and other fixed commitments stay put.':intent.panel==='tasks'?`${activeTasks.length} unfinished actions, ranked by priority and deadline.`:'The requested workspace is open.'});return;}
-    if(intent.kind==='browser'){setCommandResult({title:"Browser review ready",detail:intent.tool==='gmail'?'Open your read-only Gmail workspace in the companion. No messages are sent.':intent.tool==='tabs'?'Open the companion tab and workspace review. No tabs close without your review.':intent.tool==='gleam'?'Open Gleam social-skills practice in the companion.':'Open your bookmark review in the companion. Preview before moving anything.'});void openBrowserTool(intent.tool);return;}
+    if(intent.kind==='browser'){setCommandResult({title:"Browser review ready",tool:intent.tool as BrowserTool,detail:intent.tool==='gmail'?'Open your read-only Gmail workspace in the companion. No messages are sent.':intent.tool==='tabs'?'Open the companion tab and workspace review. No tabs close without your review.':intent.tool==='gleam'?'Open Gleam social-skills practice in the companion.':intent.tool==='settings'?'Open Advanced settings in the companion, then choose Local AI. A model must be loaded explicitly; large models use additional memory.':'Open your bookmark review in the companion. Preview before moving anything.'});void openBrowserTool(intent.tool);return;}
     if(intent.kind==='weather'){void requestWeather();setCommandResult({title:'Weather requested',detail:'The weather widget shows the result or a permission/provider error.'});return;}
     if(intent.kind==='pause'){if(running){setSecondsLeft(remainingSeconds(deadline.current??Date.now()));deadline.current=null;setRunning(false);}setCommandResult({title:'Timer paused',detail:'Your remaining focus time is kept.'});return;}
     setCommandResult({title:intent.kind==='help'?'What Commands can do':'I need one clearer instruction',detail:'Commands can open workspaces, stage chapter tasks, preview scheduling, propose colours and open companion tools. It is a local command router, not a general chat model. Try one of the examples below.'});
@@ -333,7 +334,18 @@ export default function Dashboard({ displayName, signedIn, accountId }: { displa
     } catch (error) { setStudyError(error instanceof Error ? error.message : "Could not create the study plan."); }
   };
 
-  const openBrowserTool = async (tool: string) => { try { const response = await extensionCall<{ok?:boolean;error?:string}>({ type: "hq:bridge:open-tool", protocol: 1, tool }); if (!response?.ok) throw new Error(response?.error || "The extension could not open this tool."); setBridge("connected"); setBridgeMessage("Browser tool opened in the extension."); } catch (error) { setBridge("missing"); setBridgeMessage(error instanceof Error ? error.message : "Browser tool unavailable."); } };
+  /** Open one native workspace and discard feedback after the user changes navigation. */
+  const openBrowserTool = async (tool: string) => {
+    if(!isBrowserTool(tool))return;
+    const epoch=++toolEpoch.current;setBrowserTool(tool);setBrowserTitle('Opening '+browserTools[tool]);setBridge('checking');setBridgeMessage('Opening the companion workspace in this browser profile…');
+    importEpoch.current++;setImportReview(false);setRecoveryReview(false);setPanel('browser');
+    try {
+      const response=await extensionCall<{ok?:boolean;enabled?:boolean;error?:string}>({type:'hq:bridge:open-tool',protocol:1,tool},10000);
+      if(epoch!==toolEpoch.current)return;
+      if(!response?.ok){const problem=bridgeProblem(response?.error,response?.enabled);setBridge(problem.state);setBrowserTitle(problem.title);setBridgeMessage(problem.detail);return;}
+      setPanel(current=>current==='browser'?null:current);setBridge('connected');setBrowserTitle(browserTools[tool]+' workspace opened');setBridgeMessage('The companion workspace opened in its Chrome tab. If Safe Mode pauses this tool, use the companion’s Settings to exit Safe Mode, then retry.');
+    } catch(error) {if(epoch!==toolEpoch.current)return;const problem=bridgeProblem(error);setBridge(problem.state);setBrowserTitle(problem.title);setBridgeMessage(problem.detail);}
+  };
   const syncLabel = sync === "saved" ? "Saved" : sync === "saving" ? "Saving…" : sync === "conflict" ? "Review conflict" : sync === "loading" ? "Loading…" : "Not saved";
   const greeting = !now ? "Welcome back" : now.getHours() < 12 ? "Good morning" : now.getHours() < 17 ? "Good afternoon" : "Good evening";
 
@@ -349,7 +361,7 @@ export default function Dashboard({ displayName, signedIn, accountId }: { displa
         {coordinator.pending && <p className="device-copy-status" role="status">{coordinator.recoveryError || (coordinator.journaledGeneration === coordinator.generation ? "Unsaved work has a recovery copy on this device." : "Writing the recovery copy on this device…")}</p>}
         {coordinator.recoveryError && !coordinator.pending && <p className="device-copy-status" role="status">{coordinator.recoveryError}</p>}
         {sync === "loading" && <p role="status">Loading your saved work. New edits will be kept while it loads.</p>}
-        <div className="hero-copy"><div><span className="eyebrow">Today · {now?now.toLocaleDateString([],{weekday:"long",day:"numeric",month:"short"}):"Your workspace"}</span><h1>{greeting}, {displayName}.</h1><p>{nextTask ? <>Next by priority and due date: <strong>{nextTask.title}</strong>{nextTask.due ? `, due ${nextTask.due}` : ""}.</> : "Start with one useful action. Keep the rest of the day in view."}</p></div><button className="primary-action" onClick={() => nextTask ? setPanel("tasks") : setPanel("study")}><span>{nextTask ? "Review next task" : "Plan a study session"}</span><ArrowRight size={18}/></button></div>
+        <div className="hero-copy"><div><span className="eyebrow">Today · {now?now.toLocaleDateString([],{weekday:"long",day:"numeric",month:"short"}):"Your workspace"}</span><h1>{greeting}, {firstName}.</h1><p>{nextTask ? <>Next by priority and due date: <strong>{nextTask.title}</strong>{nextTask.due ? `, due ${nextTask.due}` : ""}.</> : "Start with one useful action. Keep the rest of the day in view."}</p></div><button className="primary-action" onClick={() => nextTask ? setPanel("tasks") : setPanel("study")}><span>{nextTask ? "Review next task" : "Plan a study session"}</span><ArrowRight size={18}/></button></div>
         {liveContext?.current && <div className="current-commitment"><CalendarDays size={18}/><span>Now: <strong>{liveContext.current.title}</strong> until {liveContext.current.end}</span></div>}
         <div className="widget-grid">
           <article className="widget foresight-card"><header><span className="widget-icon"><BrainCircuit/></span><div><small>01 / NEXT ACTION</small><h2>One thing to start.</h2></div><span className="signal">TASKS</span></header>{nextTask ? <><div className="focus-line"><span className={`priority-dot ${nextTask.priority}`}/><div><strong>{nextTask.title}</strong><p>{nextTask.subject || "Your task"} · {nextTask.estimateMinutes ? `${nextTask.estimateMinutes} min` : "Add an estimate in Tasks"}</p></div></div><button className="text-button" onClick={() => setPanel("tasks")}>Review tasks <ChevronRight size={15}/></button></> : <Empty title="The queue is clear" detail="Add a task or ask Nexus to build a study mission."/>}</article>
@@ -361,9 +373,10 @@ export default function Dashboard({ displayName, signedIn, accountId }: { displa
           <article className="widget bridge-card"><header><span className="widget-icon"><Link2/></span><div><small>BROWSER BRIDGE</small><h2>{bridge === "connected" ? "Extension connected" : bridge === "disabled" ? "Connection disabled" : bridge === "idle" ? "Browser tools not checked" : bridge === "checking" ? "Checking browser access" : "Companion unavailable"}</h2></div><span className={`bridge-light ${bridge}`}/></header><p role="status">{bridgeMessage}</p><div className="button-row"><button className="small-button" onClick={openImport}><RefreshCw/>Import from extension</button><button className="small-button" onClick={() => openBrowserTool("nexus")}><Gauge/>Browser tools</button></div></article>
         </div>
         <form className="nexus" onSubmit={runCommand}><span className="nexus-core"><Command/></span><div className="nexus-input"><label htmlFor="nexus-command">COMMANDS · LOCAL TOOLS</label><input id="nexus-command" value={command} onChange={event => setCommand(event.target.value)} placeholder="Study maths chapters 5, 7, 8 and 10" list="hq-command-examples" autoComplete="off"/></div><button type="submit">Run <ArrowRight/></button><datalist id="hq-command-examples">{commandExamples.map(example=><option key={example} value={example}/>)}</datalist></form><div className="command-help"><span>Try:</span>{["Show my timetable","Show unfinished tasks","Change theme for HSIE","Find manga releases"].map(example=><button key={example} onClick={()=>{setCommand(example);document.getElementById("nexus-command")?.focus();}}>{example}</button>)}</div>
-        {commandResult && <section className="command-result" aria-live="polite"><button className="result-close" onClick={() => setCommandResult(null)} aria-label="Dismiss result"><X/></button><span className="result-icon"><WandSparkles/></span><div><small>REVIEW BEFORE ACTION</small><h2>{commandResult.title}</h2><p>{commandResult.detail}</p>{commandResult.chapters && <div className="chapter-row">{commandResult.chapters.map(chapter => <span key={chapter}>CH {chapter}</span>)}</div>}{themes.length > 0 && <div className="theme-options">{themes.map(choice => <button key={choice.name} onClick={() => applyTheme(choice)} style={{"--choice":choice.hue} as React.CSSProperties}><i/><span>{choice.name}</span></button>)}</div>}<div className="button-row">{commandResult.chapters && <><div className="study-plan-inputs"><label>Deadline<input type="date" required min={currentDateKey || undefined} value={studyDue} onChange={event => setStudyDue(event.target.value)}/></label><label>Minutes per chapter<input type="number" min={5} max={180} step={1} value={studyMinutes} onChange={event => setStudyMinutes(Number(event.target.value))}/></label></div>{studyError && <p role="alert">{studyError}</p>}<button className="small-button accent" onClick={applyStudyPlan}><Check/>Apply study plan</button></>}{/Browser review/.test(commandResult.title) && <button className="small-button accent" onClick={() => openBrowserTool("bookmarks")}><Bookmark/>Open browser review</button>}</div></div></section>}
+        {commandResult && <section className="command-result" aria-live="polite"><button className="result-close" onClick={() => setCommandResult(null)} aria-label="Dismiss result"><X/></button><span className="result-icon"><WandSparkles/></span><div><small>REVIEW BEFORE ACTION</small><h2>{commandResult.title}</h2><p>{commandResult.detail}</p>{commandResult.chapters && <div className="chapter-row">{commandResult.chapters.map(chapter => <span key={chapter}>CH {chapter}</span>)}</div>}{themes.length > 0 && <div className="theme-options">{themes.map(choice => <button key={choice.name} onClick={() => applyTheme(choice)} style={{"--choice":choice.hue} as React.CSSProperties}><i/><span>{choice.name}</span></button>)}</div>}<div className="button-row">{commandResult.chapters && <><div className="study-plan-inputs"><label>Deadline<input type="date" required min={currentDateKey || undefined} value={studyDue} onChange={event => setStudyDue(event.target.value)}/></label><label>Minutes per chapter<input type="number" min={5} max={180} step={1} value={studyMinutes} onChange={event => setStudyMinutes(Number(event.target.value))}/></label></div>{studyError && <p role="alert">{studyError}</p>}<button className="small-button accent" onClick={applyStudyPlan}><Check/>Apply study plan</button></>}{/Browser review/.test(commandResult.title) && <button className="small-button accent" onClick={() => openBrowserTool(commandResult.tool||"bookmarks")}>{commandResult.tool==="gmail"?<Mail/>:commandResult.tool==="settings"?<Settings/>:commandResult.tool==="gleam"?<BrainCircuit/>:commandResult.tool==="tabs"?<Link2/>:<Bookmark/>}Open {browserTools[commandResult.tool||"bookmarks"]}</button>}</div></div></section>}
       </section>
-      <Dialog open={Boolean(panel)} onOpenChange={open => { if (!open) setPanel(null); }}><DialogContent className="module-panel hq-dialog" showCloseButton={false} aria-describedby={undefined} onCloseAutoFocus={event => { event.preventDefault(); panelOpener.current?.focus(); }}><header className="panel-head"><div><small>OPERATION HQ</small><DialogTitle>{panel === "tasks" ? "Tasks" : panel === "calendar" ? "Calendar" : panel === "notes" ? "Notes" : panel === "study" ? "Study overview" : panel === "releases" ? "Release radar" : "System settings"}</DialogTitle></div><button onClick={() => setPanel(null)} aria-label="Close panel"><X/></button></header>
+      <Dialog open={Boolean(panel)} onOpenChange={open => { if (!open) {setPanel(null);cancelBrowserHandoff();} }}><DialogContent className="module-panel hq-dialog" showCloseButton={false} aria-describedby={undefined} onCloseAutoFocus={event => { event.preventDefault(); panelOpener.current?.focus(); }}><header className="panel-head"><div><small>OPERATION HQ</small><DialogTitle>{panel === "tasks" ? "Tasks" : panel === "calendar" ? "Calendar" : panel === "notes" ? "Notes" : panel === "study" ? "Study overview" : panel === "releases" ? "Release radar" : panel === "browser" ? browserTools[browserTool] : "System settings"}</DialogTitle></div><button onClick={() => {cancelBrowserHandoff();setPanel(null);}} aria-label="Close panel"><X/></button></header>
+        {panel === "browser" && <BrowserAccess tool={browserTool} status={bridge} title={browserTitle} message={bridgeMessage} retry={()=>void openBrowserTool(browserTool)} settings={()=>{cancelBrowserHandoff();setPanel('settings');}}/>}
         {panel === "tasks" && <TaskWorkbench state={state} update={update} recovery={recovery}/>}
         {panel === "calendar" && <PlanningCalendar state={state} update={update} recovery={recovery} subject={commandResult?.subject}/>}
         {panel === "releases" && <ReleaseShelf state={state} update={update}/>}

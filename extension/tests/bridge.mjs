@@ -38,6 +38,8 @@ test('privacy mode blocks planning reads even when bridge was enabled',async()=>
 });
 test('concurrent tool clicks reuse one workspace and reject arbitrary routes',async()=>{
   const f=fixture();await Promise.all([f.bridge.openTool('notes'),f.bridge.openTool('calendar'),f.bridge.openTool('bookmarks')]);
-  assert.equal(f.tabs.length,1);assert(f.tabs[0].url.endsWith('#tool=bookmarks'));
+  assert.equal(f.tabs.length,1);assert.equal(new URLSearchParams(new URL(f.tabs[0].url).hash.slice(1)).get('tool'),'bookmarks');
   await assert.rejects(f.bridge.openTool('https://evil.test'),/Unknown/);assert.equal(f.tabs.length,1);
 });
+
+test('request identities reopen the same tool without another workspace',async()=>{const f=fixture();await f.bridge.openTool('gmail');const first=f.tabs[0].url;await f.bridge.openTool('gmail');assert.equal(f.tabs.length,1);assert.notEqual(f.tabs[0].url,first);assert.equal(new URLSearchParams(new URL(f.tabs[0].url).hash.slice(1)).get('tool'),'gmail');});

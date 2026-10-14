@@ -36,7 +36,7 @@ try{
    await page.waitForFunction(()=>document.getElementById('bookmarks-flyout').classList.contains('open'));
    await popup.evaluate(()=>Promise.all(['notes','calendar','bookmarks'].map(tool=>DashboardBridge.openTool(tool))));
    const workspaces=await popup.evaluate(async()=> (await chrome.tabs.query({})).filter(t=>t.url?.split('#')[0]===chrome.runtime.getURL('newtab.html')));
-   assert.equal(workspaces.length,1);assert(workspaces[0].url.endsWith('#tool=bookmarks'));await page.waitForFunction(()=>location.hash==='#tool=bookmarks'&&document.getElementById('bookmarks-flyout').classList.contains('open'));await popup.close();
+   assert.equal(workspaces.length,1);assert.equal(new URLSearchParams(new URL(workspaces[0].url).hash.slice(1)).get('tool'),'bookmarks');await page.waitForFunction(()=>new URLSearchParams(location.hash.slice(1)).get('tool')==='bookmarks'&&document.getElementById('bookmarks-flyout').classList.contains('open'));await page.locator('#bookmarks-flyout .flyout-close').click();await popup.evaluate(()=>DashboardBridge.openTool('bookmarks'));await page.waitForFunction(()=>document.getElementById('bookmarks-flyout').classList.contains('open'));await popup.close();
  });
  const panels=await page.evaluate(()=>[...document.querySelectorAll('.flyout[id]')].map(e=>e.id));
  await check('All packaged flyouts open and have reachable close buttons',async()=>{

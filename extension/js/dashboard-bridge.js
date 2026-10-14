@@ -48,7 +48,9 @@ const DashboardBridge = {
     // One on-demand workspace, rather than another large dashboard per click.
     const tabs=await chrome.tabs.query({});
     const found=tabs.find(tab=>typeof tab.url==='string' && tab.url.split('#')[0]===base);
-    const url=`${base}#tool=${encodeURIComponent(tool)}`;
+    // A closed flyout must reopen even when this is the same requested tool.
+    const request=globalThis.crypto?.randomUUID?.()||`${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+    const url=`${base}#tool=${encodeURIComponent(tool)}&request=${encodeURIComponent(request)}`;
     if(found){await chrome.tabs.update(found.id,{url,active:true});if(found.windowId)await chrome.windows.update(found.windowId,{focused:true});}
     else await chrome.tabs.create({url});
     return {ok:true};
