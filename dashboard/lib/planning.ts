@@ -69,4 +69,22 @@ export function restoreCalendarItem(state:HQState,kind:'events'|'schedule',recor
  const restored={...record,updatedAt:Math.max(now,record.updatedAt+1,deletedAt+1)};
  return kind==='events'?{...state,events:[...state.events,restored as HQEvent]}:{...state,schedule:[...state.schedule,restored as HQState['schedule'][number]]};
 }
-export function exportICS(events:HQEvent[]){const escape=(s:string)=>s.replace(/\\/g,'\\\\').replace(/\n/g,'\\n').replace(/,/g,'\\,').replace(/;/g,'\\;');const stamp=(e:HQEvent,t?:string)=>e.date.replaceAll('-','')+(t?'T'+t.replace(':','')+'00':'');return ['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//Operation HQ//Calendar//EN',...events.flatMap(e=>['BEGIN:VEVENT',`UID:${escape(e.id)}@operation-hq`,e.start?`DTSTART:${stamp(e,e.start)}`:`DTSTART;VALUE=DATE:${stamp(e)}`,e.end?`DTEND:${stamp(e,e.end)}`:`DTEND;VALUE=DATE:${shiftDate(e.date,1).replaceAll('-','')}`,`SUMMARY:${escape(e.title)}`,...(e.notes?[`DESCRIPTION:${escape(e.notes)}`]:[]),'END:VEVENT']),'END:VCALENDAR'].join('\r\n');}
+/** RFC 5545 content lines: fold by UTF-8 octets, never inside a code point. */
+export function foldCalendarLine(line:string){
+ const encoder=new TextEncoder();let output='',part='',bytes=0;
+ for(const char of line){const size=encoder.encode(char).byteLength;if(bytes+size>75){output+=part+'\r\n';part=' ';bytes=1;}part+=char;bytes+=size;}
+ return output+part;
+}
+export function exportICS(events:HQEvent[],now=new Date()){
+ const escape=(s:string)=>s.replace(/\\/g,'\\\\').replace(/\r\n|\r|\n/g,'\\n').replace(/,/g,'\\,').replace(/;/g,'\\;');
+ const stamp=(e:HQEvent,t?:string)=>e.date.replaceAll('-','')+(t?'T'+t.replace(':','')+'00':'');
+ const dtstamp=now.toISOString().replace(/[-:]/g,'').replace(/\.\d{3}/,'');
+ return ['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//Operation HQ//Calendar//EN','CALSCALE:GREGORIAN',...events.flatMap(e=>[
+  'BEGIN:VEVENT',`UID:${escape(e.id)}@operation-hq`,`DTSTAMP:${dtstamp}`,
+  e.start?`DTSTART:${stamp(e,e.start)}`:`DTSTART;VALUE=DATE:${stamp(e)}`,
+  e.end?`DTEND:${stamp(e,e.end)}`:`DTEND;VALUE=DATE:${shiftDate(e.date,1).replaceAll('-','')}`,
+  `SUMMARY:${escape(e.title)}`,...(e.notes?[`DESCRIPTION:${escape(e.notes)}`]:[]),...(e.location?[`LOCATION:${escape(e.location)}`]:[]),'END:VEVENT'
+ ]),'END:VCALENDAR'].map(foldCalendarLine).join('\r\n')+'\r\n';
+}
+/** A finite timetable snapshot, not an invented recurrence rule or timezone conversion. */
+export function exportAgendaICS(state:HQState,from:string,days=30,now=new Date()){return exportICS(rangeAgenda(state,from,days),now);}
