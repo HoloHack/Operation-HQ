@@ -1,0 +1,32 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import vm from 'node:vm';
+const source=n=>fs.readFileSync(new URL('../js/'+n+'.js',import.meta.url),'utf8');
+function fixture(){const data={};let requests=0;const chrome={storage:{local:{async get(keys){return Object.fromEntries((Array.isArray(keys)?keys:[keys]).map(k=>[k,data[k]]));},async set(v){Object.assign(data,v);}}}};const context=vm.createContext({chrome,URL,navigator,console,Date,Map,Set,TextDecoder,AbortController,setTimeout,clearTimeout,fetch:async()=>{requests++;return new Response(JSON.stringify({title:'Every Chess Tip - Explained in stages',provider_name:'YouTube'}),{headers:{'content-type':'application/json'}});}});vm.runInContext(source('classifier')+'\n'+source('bookmarks'),context);return {context,data,book:vm.runInContext('Bookmarks',context),classifier:vm.runInContext('Classifier',context),requests:()=>requests};}
+test('real smoke-test title patterns classify by subject despite generic guide words and stale folders',()=>{
+ const {classifier:c}=fixture();
+ const cases=[['Marvel Rivals Ultimate Beginners Guide How To Have The Perfect Aim',['Gaming & Roblox Dev','Gaming']],['How to LEARN any LANGUAGE in a single DAY. Secret learning techniques',['School & Academics','Languages']],['Every Chess Tip - Explained! (in stages) - YouTube',['Gaming & Roblox Dev','Chess']],['Sahiba - Easy Piano Tutorial with Notes & Chords',['Entertainment','Music']],['Air walk made easy #funk #remix #tutorial',['Entertainment','Music']]];
+ for(const [title,path] of cases){const r=c.classify({title,url:'https://youtube.com/watch?v=test',sourcePath:['Reading & Articles','Saved Reading']},{},[]);assert.deepEqual(Array.from(r.path),path,title);assert.equal(r.confidence,'high',title);}
+ assert.deepEqual(Array.from(c.classify({title:'Getting started | Jules',url:'https://jules.google/docs/getting-started'},{},[]).path),['Coding & Dev','AI Tools']);
+ assert.equal(c.classify({title:'Watch this',url:'https://youtube.com/watch?v=unknown'},{},[]).path,null);
+ assert.equal(c.classify({title:'Physics React',url:'https://example.org'},{},[]).path,null);
+});
+test('successful page metadata is cached and avoids repeated provider calls',async()=>{const f=fixture();const one=await f.book.fetchPageContext('https://youtube.com/watch?v=known');assert(one.includes('Chess'));const two=await f.book.fetchPageContext('https://youtube.com/watch?v=known');assert.equal(one,two);assert.equal(f.requests(),1);});
+test('page evidence stops reading an oversized response at its byte budget',async()=>{const f=fixture();let cancelled=false;const stream=new ReadableStream({pull(c){c.enqueue(new Uint8Array(64000).fill(65));},cancel(){cancelled=true;}});const text=await f.book.boundedPageText(new Response(stream));assert.equal(text.length,128000);assert(cancelled);});
+test('page permission request starts synchronously before sort storage or network work',async()=>{const f=fixture();let asked=false;f.context.chrome.permissions={request(){asked=true;return Promise.resolve(false);}};const pending=f.book.ensureContentPermission();assert(asked);assert.equal(await pending,false);});
+test('evidence cache distinguishes full paths and query strings',async()=>{const f=fixture();await f.book.fetchPageContext('https://example.org/article/a?topic=chess');await f.book.fetchPageContext('https://example.org/article/a?topic=music');assert.equal(f.requests(),2);});
+test('unavailable permissions are distinct from an explicit decline',async()=>{const f=fixture();const error=await f.book.permissionResult(Promise.reject(Error('User gesture missing')));assert.equal(error.granted,false);assert.match(error.error,/gesture/);const denied=await f.book.permissionResult(Promise.resolve(false));assert.equal(denied.granted,false);assert.equal(denied.error,undefined);});
+test('private host patterns and credential-bearing pages are not fetched',()=>{const f=fixture();for(const url of ['https://router/a','https://site.lan/a','https://site.internal/a','https://100.64.0.1/a','https://user:secret@example.org/a','http://2130706433/a'])assert.equal(f.book.evidenceEndpoints(url).length,0,url);});
+test('superseded wallpaper requests cannot repaint or replace the newer saved category',async()=>{
+ const saved={hq_wallpaper_category:'old'},renders=[];let release,started;const reached=new Promise(r=>started=r);
+ const ctx=vm.createContext({URL,console,setTimeout,clearTimeout,chrome:{storage:{local:{async get(keys){return Object.fromEntries((Array.isArray(keys)?keys:[keys]).map(k=>[k,saved[k]]));},async set(v){Object.assign(saved,v);}}}}});vm.runInContext(source('wallpaper'),ctx);const w=vm.runInContext('Wallpaper',ctx);
+ Object.assign(w,{applyStoredPalette:async()=>{},getBlocklist:async()=>[],readOffline:async()=>null,setBackground:async(url,_gradient,isCurrent=()=>true)=>{if(!isCurrent())return false;renders.push(url);return true;},gradientFor:()=> 'gradient',setStatus(){},refreshSafetyControls:async()=>{},cacheOffline:async()=>{},fetchRandom:async category=>{if(category==='old'){started();await new Promise(r=>release=r);}return {url:'https://example.org/'+category+'.jpg',key:category};}});
+ const old=w.apply(true);await reached;saved.hq_wallpaper_category='new';const latest=w.apply(true);release();await Promise.all([old,latest]);assert(!renders.includes('https://example.org/old.jpg'));assert.equal(saved.hq_wallpaper_current.category,'new');assert.equal(saved.hq_wallpaper_cached,'https://example.org/new.jpg');
+});
+test('appearance-storage failure keeps the browser tool shell visible with a default theme',async()=>{
+ const elements=new Map(),errors=[];const element=()=>({dataset:{},style:{setProperty(){}},append(){},hidden:true});
+ const document={body:element(),getElementById(id){if(!elements.has(id))elements.set(id,element());return elements.get(id);},querySelectorAll(){return [];},createElement:element};
+ const ctx=vm.createContext({document,location:{search:'',hash:''},URLSearchParams,console,chrome:{storage:{local:{async get(){throw Error('Storage unavailable');}},onChanged:{addListener(){}}}},window:{HQEarlyDiagnostics:{record(...v){errors.push(v);}}}});
+ vm.runInContext(source('companion-desk'),ctx);await vm.runInContext('CompanionDesk.init()',ctx);assert.equal(elements.get('companion-desk').hidden,false);assert.equal(document.body.dataset.deskSurface,'paper');assert.equal(errors.length,1);
+});

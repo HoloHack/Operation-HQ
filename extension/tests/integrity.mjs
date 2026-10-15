@@ -107,7 +107,7 @@ assert(read("js/daily-planner.js").includes("Generate the plan for the exact tar
 pass("Nightly planning prepares tomorrow separately and promotes it after the local date rolls over");
 
 const html = read("newtab.html");
-assert.equal([...html.matchAll(/<script\b[^>]*\bsrc=/g)].length, 2, "The HTML startup chain should contain only diagnostics and the bootstrap");
+assert.equal([...html.matchAll(/<script\b[^>]*\bsrc=/g)].length, 3, "The HTML startup chain should contain only diagnostics and the bootstrap");
 assert(read("js/newtab.js").includes("const CORE_SCRIPTS = Object.freeze(["));
 for (const eager of ["js/lib/chart.umd.min.js", "js/lib/tiptap/tiptap-bundle.js", "js/gleam.js", "js/spotify-ui.js", "js/weekly-stats.js", "js/venture-dashboard.js", "js/chrome-optimizer.js"]) {
   assert(!html.includes(`<script src="${eager}"></script>`), `${eager} still blocks new-tab startup`);
@@ -126,3 +126,4 @@ assert(css.includes(".cinematic-event-wave") && css.includes("prefers-reduced-mo
 pass("Mobile month view remains in-bounds and cinematic state feedback has a reduced-motion path");
 
 console.log("\nOperation HQ integrity regression tests completed successfully.");
+

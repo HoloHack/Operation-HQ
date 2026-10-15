@@ -11,6 +11,9 @@ const Bookmarks = {
   UNDO_KEY: "hq_bookmark_undo_v2",
   JOURNAL_KEY: "hq_bookmark_pending_v1",
   DECISIONS_KEY: "hq_bookmark_decisions_v1",
+  EVIDENCE_KEY: "hq_bookmark_evidence_v1",
+  decisionFilter: "",
+  decisionSelections: new Map(),
   existingFolders: [],
   decisionItems: [],
   decisionPage: 0,
@@ -62,7 +65,7 @@ const Bookmarks = {
     });
     document.querySelectorAll("[data-bookmark-review-action]").forEach(button => {
       if (button.id === "bookmark-complete-decisions") {
-        button.disabled = busy || ![...document.querySelectorAll("#bookmark-review-list select")].some(select => select.value);
+        button.disabled = busy || ![...document.querySelectorAll("#bookmark-review-list select")].some(select => select.value) && ![...this.decisionSelections.values()].some(Boolean);
       } else {
         button.disabled = busy || !button.closest(".bookmark-review-controls")?.querySelector("select")?.value;
       }
@@ -252,9 +255,12 @@ const Bookmarks = {
     const count = this.el("bookmark-review-count");
     if (!board || !list || !count) return;
     this.decisionItems = items;
-    const pages = Math.max(1, Math.ceil(items.length / this.DECISION_PAGE_SIZE));
+    const ids=new Set(items.map(item=>String(item.bm.id)));for(const id of this.decisionSelections.keys())if(!ids.has(id))this.decisionSelections.delete(id);
+    const query=this.decisionFilter.toLowerCase().trim();
+    const visible=query?items.filter(item=>[item.bm.title,item.bm.url,...(item.reasons||[])].join(" ").toLowerCase().includes(query)):items;
+    const pages = Math.max(1, Math.ceil(visible.length / this.DECISION_PAGE_SIZE));
     this.decisionPage = Math.max(0, Math.min(this.decisionPage, pages - 1));
-    count.textContent = String(items.length);
+    count.textContent = query?`${visible.length} of ${items.length}`:String(items.length);
     board.classList.toggle("hidden", items.length === 0);
     list.replaceChildren();
     if (pages > 1) {
@@ -274,7 +280,7 @@ const Bookmarks = {
       navigation.append(previous, label, next); list.append(navigation);
     }
     const start = this.decisionPage * this.DECISION_PAGE_SIZE;
-    this.decisionItems.slice(start, start + this.DECISION_PAGE_SIZE).forEach(item => {
+    visible.slice(start, start + this.DECISION_PAGE_SIZE).forEach(item => {
       const row = document.createElement("article");
       row.className = "bookmark-review-row";
       row.dataset.bookmarkDecisionId = String(item.bm.id);
@@ -303,12 +309,14 @@ const Bookmarks = {
       move.type = "button";
       move.dataset.bookmarkReviewAction = "true";
       move.textContent = "Confirm + learn";
-      if (suggested) select.value = JSON.stringify(suggested);
+      if (this.decisionSelections.has(String(item.bm.id)))select.value=this.decisionSelections.get(String(item.bm.id));
+      else if (suggested) select.value = JSON.stringify(suggested);
       move.disabled = this.busy || !select.value;
       select.onchange = () => {
+        this.decisionSelections.set(String(item.bm.id),select.value);
         move.disabled = !select.value || this.busy;
         const complete = this.el("bookmark-complete-decisions");
-        if (complete) complete.disabled = this.busy || ![...list.querySelectorAll("select")].some(candidate => candidate.value);
+        if (complete) complete.disabled = this.busy || ![...list.querySelectorAll("select")].some(candidate => candidate.value) && ![...this.decisionSelections.values()].some(Boolean);
       };
       move.onclick = () => {
         let path;
@@ -325,7 +333,7 @@ const Bookmarks = {
       list.append(row);
     });
     const complete = this.el("bookmark-complete-decisions");
-    if (complete) complete.disabled = this.busy || !this.decisionItems.length || ![...list.querySelectorAll("select")].some(select => select.value);
+    if (complete) complete.disabled = this.busy || !this.decisionItems.length || ![...list.querySelectorAll("select")].some(select => select.value) && ![...this.decisionSelections.values()].some(Boolean);
   },
 
   async preview(scopeParentId) {
@@ -351,17 +359,35 @@ const Bookmarks = {
     });
   },
 
+  async auditSavedDecisions() {
+    return this.runExclusive("Saved decision review",async()=>{
+      const {nodes}=await this.getAllBookmarks(),learned=await this.getLearnedMap(),conflicts=[];
+      for(const bm of nodes){const remembered=Classifier.normalizePath(learned[Classifier.fingerprint(bm)],{allowOperational:false});if(!remembered)continue;
+        const topic=Classifier.scoredKeywordMatch({title:bm.title,url:bm.url});const path=Classifier.normalizePath(topic?.path,{allowOperational:false});
+        if(path&&topic.confidence==='high'&&path.join(' / ')!==remembered.join(' / '))conflicts.push({bm,suggestedPath:path,reasons:['Saved correction differs from the page topic; choose which to keep'],candidates:[{path,score:9,reasons:topic.reasons||[]},{path:remembered,score:8,reasons:['your saved decision']}]});
+      }
+      await this.mergeDecisions(conflicts);this.log(`${conflicts.length} saved decision${conflicts.length===1?'':'s'} need a second look. No bookmarks moved and no learning was erased. Confirm only the destinations you want.`,!conflicts.length);await this.refreshInboxCount();await this.recordAudit('saved-decision-review',{conflicts:conflicts.length});return {conflicts:conflicts.length};
+    });
+  },
+
   async ensureContentPermission() {
     const origins = ["http://*/*", "https://*/*"];
-    return await chrome.permissions.contains({ origins }) || chrome.permissions.request({ origins });
+    try{return await chrome.permissions.request({ origins });}catch(error){if(await chrome.permissions.contains({origins}))return true;throw error;}
+  },
+
+  permissionResult(permission) {
+    let request;try{request=permission||this.ensureContentPermission();}catch(error){request=Promise.reject(error);}
+    return Promise.resolve(request).then(value=>typeof value==='object'&&value?value:{granted:Boolean(value)},error=>({granted:false,error:String(error?.message||error)}));
   },
 
   evidenceEndpoints(rawUrl) {
     try {
       const url = new URL(rawUrl);
       if (!/^https?:$/.test(url.protocol)) return [];
-      const host = url.hostname.toLowerCase();
-      const isPrivate = host === "localhost" || host === "::1" || host.endsWith(".local")
+      const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, "").replace(/\.$/, "");
+      if(url.username||url.password)return [];
+      const isPrivate = !host.includes(".") || /\.(internal|lan|home|corp|intranet)$/.test(host) || /\.\d+$/.test(host) || host === "localhost" || host === "::1" || host.endsWith(".local") || host.endsWith(".localhost") || host.includes(":")
+        || /^169\.254\./.test(host) || /^0\./.test(host)
         || /^127\./.test(host) || /^10\./.test(host) || /^192\.168\./.test(host)
         || /^172\.(1[6-9]|2\d|3[01])\./.test(host);
       if (isPrivate) return [];
@@ -378,22 +404,37 @@ const Bookmarks = {
   },
 
   async fetchPageContext(url) {
+    let key;try{const parsed=new URL(url);parsed.hash="";key="url:"+parsed.href;}catch{return "";}
+    try{const cache=(await chrome.storage.local.get(this.EVIDENCE_KEY))[this.EVIDENCE_KEY]||{};if(cache[key]?.text&&Date.now()-cache[key].at<7*86400000)return cache[key].text;}catch{}
+    const text=await this.readPageContext(url);
+    if(text){try{await (this._evidenceWrite=(this._evidenceWrite||Promise.resolve()).catch(()=>{}).then(async()=>{const cache=(await chrome.storage.local.get(this.EVIDENCE_KEY))[this.EVIDENCE_KEY]||{};cache[key]={text,at:Date.now()};const entries=Object.entries(cache).sort((a,b)=>b[1].at-a[1].at).slice(0,600);await chrome.storage.local.set({[this.EVIDENCE_KEY]:Object.fromEntries(entries)});}));}catch{}}
+    return text;
+  },
+
+  async boundedPageText(response) {
+    if(!response.body?.getReader)return ""; // No unbounded fallback in engines without streaming.
+    const reader=response.body.getReader(),decoder=new TextDecoder();let text='',bytes=0;
+    try{while(bytes<128000){const {value,done}=await reader.read();if(done)break;const part=value.subarray(0,128000-bytes);bytes+=part.byteLength;text+=decoder.decode(part,{stream:true});}return text+decoder.decode();}
+    finally{await reader.cancel().catch(()=>{});}
+  },
+
+  async readPageContext(url) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 7000);
     try {
       for (const endpoint of this.evidenceEndpoints(url)) {
         try {
           const response = await fetch(endpoint, { signal: controller.signal, credentials: "omit", redirect:"follow" });
-          if (!response.ok) continue;
+          if (!response.ok || (response.url && !this.evidenceEndpoints(response.url).length)) continue;
           const type = (response.headers.get("content-type") || "").toLowerCase();
           if (type.includes("application/json")) {
-            const data = await response.json();
+            const data = JSON.parse(await this.boundedPageText(response));
             const context = [data?.title, data?.author_name, data?.provider_name, data?.description, data?.category].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
-            if (context) return context.slice(0, 3000);
+            if (context && !/^(sign in|log in|access denied|just a moment|before you continue)/i.test(context)) return context.slice(0, 3000);
             continue;
           }
           if (!type.includes("text/html")) continue;
-          const html = await response.text();
+          const html = await this.boundedPageText(response);
           const doc = new DOMParser().parseFromString(html.slice(0, 120000), "text/html");
           const context = [
             doc.querySelector('meta[property="og:title"]')?.getAttribute("content") || doc.querySelector('meta[name="twitter:title"]')?.getAttribute("content") || doc.querySelector("title")?.textContent || "",
@@ -401,7 +442,7 @@ const Bookmarks = {
             doc.querySelector('meta[name="keywords"]')?.getAttribute("content") || "",
             doc.querySelector("h1")?.textContent || "",
           ].join(" ").replace(/\s+/g, " ").trim();
-          if (context) return context.slice(0, 3000);
+          if (context && !/^(sign in|log in|access denied|just a moment|before you continue)/i.test(context)) return context.slice(0, 3000);
         } catch (error) {
           if (controller.signal.aborted) break;
         }
@@ -424,12 +465,15 @@ const Bookmarks = {
     return allBookmarks.filter(bm => pendingIds.has(String(bm.id)) || legacyHoldingDescendants.has(bm.id) || (!pendingOnly && Classifier.isContentVariesDomain(Classifier.domainOf(bm.url))));
   },
 
-  async refineUncategorized({ pendingOnly = false } = {}) {
-    return this.runExclusive("Deep topic review", async () => {
-      if (!(await this.ensureContentPermission())) {
-        this.log("Page-reading permission was declined. Nothing changed; unresolved bookmarks remain in their current folders.");
-        return;
-      }
+  async refineUncategorized({ pendingOnly = false } = {}, permission) {
+    const access=this.permissionResult(permission);
+    return this.runExclusive("Page evidence",async()=>{
+      const outcome=await access;if(!outcome.granted){this.log(outcome.error?`Page-reading permission could not be requested: ${outcome.error}. Retry from the button.`:"Page-reading permission was declined. Remaining bookmarks were kept in place.");return {permissionDenied:!outcome.error,permissionError:outcome.error};}
+      return this.runEvidencePass({pendingOnly});
+    });
+  },
+
+  async runEvidencePass({pendingOnly=false}={}) {
       const { barId, nodes } = await this.getAllBookmarks();
       const bookmarks = await this.collectEvidenceCandidates(barId, nodes, { pendingOnly });
       if (!bookmarks.length) { this.log("No ambiguous bookmarks need a deep review.", true); return; }
@@ -505,7 +549,6 @@ const Bookmarks = {
       this.setProgress(reviewed - stillUncertain.length, bookmarks.length, !stillUncertain.length);
       await this.refreshInboxCount();
       return { reviewed, moved:moves.length - released, released, uncertain:stillUncertain.length };
-    });
   },
 
   async readManagedRegistry() {
@@ -667,13 +710,18 @@ const Bookmarks = {
     }
   },
 
-  async sortAll(scopeParentId) {
-    const result = await this.runExclusive(scopeParentId ? "Inbox sort" : "Full sort", () => this.applySort(scopeParentId));
-    if (!scopeParentId && result?.uncertain > 0 && !result?.failed) {
-      this.log("Strong title and URL matches are filed. Checking real page evidence for the unresolved remainder…");
-      return this.refineUncategorized({ pendingOnly:true });
-    }
-    return result;
+  async sortAll(scopeParentId, permission) {
+    // The click handler starts this promise synchronously while activation is live.
+    const access = this.permissionResult(permission);
+    return this.runExclusive(scopeParentId ? "Inbox sort" : "Full sort", async()=>{
+      const result=await this.applySort(scopeParentId);
+      if(!scopeParentId&&result?.uncertain>0&&!result.failed){
+        const outcome=await access;if(outcome.granted)return this.runEvidencePass({pendingOnly:true});
+        if(outcome.error)this.log(`Page-reading permission could not be requested: ${outcome.error}. Retry from the Resolve button.`);
+        this.log("Page evidence is unavailable without your permission. Title matches were sorted; the remaining links stay in place. Click Resolve with page evidence to grant access.");
+      }
+      return result;
+    });
   },
 
   async applySort(scopeParentId) {
@@ -737,6 +785,8 @@ const Bookmarks = {
       const { barId } = await this.getAllBookmarks();
       const [bm] = await chrome.bookmarks.get(bookmarkId);
       if (!bm?.url) throw new Error("That bookmark no longer exists.");
+      const reviewed=this.decisionItems.find(item=>String(item.bm.id)===String(bookmarkId));
+      if(reviewed&&(reviewed.bm.url!==bm.url||reviewed.bm.parentId!==bm.parentId))throw Error("Bookmark changed after review. Refresh Preview before confirming it.");
       const targetParent = await this.getOrCreateFolderPath(path, barId);
       const moves = [];
       await this.moveAndRecord(bm, targetParent, path, barId, moves);
@@ -757,11 +807,10 @@ const Bookmarks = {
 
   async applySelectedDecisions() {
     if (typeof document === "undefined") return;
-    const selected = [...document.querySelectorAll("#bookmark-review-list select[data-bookmark-decision-id]")].map(select => {
-      if (!select.value) return null;
-      try { return { id:select.dataset.bookmarkDecisionId, path:JSON.parse(select.value) }; }
-      catch { return null; }
-    }).filter(Boolean);
+    const choices=new Map(this.decisionSelections);
+    document.querySelectorAll("#bookmark-review-list select[data-bookmark-decision-id]").forEach(select=>choices.set(select.dataset.bookmarkDecisionId,select.value));
+    const selected=[...choices].map(([id,value])=>{if(!value||!this.decisionItems.some(item=>String(item.bm.id)===id))return null;try{return {id,path:JSON.parse(value)};}catch{return null;}}).filter(Boolean);
+
     if (!selected.length) { this.log("Choose at least one verified destination first."); return; }
     return this.runExclusive("Finish selected decisions", async () => {
       const { barId } = await this.getAllBookmarks();
@@ -774,7 +823,8 @@ const Bookmarks = {
         if (!path) { failed += 1; continue; }
         try {
           const [bm] = await chrome.bookmarks.get(choice.id);
-          if (!bm?.url) { failed += 1; continue; }
+          const reviewed=this.decisionItems.find(item=>String(item.bm.id)===String(choice.id));
+          if (!bm?.url || !reviewed || reviewed.bm.url!==bm.url || reviewed.bm.parentId!==bm.parentId) { failed += 1; continue; }
           const targetParent = await this.getOrCreateFolderPath(path, barId);
           await this.moveAndRecord(bm, targetParent, path, barId, moves);
           learned[Classifier.fingerprint(bm)] = path;

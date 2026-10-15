@@ -11,7 +11,7 @@ const pass = (message) => console.log(`✓ ${message}`);
 
 const manifest = JSON.parse(read("manifest.json"));
 assert.equal(manifest.manifest_version, 3);
-assert.equal(manifest.version, "3.2.2");
+assert.equal(manifest.version, "3.2.3");
 const extensionHex = createHash("sha256").update(Buffer.from(manifest.key, "base64")).digest("hex").slice(0, 32);
 const extensionId = [...extensionHex].map(char => String.fromCharCode(97 + parseInt(char, 16))).join("");
 assert.equal(extensionId, "cbgepkbfmcahdpahipkdeahppfbggjok", "Manifest key changed the OAuth-bound extension ID");
@@ -733,7 +733,7 @@ assert(read("js/bookmarks.js").includes("runExclusive") && read("js/bookmarks.js
 assert(read("js/background.js").includes('navigator.locks.request("hq-bookmark-mutations"') && read("js/bookmarks.js").includes('navigator.locks.request("hq-bookmark-mutations"'), "Bookmark mutations must share one browser-managed lock");
 assert(read("js/bookmarks.js").includes("[tree[0].children[0]]"), "Full bookmark sorting can escape the Bookmark Bar root");
 assert(read("js/background.js").includes("Classifier.normalizePath(path, { allowOperational: false })"), "Manual bookmark learning can escape the curated taxonomy");
-assert(html.includes('id="bookmark-review-board"') && html.includes("Zero-wrong-placement gate"), "Uncertain bookmarks lack an explicit accuracy gate");
+assert(html.includes('id="bookmark-review-board"') && html.includes("Review unresolved topics"), "Uncertain bookmarks lack an explicit accuracy gate");
 assert(read("js/workspaces.js").includes("saved-only tab") && read("js/workspaces.js").includes("restoreGroups"), "Workspace sync must preserve saved-only tabs and tab groups");
 pass("Topic-first bookmarks, zero catch-all placement, and loss-resistant workspace cross-references");
 
@@ -753,3 +753,4 @@ assert(read("js/early-diagnostics.js").includes('"credential=[redacted]"'), "Dia
 pass("Rendering safety, contextual permissions, async boundaries, and network timeouts");
 
 console.log("\nOperation HQ verification completed successfully.");
+

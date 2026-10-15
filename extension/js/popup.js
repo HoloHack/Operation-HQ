@@ -1,4 +1,5 @@
 (async()=>{
+  const appearance=(await chrome.storage.local.get('hq_desk_appearance_v1')).hq_desk_appearance_v1;document.documentElement.dataset.deskSurface=appearance?.surface==='ink'?'ink':'paper';
   const status=document.getElementById('popup-status');
   const enabled=document.getElementById('bridge-enabled');
   const action=async(fn)=>{try{await fn();status.textContent='Ready.';}catch(error){status.textContent=String(error.message||error);}};

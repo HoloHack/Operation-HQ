@@ -40,20 +40,20 @@ try{
  });
  const panels=await page.evaluate(()=>[...document.querySelectorAll('.flyout[id]')].map(e=>e.id));
  await check('All packaged flyouts open and have reachable close buttons',async()=>{
-   for(const id of panels){console.log('Opening panel '+id);
+   for(const width of [320,1440]){await page.setViewportSize({width,height:960});for(const id of panels){console.log('Opening panel '+id+' at '+width);
      await page.evaluate(()=>HQPanels.close());
      assert.equal(await page.evaluate(id=>HQPanels.open(id),id),true,'Panel failed: '+id);
-     const panel=page.locator('#'+id);await panel.waitFor({state:'visible'});
-     const close=panel.locator('.flyout-close');assert.equal(await close.count(),1,'Close count: '+id);
+     const panel=page.locator('#'+id);await panel.waitFor({state:'visible'});for(const field of await panel.locator('input[placeholder],textarea[placeholder]').all()){assert.equal(await field.evaluate(e=>getComputedStyle(e,'::placeholder').opacity),'1','Placeholder must remain legible in '+id);assert.match(await field.evaluate(e=>getComputedStyle(e,'::placeholder').color),/^rgb\(/);}for(const legend of await panel.locator('legend').all())assert.equal(await legend.evaluate(e=>getComputedStyle(e).color),await panel.evaluate(e=>getComputedStyle(e).color),'Legend must follow desk ink');
+     const close=panel.locator('.flyout-close');assert.equal(await close.count(),1,'Close count: '+id);if(id==='gleam-flyout'&&width===320){const form=panel.locator('.gleam-onboarding');await page.screenshot({path:path.join(output,'gleam-calibration-narrow.png')});const overflow=await form.evaluate(e=>({scroll:e.scrollWidth,width:e.clientWidth,items:[...e.querySelectorAll('*')].filter(n=>n.getBoundingClientRect().right>e.getBoundingClientRect().right+1).map(n=>({tag:n.tagName,id:n.id,class:n.className,w:n.getBoundingClientRect().width}))}));assert(overflow.scroll<=overflow.width+1,'Gleam calibration content overflows: '+JSON.stringify(overflow));const b=await form.boundingBox();assert(b.x>=0&&b.x+b.width<=width,'Gleam calibration extends beyond screen');}
      const [p,c]=await Promise.all([panel.boundingBox(),close.boundingBox()]);
      assert(c&&p&&c.x>=p.x-1&&c.y>=p.y-1&&c.x+c.width<=p.x+p.width+1&&c.y+c.height<=p.y+p.height+1,'Close outside panel: '+id+' '+JSON.stringify({p,c}));
-     await close.click();assert.equal(await panel.getAttribute('aria-hidden'),'true','Close inactive: '+id);
-   }
+     assert(p.x>=-1&&p.x+p.width<=width+1,'Panel outside viewport: '+id+' '+width);for(const surface of await panel.locator('.study-mission-preview,#srs-review-area,.gleam-onboarding,.nexus-cortex,.focus-theme-proposal,.focus-mission-console,.cal-surface,.cal-inspector,.notes-search-field,.local-ai-output,.nexus-ai-output').all()){assert.equal(await surface.evaluate(e=>getComputedStyle(e).backgroundImage),'none','Legacy gradient survived in '+id);assert.match(await surface.evaluate(e=>getComputedStyle(e).backgroundColor),/^rgb\(/,'Reading surface must be opaque in '+id);}await page.screenshot({path:path.join(output,`panel-${id}-${width}.png`)});await close.click();assert.equal(await panel.getAttribute('aria-hidden'),'true','Close inactive: '+id);
+   }}
    assert.deepEqual(await page.evaluate(()=>BootDiagnostics.issues),[]);
    return {panelCount:panels.length};
  });
  await check('Settings and safe-mode exit remain usable',async()=>{
-   await page.locator('#settings-btn').click();await page.waitForFunction(()=>!document.getElementById('settings-drawer').classList.contains('hidden'));
+   await page.locator('#desk-advanced').click();await page.waitForFunction(()=>!document.getElementById('settings-drawer').classList.contains('hidden'));
    await page.locator('#close-settings').click();
    await page.evaluate(()=>localStorage.setItem('hq_safe_mode_v1','true'));await page.reload();
    await page.waitForFunction(()=>document.body?.classList.contains('app-ready'));assert(await page.locator('#safe-mode-exit').isVisible());
@@ -114,11 +114,11 @@ try{
    const result=await page.evaluate(()=>{
      const prior=Bookmarks.decisionItems;
      const fixture=Array.from({length:65},(_,i)=>({bm:{id:'ui-fixture-'+i,title:'Ambiguous fixture '+i,url:'https://example.org/'+i,parentId:'1'},reasons:['test fixture'],candidates:[]}));
-     Bookmarks.renderAccuracyGate(fixture);const first=document.querySelectorAll('.bookmark-review-row').length;
+     Bookmarks.renderAccuracyGate(fixture);const first=document.querySelectorAll('.bookmark-review-row').length;const select=document.querySelector('#bookmark-review-list select');select.value=JSON.stringify(['Gaming & Roblox Dev','Chess']);select.dispatchEvent(new Event('change'));
      document.querySelector('[data-bookmark-page="next"]').click();const second=document.querySelector('.bookmark-review-row strong').textContent;
-     const retained=Bookmarks.decisionItems.length;Bookmarks.decisionPage=0;Bookmarks.renderAccuracyGate(prior);return {first,second,retained};
+     const retained=Bookmarks.decisionItems.length;document.querySelector('[data-bookmark-page=previous]').click();const retainedChoice=document.querySelector('#bookmark-review-list select').value;Bookmarks.decisionPage=0;Bookmarks.renderAccuracyGate(prior);return {first,second,retained,retainedChoice};
    });
-   assert.equal(result.first,20);assert.equal(result.second,'Ambiguous fixture 20');assert.equal(result.retained,65);
+   assert.equal(result.first,20);assert.equal(result.second,'Ambiguous fixture 20');assert.equal(result.retained,65);assert.deepEqual(JSON.parse(result.retainedChoice),['Gaming & Roblox Dev','Chess']);
  });
  await check('Native tab groups survive save and restore in a separate window',async()=>{
    await page.evaluate(()=>HQPanels.close());await page.evaluate(()=>HQPanels.open('optimizer-flyout'));
@@ -139,7 +139,7 @@ try{
    assert.equal(await page.locator('#gmail-connect-btn').isEnabled(),true);
  });
  await check('Widgets have direct working routes and calendar works at narrow widths',async()=>{
-   await page.evaluate(()=>HQPanels.close());await page.locator('#widget-weather [data-open-panel]').first().click();
+   await page.evaluate(()=>HQPanels.close());await page.getByRole('button',{name:'Weather',exact:true}).click();
    assert(await page.locator('#weather-flyout').evaluate(e=>e.classList.contains('open')));await page.evaluate(()=>HQPanels.close());
    for(const width of [320,640,1280,1920]){
      await page.setViewportSize({width,height:960});await page.evaluate(()=>HQPanels.open('calendar-flyout'));
@@ -158,14 +158,8 @@ try{
    await page.locator('.focus-theme-option').first().click();
    await waitForSaved(()=>page.evaluate(()=>chrome.storage.local.get('hq_adaptive_theme_active_v1')),v=>v.hq_adaptive_theme_active_v1===true);
    await page.evaluate(()=>HQPanels.close());await page.emulateMedia({reducedMotion:'no-preference'});
-   await page.locator('#settings-btn').click();await page.locator('#boot-sequence-select').selectOption('full');
-   await page.locator('#boot-sequence-preview').click();
-   await page.waitForFunction(()=>document.getElementById('hq-launch').classList.contains('is-active'));
-   const animatedLayers=await page.evaluate(()=>document.getAnimations().filter(a=>a.playState==='running').length);
-   assert(animatedLayers>=5,'Launch animation has too few active layers');
-   await page.locator('#hq-launch-skip').click();await page.waitForFunction(()=>!document.body.classList.contains('boot-cinematic-active'));
-   await page.locator('#close-settings').click();await page.evaluate(()=>HQPanels.open('nexus-flyout'));
-   await page.locator('#nexus-flyout .flyout-close').click();await page.emulateMedia({reducedMotion:'reduce'});
+   const legacy=await context.newPage();await legacy.goto(base+'newtab.html?legacy=1');await legacy.waitForFunction(()=>document.body.classList.contains('app-ready'));await legacy.emulateMedia({reducedMotion:'no-preference'});await legacy.evaluate(()=>{BootCinematic.mode='full';BootCinematic.replay();});await legacy.waitForFunction(()=>document.getElementById('hq-launch').classList.contains('is-active'));
+   const animatedLayers=await legacy.evaluate(()=>document.getAnimations().filter(a=>a.playState==='running').length);assert(animatedLayers>=5,'Legacy launch animation has too few layers');await legacy.locator('#hq-launch-skip').click();await legacy.waitForFunction(()=>!document.body.classList.contains('boot-cinematic-active'));await legacy.close();await page.bringToFront();await page.evaluate(()=>HQPanels.open('nexus-flyout'));await page.locator('#nexus-flyout .flyout-close').click();await page.emulateMedia({reducedMotion:'reduce'});
    return {generatedOptions:proposals.length,animatedLayers};
  });
  await check('Exact-origin dashboard bridge works through real Chrome external messaging (isolated fixture)',async()=>{
@@ -182,6 +176,15 @@ try{
    await popup.locator('#bridge-enabled').uncheck();await popup.close();await site.close();
    return {productionSiteRequests:0,realUserDataMutations:0};
  });
+ await check('Browser tools use the shared Paper/Night desk and readable narrow bookmark controls',async()=>{
+   await worker.evaluate(()=>chrome.storage.local.set({hq_desk_appearance_v1:{surface:'paper',hue:152,motion:'reduced'}}));
+   await page.goto(base+'newtab.html#tool=bookmarks&request=shared-desk-test');await page.waitForFunction(()=>document.body.classList.contains('app-ready')&&document.getElementById('bookmarks-flyout').classList.contains('open'));
+   assert.equal(await page.locator('body').getAttribute('data-workspace'),'tools');assert.equal(await page.locator('#app').isVisible(),false);assert.equal(await page.locator('body').evaluate(e=>getComputedStyle(e).backgroundColor),'rgb(247, 246, 239)');
+   await page.evaluate(()=>Bookmarks.renderAccuracyGate([{bm:{id:'readable',title:'Every Chess Tip - Explained',url:'https://youtube.com/watch?v=readable',parentId:'1'},reasons:['test-only layout'],candidates:[]}]));
+   for(const width of [320,1440]){await page.setViewportSize({width,height:960});const panel=page.locator('#bookmarks-flyout'),select=page.locator('#bookmark-review-list select');const box=await select.boundingBox();assert(box.width>180);assert(await panel.evaluate(e=>e.scrollWidth<=e.clientWidth+1));await page.waitForFunction(()=>getComputedStyle(document.getElementById('bookmarks-flyout')).opacity==='1');await page.screenshot({path:path.join(output,`shared-desk-${width}.png`)});}
+   await worker.evaluate(()=>chrome.storage.local.set({hq_desk_appearance_v1:{surface:'ink',hue:220,motion:'reduced'}}));await page.waitForFunction(()=>document.body.dataset.deskSurface==='ink'&&getComputedStyle(document.body).backgroundColor==='rgb(27, 32, 28)');assert.equal(await page.locator('body').evaluate(e=>getComputedStyle(e).backgroundColor),'rgb(27, 32, 28)');
+   await page.locator('#bookmarks-flyout .flyout-close').click();await page.getByRole('button',{name:'Gmail',exact:true}).click();await page.locator('#gmail-flyout').waitFor({state:'visible'});await page.screenshot({path:path.join(output,'shared-desk-gmail.png')});return {surfaceMatches:true,oldDashboardHidden:true,readableSelect:true};
+ });
  await check('Heavy AI stays unloaded and measured DOM/JS heap remain bounded',async()=>{
    assert.equal(await page.evaluate(()=>performance.getEntriesByType('resource').some(r=>/webllm-loader|web-llm\.js/.test(r.name))),false);
    const session=await context.newCDPSession(page);await session.send('Performance.enable');const metrics=await session.send('Performance.getMetrics');
@@ -192,3 +195,4 @@ try{
  await check('No uncaught browser errors across tested journeys',async()=>{assert.deepEqual(errors,[]);return {consoleErrors};});
 }catch(error){console.error(error);process.exitCode=1;if(context){for(const p of context.pages().filter(p=>p.url().includes('newtab.html'))){await p.screenshot({path:path.join(output,'failure.png')}).catch(()=>{});const diagnostics=await p.evaluate(()=>({issues:typeof BootDiagnostics==='undefined'?[]:BootDiagnostics.issues,early:window.HQEarlyDiagnostics?.entries()})).catch(()=>null);console.log('Failure diagnostics',JSON.stringify(diagnostics));console.log('Failure panel states',JSON.stringify(await p.evaluate(()=>({hash:location.hash,panels:[...document.querySelectorAll('.flyout.open')].map(e=>({id:e.id,visible:getComputedStyle(e).visibility})),errors:window.HQEarlyDiagnostics?.entries()})).catch(()=>null)));await fs.writeFile(path.join(output,'diagnostics.json'),JSON.stringify(diagnostics,null,2));}}}
 finally{await fs.writeFile(path.join(output,'chromium-results.json'),JSON.stringify({timestamp:new Date().toISOString(),results,errors,consoleErrors,network,providerTests:'External HTTP blocked; Gmail cancellation token stub. No live account or local model download.'},null,2));await context?.close();await fs.rm(profile,{recursive:true,force:true});}
+

@@ -110,6 +110,7 @@ const UNIT_MINUTES = { hours: 60, days: 1440, weeks: 10080, months: 43200 };
 
 const Wallpaper = {
   _renderRequestId: 0,
+  _applyEpoch: 0,
   _offlineObjectUrl: null,
 
   setStatus(message, state = "neutral") {
@@ -356,7 +357,7 @@ const Wallpaper = {
       // aliases, a second results page, and finally the verified SFW anime
       // channel. This preserves the 4K gate while preventing rare named
       // scenes from collapsing to an error after one empty API response.
-      const exact = [selected.q, ...(selected.aliases || [])];
+      const exact = [...(selected.aliases || []).slice(0,2), selected.q];
       const attempts = exact.flatMap((q, index) => [
         { ...CATEGORY_SOURCE.anime, q, sorting: "relevance", page: 1, requestedLabel: selected.label, exact: index < 2 },
         { ...CATEGORY_SOURCE.anime, q, sorting: "relevance", page: 2, requestedLabel: selected.label, exact: index < 2 },
@@ -530,7 +531,8 @@ const Wallpaper = {
     document.body.dataset.wallpaperTone = palette.tone || "dark";
   },
 
-  async setBackground(cssUrlOrGradient, isGradient = false) {
+  async setBackground(cssUrlOrGradient, isGradient = false, isCurrent=()=>true) {
+    if(!isCurrent())return false;
     const layer = document.getElementById("wallpaper-layer");
     const image = document.getElementById("wallpaper-image");
     if (!layer || !image) return false;
@@ -553,15 +555,17 @@ const Wallpaper = {
     layer.classList.add("loading");
 
     return new Promise((resolve) => {
+      let settled=false;const finish=value=>{if(settled)return;settled=true;clearTimeout(timer);preload.onload=preload.onerror=null;resolve(value);};
       const preload = new Image();
+      const timer=setTimeout(()=>{if(requestId===this._renderRequestId){layer.classList.remove("loading");this.setStatus("Image host timed out. Keeping the last working background.","error");}preload.src="";finish(false);},8000);
       preload.decoding = "async";
       preload.referrerPolicy = "no-referrer";
       preload.onload = () => {
-        if (requestId !== this._renderRequestId) { resolve(false); return; }
+        if (requestId !== this._renderRequestId || !isCurrent()) { finish(false); return; }
         if (!url.startsWith("data:") && !this.is4KDimensions(preload.naturalWidth, preload.naturalHeight)) {
           layer.classList.remove("loading");
           this.setStatus(`Rejected ${preload.naturalWidth}×${preload.naturalHeight}: wallpaper is below the 4K quality gate.`, "error");
-          resolve(false);
+          finish(false);
           return;
         }
         image.src = url;
@@ -572,14 +576,14 @@ const Wallpaper = {
         image.classList.add("ready");
         layer.style.backgroundImage = "none";
         layer.classList.remove("loading");
-        resolve(true);
+        finish(true);
       };
       preload.onerror = () => {
         if (requestId === this._renderRequestId) {
           layer.classList.remove("loading");
           this.setStatus("Image host failed to load. Keeping the last working background.", "error");
         }
-        resolve(false);
+        finish(false);
       };
       preload.src = url;
     });
@@ -635,10 +639,18 @@ const Wallpaper = {
     this.toast("Hidden wallpapers restored.");
   },
 
-  async apply(forceNew = false, silent = true, { deferNetwork = false } = {}) {
+  async apply(forceNew = false, silent = true, options = {}) {
+    const epoch=++this._applyEpoch;
+    this._applyQueue=(this._applyQueue||Promise.resolve()).catch(()=>{}).then(()=>epoch===this._applyEpoch?this.applyCurrent(forceNew,silent,{...options,epoch}):undefined);
+    return this._applyQueue;
+  },
+
+  async applyCurrent(forceNew = false, silent = true, { deferNetwork = false,epoch } = {}) {
+    const isCurrent=()=>epoch===this._applyEpoch;
     const { hq_wallpaper_category } = await chrome.storage.local.get("hq_wallpaper_category");
     const category = hq_wallpaper_category || "gaming";
     await this.applyStoredPalette(category);
+    if(!isCurrent())return;
     const s = await chrome.storage.local.get(["hq_wallpaper_cached", "hq_wallpaper_cached_category", "hq_wallpaper_current"]);
     const blocked = new Set(await this.getBlocklist());
     const cachedIsBlocked = s.hq_wallpaper_current?.key && blocked.has(s.hq_wallpaper_current.key);
@@ -649,18 +661,19 @@ const Wallpaper = {
     // refresh skipped both cache and offline fallback, leaving a blank page
     // for the whole network request—and permanently blank when that request
     // failed. The refresh now happens on top of a visible background.
+    if(!isCurrent())return;
     const immediate = sameCategoryCached || safeOfflineCopy;
-    let immediateRendered = immediate ? await this.setBackground(immediate) : false;
+    let immediateRendered = immediate ? await this.setBackground(immediate,false,isCurrent) : false;
     if (!immediateRendered && sameCategoryCached && !cachedIsBlocked) {
       safeOfflineCopy = await this.readOffline(category);
-      if (safeOfflineCopy) immediateRendered = await this.setBackground(safeOfflineCopy);
+      if (safeOfflineCopy) immediateRendered = await this.setBackground(safeOfflineCopy,false,isCurrent);
     }
-    if (!immediateRendered) await this.setBackground(this.gradientFor(), true);
+    if (!immediateRendered) await this.setBackground(this.gradientFor(), true,isCurrent);
 
     if (deferNetwork) {
-      setTimeout(() => this.apply(true, true).catch(error => {
+      setTimeout(() => {if(!isCurrent())return;this.apply(true, true).catch(error => {
         this.setStatus(`${error.message}. The last working background remains active.`, "error");
-      }), 0);
+      });}, 0);
       this.setStatus(immediateRendered ? `Showing cached ${category} wallpaper while a new one loads.` : `Preparing a new ${category} wallpaper…`, "loading");
       return;
     }
@@ -673,6 +686,7 @@ const Wallpaper = {
     try {
       this.setStatus(`Loading a new ${category} wallpaper…`, "loading");
       const result = await this.fetchRandom(category);
+      if(epoch!==this._applyEpoch)return;
       if (result?.url) {
         // A CDN item can disappear between search and display. Try other
         // verified results from the same response before declaring the whole
@@ -682,13 +696,17 @@ const Wallpaper = {
           .slice(0, 6);
         let displayed = null;
         for (const candidate of candidates) {
-          if (await this.setBackground(candidate.url)) { displayed = candidate; break; }
+          if(epoch!==this._applyEpoch)return;
+          if (await this.setBackground(candidate.url,false,isCurrent)) { displayed = candidate; break; }
         }
         if (!displayed) throw new Error("Verified images were found, but their hosts could not be decoded");
+        if(epoch!==this._applyEpoch)return;
         const remembered = { ...result, ...displayed };
-        await chrome.storage.local.set({ hq_wallpaper_cached: displayed.url, hq_wallpaper_cached_category: category });
-        await this.rememberCurrent(remembered, category);
-        this.cacheOffline(category, displayed.url);
+        await chrome.storage.local.set({ hq_wallpaper_cached: displayed.url, hq_wallpaper_cached_category: category, hq_wallpaper_current:{key:remembered.key,url:displayed.url,category} });
+        if(!isCurrent())return;
+        await this.refreshSafetyControls();
+        await this.cacheOffline(category, displayed.url);
+        if(!isCurrent())return;
         const searchNote = result.searchTier > 1 ? ` · recovered on search tier ${result.searchTier}` : "";
         const fallbackNote = result.usedFallback && result.requestedLabel
           ? ` Requested ${result.requestedLabel}; showing the closest verified 4K anime result.`
@@ -700,14 +718,16 @@ const Wallpaper = {
       }
       throw new Error(category === "custom" ? "No valid custom wallpaper URLs are saved" : "Wallpaper provider returned no usable images");
     } catch (e) {
+      if(epoch!==this._applyEpoch)return;
       this.setStatus(`${e.message}. The last working background remains active.`, "error");
       if (!silent) {
         this.toast(e.message || "Couldn't load a new wallpaper. The last working background is still active.");
       }
     }
 
+    if(epoch!==this._applyEpoch)return;
     if (!safeOfflineCopy && !sameCategoryCached) {
-      await this.setBackground(this.gradientFor(), true);
+      await this.setBackground(this.gradientFor(), true,isCurrent);
     }
   },
 

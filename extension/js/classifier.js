@@ -51,6 +51,8 @@ const OPERATIONAL_SUBFOLDERS = new Set();
 const DOMAIN_TABLE = {
   // Coding & Dev
   "github.com": ["Coding & Dev", "Docs & References"],
+  "jules.google": ["Coding & Dev", "AI Tools"],
+  "aistudio.google.com": ["Coding & Dev", "AI Tools"],
   "stackoverflow.com": ["Coding & Dev", "Docs & References"],
   "exercism.org": ["Coding & Dev", "Practice & Jobs"],
   "copilot.microsoft.com": ["Coding & Dev", "AI Tools"],
@@ -228,6 +230,14 @@ const DOMAIN_TABLE = {
 // Keyword fallback for domains not in the table above — still only ever
 // resolves to a (root, subfolder) pair from the fixed ROOTS list.
 const KEYWORD_RULES = [
+  { root: "Gaming & Roblox Dev", sub: "Chess", words: ["chess", "checkmate", "sicilian defense", "sicilian defence", "queen's gambit", "chess openings", "endgame strategy"] },
+  { root: "Gaming & Roblox Dev", sub: "Gaming", words: ["marvel rivals", "blox fruits", "minecraft", "fortnite", "valorant", "elden ring", "roblox", "ranked gameplay", "gaming settings"] },
+  { root: "School & Academics", sub: "Languages", words: ["learn any language", "learn a language", "language learning", "learn spanish", "learn japanese", "learn french", "language acquisition", "learn korean", "learn chinese"] },
+  { root: "Entertainment", sub: "Music", words: ["piano", "guitar", "violin", "funk", "choreography", "dance tutorial", "drum lesson", "sheet music", "piano chords", "funk remix", "song lyrics", "music theory", "synthesia"] },
+  { root: "Utilities & Misc", sub: "Fitness", words: ["workout", "hypertrophy", "calisthenics", "strength training", "muscle growth", "push up", "pull up", "bodyweight exercise", "gym routine"] },
+  { root: "Coding & Dev", sub: "AI Tools", words: ["large language model", "llm", "ai agent", "ai agents", "coding agent", "prompt engineering", "machine learning", "artificial intelligence", "deep learning", "claude code", "chatgpt", "ollama", "jules google"] },
+  { root: "School & Academics", sub: "Science", words: ["physics", "chemistry", "biology", "quantum mechanics", "atomic structure", "photosynthesis", "newton laws", "periodic table"] },
+
   { root: "School & Academics", sub: "Mathematics", words: ["math", "maths", "mathematics", "algebra", "geometry", "calculus", "trigonometry", "quadratic", "indices", "surds", "probability", "statistics", "pythagoras", "cambridge maths", "math chapter", "math exercise"] },
   { root: "School & Academics", sub: "Science", words: ["science", "biology", "chemistry", "physics", "scientific method", "experiment", "laboratory", "data skills"] },
   { root: "School & Academics", sub: "Humanities & English", words: ["english", "literature", "poetry", "shakespeare", "essay", "creative writing", "hsie", "history", "geography", "commerce", "economics", "humanities", "source analysis"] },
@@ -333,7 +343,7 @@ const Classifier = {
 
   scoredKeywordMatch(bookmark) {
     const normalize = value => String(value || "").toLowerCase().replace(/%[0-9a-f]{2}/gi, " ").replace(/[^a-z0-9.+#]+/g, " ").replace(/\s+/g, " ").trim();
-    const title = normalize([bookmark.title, ...(Array.isArray(bookmark.sourcePath) ? bookmark.sourcePath : [])].join(" "));
+    const title = normalize(bookmark.title);
     const url = normalize(bookmark.url);
     const contains = (text, phrase) => {
       const needle = normalize(phrase);
@@ -415,7 +425,7 @@ const Classifier = {
     // white rule: classify what the saved page says it is about first;
     // use a domain only when content gives no reliable signal.
     const topic = this.scoredKeywordMatch(bookmark);
-    if (topic) return topic;
+    if (topic && topic.confidence !== "medium") return topic;
 
     // A bookmark already placed inside the supported taxonomy is an explicit
     // owner decision. Preserve it when no stronger title/URL topic contradicts
@@ -427,12 +437,14 @@ const Classifier = {
     if (this.contentVariesBase(domain)) {
       // An ambiguous multi-topic platform stays where the person put it until
       // page evidence or an explicit decision identifies its real topic.
-      return { path: null, confidence: "needs-evidence", source: "needs-content", reasons: ["platform content varies"], candidates:[] };
+      return topic || { path: null, confidence: "needs-evidence", source: "needs-content", reasons: ["platform content varies"], candidates:[] };
     }
 
     // 4) curated stable-domain table
     const stablePath = this.stableDomainPath(domain);
     if (stablePath) return { path: stablePath, confidence: "high", source: "domain", candidates:[{ path:stablePath, score:10, reasons:[domain] }] };
+
+    if (topic) return topic;
 
     // 5) a subfolder you (or a previous sort) already legitimately created
     // inside one of the fixed roots — never a stray top-level folder
