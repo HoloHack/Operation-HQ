@@ -40,15 +40,15 @@ try{
  });
  const panels=await page.evaluate(()=>[...document.querySelectorAll('.flyout[id]')].map(e=>e.id));
  await check('All packaged flyouts open and have reachable close buttons',async()=>{
-   for(const id of panels){console.log('Opening panel '+id);
+   for(const width of [320,1440]){await page.setViewportSize({width,height:960});for(const id of panels){console.log('Opening panel '+id+' at '+width);
      await page.evaluate(()=>HQPanels.close());
      assert.equal(await page.evaluate(id=>HQPanels.open(id),id),true,'Panel failed: '+id);
      const panel=page.locator('#'+id);await panel.waitFor({state:'visible'});
      const close=panel.locator('.flyout-close');assert.equal(await close.count(),1,'Close count: '+id);
      const [p,c]=await Promise.all([panel.boundingBox(),close.boundingBox()]);
      assert(c&&p&&c.x>=p.x-1&&c.y>=p.y-1&&c.x+c.width<=p.x+p.width+1&&c.y+c.height<=p.y+p.height+1,'Close outside panel: '+id+' '+JSON.stringify({p,c}));
-     await close.click();assert.equal(await panel.getAttribute('aria-hidden'),'true','Close inactive: '+id);
-   }
+     assert(p.x>=-1&&p.x+p.width<=width+1,'Panel outside viewport: '+id+' '+width);await page.screenshot({path:path.join(output,`panel-${id}-${width}.png`)});await close.click();assert.equal(await panel.getAttribute('aria-hidden'),'true','Close inactive: '+id);
+   }}
    assert.deepEqual(await page.evaluate(()=>BootDiagnostics.issues),[]);
    return {panelCount:panels.length};
  });
@@ -114,11 +114,11 @@ try{
    const result=await page.evaluate(()=>{
      const prior=Bookmarks.decisionItems;
      const fixture=Array.from({length:65},(_,i)=>({bm:{id:'ui-fixture-'+i,title:'Ambiguous fixture '+i,url:'https://example.org/'+i,parentId:'1'},reasons:['test fixture'],candidates:[]}));
-     Bookmarks.renderAccuracyGate(fixture);const first=document.querySelectorAll('.bookmark-review-row').length;
+     Bookmarks.renderAccuracyGate(fixture);const first=document.querySelectorAll('.bookmark-review-row').length;const select=document.querySelector('#bookmark-review-list select');select.value=JSON.stringify(['Gaming & Roblox Dev','Chess']);select.dispatchEvent(new Event('change'));
      document.querySelector('[data-bookmark-page="next"]').click();const second=document.querySelector('.bookmark-review-row strong').textContent;
-     const retained=Bookmarks.decisionItems.length;Bookmarks.decisionPage=0;Bookmarks.renderAccuracyGate(prior);return {first,second,retained};
+     const retained=Bookmarks.decisionItems.length;document.querySelector('[data-bookmark-page=previous]').click();const retainedChoice=document.querySelector('#bookmark-review-list select').value;Bookmarks.decisionPage=0;Bookmarks.renderAccuracyGate(prior);return {first,second,retained,retainedChoice};
    });
-   assert.equal(result.first,20);assert.equal(result.second,'Ambiguous fixture 20');assert.equal(result.retained,65);
+   assert.equal(result.first,20);assert.equal(result.second,'Ambiguous fixture 20');assert.equal(result.retained,65);assert.deepEqual(JSON.parse(result.retainedChoice),['Gaming & Roblox Dev','Chess']);
  });
  await check('Native tab groups survive save and restore in a separate window',async()=>{
    await page.evaluate(()=>HQPanels.close());await page.evaluate(()=>HQPanels.open('optimizer-flyout'));
@@ -181,7 +181,7 @@ try{
    await page.goto(base+'newtab.html#tool=bookmarks&request=shared-desk-test');await page.waitForFunction(()=>document.body.classList.contains('app-ready')&&document.getElementById('bookmarks-flyout').classList.contains('open'));
    assert.equal(await page.locator('body').getAttribute('data-workspace'),'tools');assert.equal(await page.locator('#app').isVisible(),false);assert.equal(await page.locator('body').evaluate(e=>getComputedStyle(e).backgroundColor),'rgb(247, 246, 239)');
    await page.evaluate(()=>Bookmarks.renderAccuracyGate([{bm:{id:'readable',title:'Every Chess Tip - Explained',url:'https://youtube.com/watch?v=readable',parentId:'1'},reasons:['test-only layout'],candidates:[]}]));
-   for(const width of [320,1440]){await page.setViewportSize({width,height:960});const panel=page.locator('#bookmarks-flyout'),select=page.locator('#bookmark-review-list select');const box=await select.boundingBox();assert(box.width>180);assert(await panel.evaluate(e=>e.scrollWidth<=e.clientWidth+1));await page.screenshot({path:path.join(output,`shared-desk-${width}.png`)});}
+   for(const width of [320,1440]){await page.setViewportSize({width,height:960});const panel=page.locator('#bookmarks-flyout'),select=page.locator('#bookmark-review-list select');const box=await select.boundingBox();assert(box.width>180);assert(await panel.evaluate(e=>e.scrollWidth<=e.clientWidth+1));await page.waitForFunction(()=>getComputedStyle(document.getElementById('bookmarks-flyout')).opacity==='1');await page.screenshot({path:path.join(output,`shared-desk-${width}.png`)});}
    await worker.evaluate(()=>chrome.storage.local.set({hq_desk_appearance_v1:{surface:'ink',hue:220,motion:'reduced'}}));await page.waitForFunction(()=>document.body.dataset.deskSurface==='ink');assert.equal(await page.locator('body').evaluate(e=>getComputedStyle(e).backgroundColor),'rgb(27, 32, 28)');
    await page.locator('#bookmarks-flyout .flyout-close').click();await page.getByRole('button',{name:'Gmail',exact:true}).click();await page.locator('#gmail-flyout').waitFor({state:'visible'});await page.screenshot({path:path.join(output,'shared-desk-gmail.png')});return {surfaceMatches:true,oldDashboardHidden:true,readableSelect:true};
  });

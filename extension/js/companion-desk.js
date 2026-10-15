@@ -13,7 +13,7 @@ const CompanionDesk = {
   async init() {
     if(!this.active)return;
     document.body.dataset.workspace='tools';
-    this.apply((await chrome.storage.local.get('hq_desk_appearance_v1')).hq_desk_appearance_v1);
+    try{this.apply((await chrome.storage.local.get('hq_desk_appearance_v1')).hq_desk_appearance_v1);}catch(error){this.apply(null);window.HQEarlyDiagnostics?.record('desk-appearance',String(error?.message||error));}
     chrome.storage.onChanged.addListener((changes,area)=>{if(area==='local'&&changes.hq_desk_appearance_v1)this.apply(changes.hq_desk_appearance_v1.newValue);});
     const shell=document.getElementById('companion-desk');shell.hidden=false;
     document.getElementById('desk-advanced').disabled=true;

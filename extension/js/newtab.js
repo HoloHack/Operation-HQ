@@ -1040,7 +1040,7 @@ function wireDock() {
     closeAll(false);
     setMoreOpen(false);
     if (alreadyOpen) return true; // clicking the active one again just closes it
-    activeTrigger = btn || document.querySelector(`.dock-btn[data-panel="${panelId}"]`);
+    activeTrigger = btn || (CompanionDesk.active ? document.querySelector(`[data-desk-panel="${panelId}"]`) : document.querySelector(`.dock-btn[data-panel="${panelId}"]`));
     panel.classList.add("open");
     panel.removeAttribute("inert");
     panel.inert = false;
@@ -1078,7 +1078,7 @@ function wireDock() {
     const generation = ++panelRequestGeneration;
     if (!(await LazyFeatures.ensure(panelId)) || generation !== panelRequestGeneration) return false;
     if (!trigger && document.getElementById(panelId).classList.contains("open")) return true;
-    return open(panelId, trigger || document.querySelector(`.dock-btn[data-panel="${panelId}"]`));
+    return open(panelId, trigger || (CompanionDesk.active ? document.querySelector(`[data-desk-panel="${panelId}"]`) : document.querySelector(`.dock-btn[data-panel="${panelId}"]`)));
   }
 
   // One reliable route for the dock, living widgets, command palette and
@@ -1375,7 +1375,7 @@ function wireBookmarkSorter() {
   const invoke = async method => {
     // Chrome requires permissions.request during the click, before any await.
     const permission = ["sortAll","refineUncategorized"].includes(method)
-      ? chrome.permissions.request({origins:["http://*/*","https://*/*"]}).catch(()=>false) : null;
+      ? chrome.permissions.request({origins:["http://*/*","https://*/*"]}).then(granted=>({granted}),error=>({granted:false,error:String(error?.message||error)})) : null;
     if (!(await LazyFeatures.ensure("bookmarks-flyout"))) return;
     if(method==="sortAll")await Bookmarks.sortAll(undefined,permission);
     else if(method==="refineUncategorized")await Bookmarks.refineUncategorized({},permission);

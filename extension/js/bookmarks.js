@@ -13,6 +13,7 @@ const Bookmarks = {
   DECISIONS_KEY: "hq_bookmark_decisions_v1",
   EVIDENCE_KEY: "hq_bookmark_evidence_v1",
   decisionFilter: "",
+  decisionSelections: new Map(),
   existingFolders: [],
   decisionItems: [],
   decisionPage: 0,
@@ -64,7 +65,7 @@ const Bookmarks = {
     });
     document.querySelectorAll("[data-bookmark-review-action]").forEach(button => {
       if (button.id === "bookmark-complete-decisions") {
-        button.disabled = busy || ![...document.querySelectorAll("#bookmark-review-list select")].some(select => select.value);
+        button.disabled = busy || ![...document.querySelectorAll("#bookmark-review-list select")].some(select => select.value) && ![...this.decisionSelections.values()].some(Boolean);
       } else {
         button.disabled = busy || !button.closest(".bookmark-review-controls")?.querySelector("select")?.value;
       }
@@ -254,6 +255,7 @@ const Bookmarks = {
     const count = this.el("bookmark-review-count");
     if (!board || !list || !count) return;
     this.decisionItems = items;
+    const ids=new Set(items.map(item=>String(item.bm.id)));for(const id of this.decisionSelections.keys())if(!ids.has(id))this.decisionSelections.delete(id);
     const query=this.decisionFilter.toLowerCase().trim();
     const visible=query?items.filter(item=>[item.bm.title,item.bm.url,...(item.reasons||[])].join(" ").toLowerCase().includes(query)):items;
     const pages = Math.max(1, Math.ceil(visible.length / this.DECISION_PAGE_SIZE));
@@ -307,12 +309,14 @@ const Bookmarks = {
       move.type = "button";
       move.dataset.bookmarkReviewAction = "true";
       move.textContent = "Confirm + learn";
-      if (suggested) select.value = JSON.stringify(suggested);
+      if (this.decisionSelections.has(String(item.bm.id)))select.value=this.decisionSelections.get(String(item.bm.id));
+      else if (suggested) select.value = JSON.stringify(suggested);
       move.disabled = this.busy || !select.value;
       select.onchange = () => {
+        this.decisionSelections.set(String(item.bm.id),select.value);
         move.disabled = !select.value || this.busy;
         const complete = this.el("bookmark-complete-decisions");
-        if (complete) complete.disabled = this.busy || ![...list.querySelectorAll("select")].some(candidate => candidate.value);
+        if (complete) complete.disabled = this.busy || ![...list.querySelectorAll("select")].some(candidate => candidate.value) && ![...this.decisionSelections.values()].some(Boolean);
       };
       move.onclick = () => {
         let path;
@@ -329,7 +333,7 @@ const Bookmarks = {
       list.append(row);
     });
     const complete = this.el("bookmark-complete-decisions");
-    if (complete) complete.disabled = this.busy || !this.decisionItems.length || ![...list.querySelectorAll("select")].some(select => select.value);
+    if (complete) complete.disabled = this.busy || !this.decisionItems.length || ![...list.querySelectorAll("select")].some(select => select.value) && ![...this.decisionSelections.values()].some(Boolean);
   },
 
   async preview(scopeParentId) {
@@ -357,16 +361,21 @@ const Bookmarks = {
 
   async ensureContentPermission() {
     const origins = ["http://*/*", "https://*/*"];
-    return chrome.permissions.request({ origins });
+    try{return await chrome.permissions.request({ origins });}catch(error){if(await chrome.permissions.contains({origins}))return true;throw error;}
+  },
+
+  permissionResult(permission) {
+    let request;try{request=permission||this.ensureContentPermission();}catch(error){request=Promise.reject(error);}
+    return Promise.resolve(request).then(value=>typeof value==='object'&&value?value:{granted:Boolean(value)},error=>({granted:false,error:String(error?.message||error)}));
   },
 
   evidenceEndpoints(rawUrl) {
     try {
       const url = new URL(rawUrl);
       if (!/^https?:$/.test(url.protocol)) return [];
-      const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+      const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, "").replace(/\.$/, "");
       if(url.username||url.password)return [];
-      const isPrivate = host === "localhost" || host === "::1" || host.endsWith(".local") || host.endsWith(".localhost") || host.includes(":")
+      const isPrivate = !host.includes(".") || /\.(internal|lan|home|corp|intranet)$/.test(host) || /\.\d+$/.test(host) || host === "localhost" || host === "::1" || host.endsWith(".local") || host.endsWith(".localhost") || host.includes(":")
         || /^169\.254\./.test(host) || /^0\./.test(host)
         || /^127\./.test(host) || /^10\./.test(host) || /^192\.168\./.test(host)
         || /^172\.(1[6-9]|2\d|3[01])\./.test(host);
@@ -384,7 +393,7 @@ const Bookmarks = {
   },
 
   async fetchPageContext(url) {
-    const key=Classifier.fingerprint({url});
+    let key;try{const parsed=new URL(url);parsed.hash="";key="url:"+parsed.href;}catch{return "";}
     try{const cache=(await chrome.storage.local.get(this.EVIDENCE_KEY))[this.EVIDENCE_KEY]||{};if(cache[key]?.text&&Date.now()-cache[key].at<7*86400000)return cache[key].text;}catch{}
     const text=await this.readPageContext(url);
     if(text){try{await (this._evidenceWrite=(this._evidenceWrite||Promise.resolve()).catch(()=>{}).then(async()=>{const cache=(await chrome.storage.local.get(this.EVIDENCE_KEY))[this.EVIDENCE_KEY]||{};cache[key]={text,at:Date.now()};const entries=Object.entries(cache).sort((a,b)=>b[1].at-a[1].at).slice(0,600);await chrome.storage.local.set({[this.EVIDENCE_KEY]:Object.fromEntries(entries)});}));}catch{}}
@@ -392,7 +401,7 @@ const Bookmarks = {
   },
 
   async boundedPageText(response) {
-    if(!response.body?.getReader)return String(await response.text()).slice(0,128000);
+    if(!response.body?.getReader)return ""; // No unbounded fallback in engines without streaming.
     const reader=response.body.getReader(),decoder=new TextDecoder();let text='',bytes=0;
     try{while(bytes<128000){const {value,done}=await reader.read();if(done)break;const part=value.subarray(0,128000-bytes);bytes+=part.byteLength;text+=decoder.decode(part,{stream:true});}return text+decoder.decode();}
     finally{await reader.cancel().catch(()=>{});}
@@ -446,9 +455,9 @@ const Bookmarks = {
   },
 
   async refineUncategorized({ pendingOnly = false } = {}, permission) {
-    const access=permission||this.ensureContentPermission().catch(()=>false);
+    const access=this.permissionResult(permission);
     return this.runExclusive("Page evidence",async()=>{
-      if(!(await access)){this.log("Page-reading permission was declined. Remaining bookmarks were kept in place.");return {permissionDenied:true};}
+      const outcome=await access;if(!outcome.granted){this.log(outcome.error?`Page-reading permission could not be requested: ${outcome.error}. Retry from the button.`:"Page-reading permission was declined. Remaining bookmarks were kept in place.");return {permissionDenied:!outcome.error,permissionError:outcome.error};}
       return this.runEvidencePass({pendingOnly});
     });
   },
@@ -692,11 +701,12 @@ const Bookmarks = {
 
   async sortAll(scopeParentId, permission) {
     // The click handler starts this promise synchronously while activation is live.
-    const access = permission || this.ensureContentPermission().catch(()=>false);
+    const access = this.permissionResult(permission);
     return this.runExclusive(scopeParentId ? "Inbox sort" : "Full sort", async()=>{
       const result=await this.applySort(scopeParentId);
       if(!scopeParentId&&result?.uncertain>0&&!result.failed){
-        if(await access)return this.runEvidencePass({pendingOnly:true});
+        const outcome=await access;if(outcome.granted)return this.runEvidencePass({pendingOnly:true});
+        if(outcome.error)this.log(`Page-reading permission could not be requested: ${outcome.error}. Retry from the Resolve button.`);
         this.log("Page evidence is unavailable without your permission. Title matches were sorted; the remaining links stay in place. Click Resolve with page evidence to grant access.");
       }
       return result;
@@ -764,6 +774,8 @@ const Bookmarks = {
       const { barId } = await this.getAllBookmarks();
       const [bm] = await chrome.bookmarks.get(bookmarkId);
       if (!bm?.url) throw new Error("That bookmark no longer exists.");
+      const reviewed=this.decisionItems.find(item=>String(item.bm.id)===String(bookmarkId));
+      if(reviewed&&(reviewed.bm.url!==bm.url||reviewed.bm.parentId!==bm.parentId))throw Error("Bookmark changed after review. Refresh Preview before confirming it.");
       const targetParent = await this.getOrCreateFolderPath(path, barId);
       const moves = [];
       await this.moveAndRecord(bm, targetParent, path, barId, moves);
@@ -784,11 +796,10 @@ const Bookmarks = {
 
   async applySelectedDecisions() {
     if (typeof document === "undefined") return;
-    const selected = [...document.querySelectorAll("#bookmark-review-list select[data-bookmark-decision-id]")].map(select => {
-      if (!select.value) return null;
-      try { return { id:select.dataset.bookmarkDecisionId, path:JSON.parse(select.value) }; }
-      catch { return null; }
-    }).filter(Boolean);
+    const choices=new Map(this.decisionSelections);
+    document.querySelectorAll("#bookmark-review-list select[data-bookmark-decision-id]").forEach(select=>choices.set(select.dataset.bookmarkDecisionId,select.value));
+    const selected=[...choices].map(([id,value])=>{if(!value||!this.decisionItems.some(item=>String(item.bm.id)===id))return null;try{return {id,path:JSON.parse(value)};}catch{return null;}}).filter(Boolean);
+
     if (!selected.length) { this.log("Choose at least one verified destination first."); return; }
     return this.runExclusive("Finish selected decisions", async () => {
       const { barId } = await this.getAllBookmarks();
@@ -801,7 +812,8 @@ const Bookmarks = {
         if (!path) { failed += 1; continue; }
         try {
           const [bm] = await chrome.bookmarks.get(choice.id);
-          if (!bm?.url) { failed += 1; continue; }
+          const reviewed=this.decisionItems.find(item=>String(item.bm.id)===String(choice.id));
+          if (!bm?.url || !reviewed || reviewed.bm.url!==bm.url || reviewed.bm.parentId!==bm.parentId) { failed += 1; continue; }
           const targetParent = await this.getOrCreateFolderPath(path, barId);
           await this.moveAndRecord(bm, targetParent, path, barId, moves);
           learned[Classifier.fingerprint(bm)] = path;
