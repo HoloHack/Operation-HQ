@@ -207,3 +207,11 @@ assert.equal(nodes.get("changed").parentId, "other", "Undo must not overwrite a 
 assert.equal(storage[Bookmarks.UNDO_KEY].length, 0);
 
 console.log("✓ Accuracy-first sorting, no catch-all folder, legacy evacuation, validated learning, exclusive mutations, failure-safe logging, and exact undo");
+
+
+// A new topic vocabulary must not silently override a user's old correction.
+// The audit exposes the conflict for explicit confirmation, without moving it.
+resetTree();for(const key of Object.keys(storage))delete storage[key];Bookmarks.decisionItems=[];
+add({id:'old-choice',parentId:'1',title:'Every Chess Tip - Explained',url:'https://youtube.com/watch?v=audit-example'});
+storage.hq_learned_domains={[Classifier.fingerprint(nodes.get('old-choice'))]:['Reading & Articles','Saved Reading']};
+const checked=await Bookmarks.auditSavedDecisions();assert.equal(checked.conflicts,1);assert.equal(nodes.get('old-choice').parentId,'1');assert.deepEqual(Array.from(Bookmarks.decisionItems[0].suggestedPath),['Gaming & Roblox Dev','Chess']);assert.deepEqual(storage.hq_learned_domains[Classifier.fingerprint(nodes.get('old-choice'))],['Reading & Articles','Saved Reading']);

@@ -359,6 +359,17 @@ const Bookmarks = {
     });
   },
 
+  async auditSavedDecisions() {
+    return this.runExclusive("Saved decision review",async()=>{
+      const {nodes}=await this.getAllBookmarks(),learned=await this.getLearnedMap(),conflicts=[];
+      for(const bm of nodes){const remembered=Classifier.normalizePath(learned[Classifier.fingerprint(bm)],{allowOperational:false});if(!remembered)continue;
+        const topic=Classifier.scoredKeywordMatch({title:bm.title,url:bm.url});const path=Classifier.normalizePath(topic?.path,{allowOperational:false});
+        if(path&&topic.confidence==='high'&&path.join(' / ')!==remembered.join(' / '))conflicts.push({bm,suggestedPath:path,reasons:['Saved correction differs from the page topic; choose which to keep'],candidates:[{path,score:9,reasons:topic.reasons||[]},{path:remembered,score:8,reasons:['your saved decision']}]});
+      }
+      await this.mergeDecisions(conflicts);this.log(`${conflicts.length} saved decision${conflicts.length===1?'':'s'} need a second look. No bookmarks moved and no learning was erased. Confirm only the destinations you want.`,!conflicts.length);await this.refreshInboxCount();await this.recordAudit('saved-decision-review',{conflicts:conflicts.length});return {conflicts:conflicts.length};
+    });
+  },
+
   async ensureContentPermission() {
     const origins = ["http://*/*", "https://*/*"];
     try{return await chrome.permissions.request({ origins });}catch(error){if(await chrome.permissions.contains({origins}))return true;throw error;}

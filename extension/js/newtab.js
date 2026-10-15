@@ -1382,6 +1382,7 @@ function wireBookmarkSorter() {
     else await Bookmarks[method]();
   };
   document.getElementById("bookmark-decision-search").oninput=event=>{if(typeof Bookmarks!=="undefined"){Bookmarks.decisionFilter=event.target.value;Bookmarks.decisionPage=0;Bookmarks.renderAccuracyGate();}};
+  document.getElementById("audit-bookmarks-btn").onclick=()=>invoke("auditSavedDecisions");
   document.getElementById("sort-bookmarks-btn").onclick = () => invoke("sortAll");
   document.getElementById("preview-bookmarks-btn").onclick = () => invoke("preview");
   document.getElementById("undo-bookmarks-btn").onclick = () => invoke("undo");
