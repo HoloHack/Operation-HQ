@@ -30,3 +30,6 @@ body[data-workspace="tools"] .flyout :is(.nexus-panel,.gleam-app)::before,body[d
 
 body[data-workspace="tools"] .flyout :is(legend,fieldset,dt,dd,td,th,time,h5,h6,em){color:var(--desk-ink)!important;text-shadow:none!important}
 body[data-workspace="tools"] :is(input,textarea)::placeholder{color:var(--desk-muted)!important;opacity:1!important}
+
+/* Calibration is a readable document on narrow screens, not an oversized overlay. */
+@media(max-width:720px){body[data-workspace="tools"] .gleam-layout{grid-template-columns:minmax(0,1fr)!important;min-width:0!important}body[data-workspace="tools"] :is(.gleam-sidebar,.gleam-workspace){min-width:0!important;max-width:100%!important}body[data-workspace="tools"] .gleam-onboarding{position:relative!important;inset:auto!important;width:100%!important;max-width:100%!important;max-height:none!important;margin:0!important;padding:18px!important;overflow:auto!important}body[data-workspace="tools"] .gleam-onboarding :is(h3,p,span,label,fieldset){min-width:0!important;min-inline-size:0!important;max-width:100%!important;white-space:normal!important;overflow-wrap:anywhere!important}body[data-workspace="tools"] .gleam-workspace:has(.gleam-onboarding:not([hidden]))>.gleam-view{display:none!important}}
