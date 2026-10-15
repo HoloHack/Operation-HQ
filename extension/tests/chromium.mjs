@@ -53,7 +53,7 @@ try{
    return {panelCount:panels.length};
  });
  await check('Settings and safe-mode exit remain usable',async()=>{
-   await page.locator('#settings-btn').click();await page.waitForFunction(()=>!document.getElementById('settings-drawer').classList.contains('hidden'));
+   await page.locator('#desk-advanced').click();await page.waitForFunction(()=>!document.getElementById('settings-drawer').classList.contains('hidden'));
    await page.locator('#close-settings').click();
    await page.evaluate(()=>localStorage.setItem('hq_safe_mode_v1','true'));await page.reload();
    await page.waitForFunction(()=>document.body?.classList.contains('app-ready'));assert(await page.locator('#safe-mode-exit').isVisible());
@@ -139,7 +139,7 @@ try{
    assert.equal(await page.locator('#gmail-connect-btn').isEnabled(),true);
  });
  await check('Widgets have direct working routes and calendar works at narrow widths',async()=>{
-   await page.evaluate(()=>HQPanels.close());await page.locator('#widget-weather [data-open-panel]').first().click();
+   await page.evaluate(()=>HQPanels.close());await page.getByRole('button',{name:'Weather',exact:true}).click();
    assert(await page.locator('#weather-flyout').evaluate(e=>e.classList.contains('open')));await page.evaluate(()=>HQPanels.close());
    for(const width of [320,640,1280,1920]){
      await page.setViewportSize({width,height:960});await page.evaluate(()=>HQPanels.open('calendar-flyout'));
@@ -158,14 +158,8 @@ try{
    await page.locator('.focus-theme-option').first().click();
    await waitForSaved(()=>page.evaluate(()=>chrome.storage.local.get('hq_adaptive_theme_active_v1')),v=>v.hq_adaptive_theme_active_v1===true);
    await page.evaluate(()=>HQPanels.close());await page.emulateMedia({reducedMotion:'no-preference'});
-   await page.locator('#settings-btn').click();await page.locator('#boot-sequence-select').selectOption('full');
-   await page.locator('#boot-sequence-preview').click();
-   await page.waitForFunction(()=>document.getElementById('hq-launch').classList.contains('is-active'));
-   const animatedLayers=await page.evaluate(()=>document.getAnimations().filter(a=>a.playState==='running').length);
-   assert(animatedLayers>=5,'Launch animation has too few active layers');
-   await page.locator('#hq-launch-skip').click();await page.waitForFunction(()=>!document.body.classList.contains('boot-cinematic-active'));
-   await page.locator('#close-settings').click();await page.evaluate(()=>HQPanels.open('nexus-flyout'));
-   await page.locator('#nexus-flyout .flyout-close').click();await page.emulateMedia({reducedMotion:'reduce'});
+   const legacy=await context.newPage();await legacy.goto(base+'newtab.html?legacy=1');await legacy.waitForFunction(()=>document.body.classList.contains('app-ready'));await legacy.emulateMedia({reducedMotion:'no-preference'});await legacy.evaluate(()=>{BootCinematic.mode='full';BootCinematic.replay();});await legacy.waitForFunction(()=>document.getElementById('hq-launch').classList.contains('is-active'));
+   const animatedLayers=await legacy.evaluate(()=>document.getAnimations().filter(a=>a.playState==='running').length);assert(animatedLayers>=5,'Legacy launch animation has too few layers');await legacy.locator('#hq-launch-skip').click();await legacy.waitForFunction(()=>!document.body.classList.contains('boot-cinematic-active'));await legacy.close();await page.bringToFront();await page.evaluate(()=>HQPanels.open('nexus-flyout'));await page.locator('#nexus-flyout .flyout-close').click();await page.emulateMedia({reducedMotion:'reduce'});
    return {generatedOptions:proposals.length,animatedLayers};
  });
  await check('Exact-origin dashboard bridge works through real Chrome external messaging (isolated fixture)',async()=>{

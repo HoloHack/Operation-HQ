@@ -754,6 +754,7 @@ function wireSettingsDrawer() {
     opener.setAttribute("aria-expanded", "false");
   };
   const open = async () => {
+    window.HQPanels?.close();
     drawer.classList.remove("hidden");
     backdrop.classList.remove("hidden");
     drawer.removeAttribute("inert");
@@ -1069,6 +1070,7 @@ function wireDock() {
   }
 
   async function requestOpen(panelId, trigger = null) {
+    if(!document.getElementById("settings-drawer").classList.contains("hidden"))document.getElementById("close-settings").click();
     if (!panelId || !document.getElementById(panelId)) {
       window.HQEarlyDiagnostics?.record?.("panel-route", `Missing panel target: ${panelId || "(empty)"}`, "js/newtab.js");
       return false;
@@ -1638,6 +1640,7 @@ async function boot() {
   });
   BootDiagnostics.render();
   window.HQEarlyDiagnostics?.markHealthy();
+  CompanionDesk.ready();
   BootCinematic.complete();
   deferOptionalStartup();
   const requestedTool = new URLSearchParams(location.hash.slice(1)).get("tool");
