@@ -43,7 +43,7 @@ try{
    for(const width of [320,1440]){await page.setViewportSize({width,height:960});for(const id of panels){console.log('Opening panel '+id+' at '+width);
      await page.evaluate(()=>HQPanels.close());
      assert.equal(await page.evaluate(id=>HQPanels.open(id),id),true,'Panel failed: '+id);
-     const panel=page.locator('#'+id);await panel.waitFor({state:'visible'});
+     const panel=page.locator('#'+id);await panel.waitFor({state:'visible'});for(const field of await panel.locator('input[placeholder],textarea[placeholder]').all()){assert.equal(await field.evaluate(e=>getComputedStyle(e,'::placeholder').opacity),'1','Placeholder must remain legible in '+id);assert.match(await field.evaluate(e=>getComputedStyle(e,'::placeholder').color),/^rgb\(/);}for(const legend of await panel.locator('legend').all())assert.equal(await legend.evaluate(e=>getComputedStyle(e).color),await panel.evaluate(e=>getComputedStyle(e).color),'Legend must follow desk ink');
      const close=panel.locator('.flyout-close');assert.equal(await close.count(),1,'Close count: '+id);
      const [p,c]=await Promise.all([panel.boundingBox(),close.boundingBox()]);
      assert(c&&p&&c.x>=p.x-1&&c.y>=p.y-1&&c.x+c.width<=p.x+p.width+1&&c.y+c.height<=p.y+p.height+1,'Close outside panel: '+id+' '+JSON.stringify({p,c}));

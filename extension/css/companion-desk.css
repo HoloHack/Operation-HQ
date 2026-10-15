@@ -27,3 +27,6 @@ body[data-workspace="tools"] #toast{background:var(--desk-panel)!important;color
 body[data-workspace="tools"] .flyout :is(.nexus-command-form,.nexus-cortex,.nexus-suggestions,.nexus-followup,.nexus-resource-panel,.nexus-ai-panel,.gleam-topbar,.gleam-sidebar,.gleam-onboarding,.gleam-simulator,.study-tabs,.study-mission-preview,#srs-review-area,.focus-theme-proposal){background:var(--desk-wash)!important;border-color:var(--desk-line)!important;box-shadow:none!important}
 body[data-workspace="tools"] .flyout :is(.gleam-signal-ring,.gleam-result-orbit)::before{background:var(--desk-panel)!important}
 body[data-workspace="tools"] .flyout :is(.nexus-panel,.gleam-app)::before,body[data-workspace="tools"] .flyout :is(.nexus-panel,.gleam-app)::after{display:none!important}
+
+body[data-workspace="tools"] .flyout :is(legend,fieldset,dt,dd,td,th,time,h5,h6,em){color:var(--desk-ink)!important;text-shadow:none!important}
+body[data-workspace="tools"] :is(input,textarea)::placeholder{color:var(--desk-muted)!important;opacity:1!important}
