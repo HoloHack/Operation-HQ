@@ -11,6 +11,8 @@ const Bookmarks = {
   UNDO_KEY: "hq_bookmark_undo_v2",
   JOURNAL_KEY: "hq_bookmark_pending_v1",
   DECISIONS_KEY: "hq_bookmark_decisions_v1",
+  EVIDENCE_KEY: "hq_bookmark_evidence_v1",
+  decisionFilter: "",
   existingFolders: [],
   decisionItems: [],
   decisionPage: 0,
@@ -252,9 +254,11 @@ const Bookmarks = {
     const count = this.el("bookmark-review-count");
     if (!board || !list || !count) return;
     this.decisionItems = items;
-    const pages = Math.max(1, Math.ceil(items.length / this.DECISION_PAGE_SIZE));
+    const query=this.decisionFilter.toLowerCase().trim();
+    const visible=query?items.filter(item=>[item.bm.title,item.bm.url,...(item.reasons||[])].join(" ").toLowerCase().includes(query)):items;
+    const pages = Math.max(1, Math.ceil(visible.length / this.DECISION_PAGE_SIZE));
     this.decisionPage = Math.max(0, Math.min(this.decisionPage, pages - 1));
-    count.textContent = String(items.length);
+    count.textContent = query?`${visible.length} of ${items.length}`:String(items.length);
     board.classList.toggle("hidden", items.length === 0);
     list.replaceChildren();
     if (pages > 1) {
@@ -274,7 +278,7 @@ const Bookmarks = {
       navigation.append(previous, label, next); list.append(navigation);
     }
     const start = this.decisionPage * this.DECISION_PAGE_SIZE;
-    this.decisionItems.slice(start, start + this.DECISION_PAGE_SIZE).forEach(item => {
+    visible.slice(start, start + this.DECISION_PAGE_SIZE).forEach(item => {
       const row = document.createElement("article");
       row.className = "bookmark-review-row";
       row.dataset.bookmarkDecisionId = String(item.bm.id);
@@ -353,15 +357,17 @@ const Bookmarks = {
 
   async ensureContentPermission() {
     const origins = ["http://*/*", "https://*/*"];
-    return await chrome.permissions.contains({ origins }) || chrome.permissions.request({ origins });
+    return chrome.permissions.request({ origins });
   },
 
   evidenceEndpoints(rawUrl) {
     try {
       const url = new URL(rawUrl);
       if (!/^https?:$/.test(url.protocol)) return [];
-      const host = url.hostname.toLowerCase();
-      const isPrivate = host === "localhost" || host === "::1" || host.endsWith(".local")
+      const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+      if(url.username||url.password)return [];
+      const isPrivate = host === "localhost" || host === "::1" || host.endsWith(".local") || host.endsWith(".localhost") || host.includes(":")
+        || /^169\.254\./.test(host) || /^0\./.test(host)
         || /^127\./.test(host) || /^10\./.test(host) || /^192\.168\./.test(host)
         || /^172\.(1[6-9]|2\d|3[01])\./.test(host);
       if (isPrivate) return [];
@@ -378,22 +384,37 @@ const Bookmarks = {
   },
 
   async fetchPageContext(url) {
+    const key=Classifier.fingerprint({url});
+    try{const cache=(await chrome.storage.local.get(this.EVIDENCE_KEY))[this.EVIDENCE_KEY]||{};if(cache[key]?.text&&Date.now()-cache[key].at<7*86400000)return cache[key].text;}catch{}
+    const text=await this.readPageContext(url);
+    if(text){try{await (this._evidenceWrite=(this._evidenceWrite||Promise.resolve()).catch(()=>{}).then(async()=>{const cache=(await chrome.storage.local.get(this.EVIDENCE_KEY))[this.EVIDENCE_KEY]||{};cache[key]={text,at:Date.now()};const entries=Object.entries(cache).sort((a,b)=>b[1].at-a[1].at).slice(0,600);await chrome.storage.local.set({[this.EVIDENCE_KEY]:Object.fromEntries(entries)});}));}catch{}}
+    return text;
+  },
+
+  async boundedPageText(response) {
+    if(!response.body?.getReader)return String(await response.text()).slice(0,128000);
+    const reader=response.body.getReader(),decoder=new TextDecoder();let text='',bytes=0;
+    try{while(bytes<128000){const {value,done}=await reader.read();if(done)break;const part=value.subarray(0,128000-bytes);bytes+=part.byteLength;text+=decoder.decode(part,{stream:true});}return text+decoder.decode();}
+    finally{await reader.cancel().catch(()=>{});}
+  },
+
+  async readPageContext(url) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 7000);
     try {
       for (const endpoint of this.evidenceEndpoints(url)) {
         try {
           const response = await fetch(endpoint, { signal: controller.signal, credentials: "omit", redirect:"follow" });
-          if (!response.ok) continue;
+          if (!response.ok || (response.url && !this.evidenceEndpoints(response.url).length)) continue;
           const type = (response.headers.get("content-type") || "").toLowerCase();
           if (type.includes("application/json")) {
-            const data = await response.json();
+            const data = JSON.parse(await this.boundedPageText(response));
             const context = [data?.title, data?.author_name, data?.provider_name, data?.description, data?.category].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
-            if (context) return context.slice(0, 3000);
+            if (context && !/^(sign in|log in|access denied|just a moment|before you continue)/i.test(context)) return context.slice(0, 3000);
             continue;
           }
           if (!type.includes("text/html")) continue;
-          const html = await response.text();
+          const html = await this.boundedPageText(response);
           const doc = new DOMParser().parseFromString(html.slice(0, 120000), "text/html");
           const context = [
             doc.querySelector('meta[property="og:title"]')?.getAttribute("content") || doc.querySelector('meta[name="twitter:title"]')?.getAttribute("content") || doc.querySelector("title")?.textContent || "",
@@ -401,7 +422,7 @@ const Bookmarks = {
             doc.querySelector('meta[name="keywords"]')?.getAttribute("content") || "",
             doc.querySelector("h1")?.textContent || "",
           ].join(" ").replace(/\s+/g, " ").trim();
-          if (context) return context.slice(0, 3000);
+          if (context && !/^(sign in|log in|access denied|just a moment|before you continue)/i.test(context)) return context.slice(0, 3000);
         } catch (error) {
           if (controller.signal.aborted) break;
         }
@@ -424,12 +445,15 @@ const Bookmarks = {
     return allBookmarks.filter(bm => pendingIds.has(String(bm.id)) || legacyHoldingDescendants.has(bm.id) || (!pendingOnly && Classifier.isContentVariesDomain(Classifier.domainOf(bm.url))));
   },
 
-  async refineUncategorized({ pendingOnly = false } = {}) {
-    return this.runExclusive("Deep topic review", async () => {
-      if (!(await this.ensureContentPermission())) {
-        this.log("Page-reading permission was declined. Nothing changed; unresolved bookmarks remain in their current folders.");
-        return;
-      }
+  async refineUncategorized({ pendingOnly = false } = {}, permission) {
+    const access=permission||this.ensureContentPermission().catch(()=>false);
+    return this.runExclusive("Page evidence",async()=>{
+      if(!(await access)){this.log("Page-reading permission was declined. Remaining bookmarks were kept in place.");return {permissionDenied:true};}
+      return this.runEvidencePass({pendingOnly});
+    });
+  },
+
+  async runEvidencePass({pendingOnly=false}={}) {
       const { barId, nodes } = await this.getAllBookmarks();
       const bookmarks = await this.collectEvidenceCandidates(barId, nodes, { pendingOnly });
       if (!bookmarks.length) { this.log("No ambiguous bookmarks need a deep review.", true); return; }
@@ -505,7 +529,6 @@ const Bookmarks = {
       this.setProgress(reviewed - stillUncertain.length, bookmarks.length, !stillUncertain.length);
       await this.refreshInboxCount();
       return { reviewed, moved:moves.length - released, released, uncertain:stillUncertain.length };
-    });
   },
 
   async readManagedRegistry() {
@@ -667,13 +690,17 @@ const Bookmarks = {
     }
   },
 
-  async sortAll(scopeParentId) {
-    const result = await this.runExclusive(scopeParentId ? "Inbox sort" : "Full sort", () => this.applySort(scopeParentId));
-    if (!scopeParentId && result?.uncertain > 0 && !result?.failed) {
-      this.log("Strong title and URL matches are filed. Checking real page evidence for the unresolved remainder…");
-      return this.refineUncategorized({ pendingOnly:true });
-    }
-    return result;
+  async sortAll(scopeParentId, permission) {
+    // The click handler starts this promise synchronously while activation is live.
+    const access = permission || this.ensureContentPermission().catch(()=>false);
+    return this.runExclusive(scopeParentId ? "Inbox sort" : "Full sort", async()=>{
+      const result=await this.applySort(scopeParentId);
+      if(!scopeParentId&&result?.uncertain>0&&!result.failed){
+        if(await access)return this.runEvidencePass({pendingOnly:true});
+        this.log("Page evidence is unavailable without your permission. Title matches were sorted; the remaining links stay in place. Click Resolve with page evidence to grant access.");
+      }
+      return result;
+    });
   },
 
   async applySort(scopeParentId) {

@@ -746,7 +746,7 @@ function wireSettingsDrawer() {
   const opener = document.getElementById("settings-btn");
 
   const close = () => {
-    opener.focus();
+    if(CompanionDesk.active)document.getElementById("desk-advanced").focus();else opener.focus();
     drawer.classList.add("hidden");
     backdrop.classList.add("hidden");
     drawer.setAttribute("aria-hidden", "true");
@@ -996,7 +996,7 @@ function wireDock() {
   function closeAll(restoreFocus = false) {
     panelRequestGeneration += 1;
     const focusedPanel = document.activeElement?.closest?.(".flyout");
-    const returnTarget = restoreFocus && activeTrigger?.isConnected && !activeTrigger.closest?.(".flyout")
+    const returnTarget = restoreFocus && activeTrigger?.isConnected && activeTrigger.getClientRects().length && !activeTrigger.closest?.(".flyout")
       ? activeTrigger
       : null;
     // Move focus before applying aria-hidden/inert. Chromium otherwise logs
@@ -1371,9 +1371,15 @@ function wireTaskInput() {
 
 function wireBookmarkSorter() {
   const invoke = async method => {
+    // Chrome requires permissions.request during the click, before any await.
+    const permission = ["sortAll","refineUncategorized"].includes(method)
+      ? chrome.permissions.request({origins:["http://*/*","https://*/*"]}).catch(()=>false) : null;
     if (!(await LazyFeatures.ensure("bookmarks-flyout"))) return;
-    await Bookmarks[method]();
+    if(method==="sortAll")await Bookmarks.sortAll(undefined,permission);
+    else if(method==="refineUncategorized")await Bookmarks.refineUncategorized({},permission);
+    else await Bookmarks[method]();
   };
+  document.getElementById("bookmark-decision-search").oninput=event=>{if(typeof Bookmarks!=="undefined"){Bookmarks.decisionFilter=event.target.value;Bookmarks.decisionPage=0;Bookmarks.renderAccuracyGate();}};
   document.getElementById("sort-bookmarks-btn").onclick = () => invoke("sortAll");
   document.getElementById("preview-bookmarks-btn").onclick = () => invoke("preview");
   document.getElementById("undo-bookmarks-btn").onclick = () => invoke("undo");
@@ -1591,8 +1597,8 @@ async function boot() {
   await BootDiagnostics.run("Context", () => ContextBus.init());
   await BootDiagnostics.run("Settings data", () => loadSettings());
   await BootDiagnostics.run("Launch controls", () => BootCinematic.bindSettings());
-  await BootDiagnostics.run("Cinematic motion", () => CinematicMotion.init());
-  await BootDiagnostics.run("Adaptive visual compositor", () => AmbientCompositor.init());
+  if(!CompanionDesk.active)await BootDiagnostics.run("Cinematic motion", () => CinematicMotion.init());
+  if(!CompanionDesk.active)await BootDiagnostics.run("Adaptive visual compositor", () => AmbientCompositor.init());
   await BootDiagnostics.run("Layout", () => applyLayoutMode());
   await BootDiagnostics.run("Daily quote", () => Quotes.render());
   await BootDiagnostics.run("Settings drawer", () => wireSettingsDrawer());
@@ -1611,7 +1617,7 @@ async function boot() {
   await BootDiagnostics.run("Daily tasks", () => DailyTasks.init());
   BootCinematic.stage("Synchronising your live context", 68);
   await BootDiagnostics.run("Schedule", () => Schedule.init());
-  await BootDiagnostics.run("Wallpaper", async () => {
+  if(!CompanionDesk.active)await BootDiagnostics.run("Wallpaper", async () => {
     const { unit } = await Wallpaper.getIntervalSetting();
     await Wallpaper.apply(unit === "tab", true, { deferNetwork:true });
   });
@@ -1624,7 +1630,7 @@ async function boot() {
   await BootDiagnostics.run("Deep Work", () => DeepWork.init());
   await BootDiagnostics.run("Nexus Core", () => Nexus.init());
   BootCinematic.stage("Deploying adaptive instruments", 90);
-  await BootDiagnostics.run("Living widgets", () => LivingWidgets.init());
+  if(!CompanionDesk.active)await BootDiagnostics.run("Living widgets", () => LivingWidgets.init());
   await BootDiagnostics.run("Tool availability", () => updateLockedToolBadges());
   requestAnimationFrame(() => {
     document.body.classList.add("app-ready");
@@ -1647,7 +1653,8 @@ async function boot() {
 }
 
 async function bootstrap() {
-  await BootCinematic.start();
+  if(typeof CompanionDesk!=="undefined")await CompanionDesk.init();
+  if(!CompanionDesk.active)await BootCinematic.start();
   for (let index = 0; index < CORE_SCRIPTS.length; index += 1) {
     const path = CORE_SCRIPTS[index];
     await BootDiagnostics.run(`Core definition · ${path}`, () => ScriptLoader.load(path));

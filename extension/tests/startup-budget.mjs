@@ -33,7 +33,7 @@ assert(core.length <= 30, `Startup script count regressed to ${core.length}`);
 assert(bytes <= 375_000, `Startup source budget regressed to ${bytes.toLocaleString()} bytes`);
 assert.deepEqual(
   [...html.matchAll(/<script\s+src="([^"]+)"/g)].map(match => match[1]),
-  ["js/early-diagnostics.js", "js/newtab.js"],
+  ["js/early-diagnostics.js", "js/companion-desk.js", "js/newtab.js"],
   "HTML must keep only diagnostics and the bootstrap entrypoint",
 );
 assert(bootstrap.includes("deferOptionalStartup()"), "Conditional post-paint hydration is missing");
@@ -45,3 +45,4 @@ assert(compositor.includes('powerPreference = this.settings.quality === "ultra" 
 const oldCoreBytes = 501_347;
 const reduction = Math.round((1 - bytes / oldCoreBytes) * 1000) / 10;
 console.log(`✓ Startup budget: ${core.length} core scripts, ${bytes.toLocaleString()} source bytes (${reduction}% below the prior core), heavy vendors demand-loaded, hidden GPU buffer released`);
+

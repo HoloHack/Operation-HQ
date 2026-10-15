@@ -39,3 +39,8 @@
 .browser-setup h4{font-size:15px;font-weight:600;margin:0 0 12px}
 .browser-setup ol{list-style:decimal;padding-left:22px;margin:0 0 14px}.browser-setup li{padding:6px 0 6px 6px}
 .browser-setup code{font-size:12px;color:var(--ink);background:var(--wash);padding:2px 4px;border-radius:2px}
+
+/* A single still wallpaper under opaque, readable work surfaces. */
+.desk-wallpaper{position:fixed;inset:0;z-index:-1;background-size:cover;background-position:center;pointer-events:none;animation:background-reveal .45s ease-out}.hq-shell:has(.desk-wallpaper){background:transparent}.hq-shell:has(.desk-wallpaper) .hero-copy{padding:24px;background:var(--panel-solid);border:1px solid var(--line);border-radius:5px}.desk-background-controls form{display:grid;gap:10px;margin:16px 0}.desk-background-controls label{display:grid;gap:8px;margin:16px 0}.desk-background-controls input[type=url]{width:100%;padding:11px 13px;border:1px solid var(--line);background:var(--page);border-radius:4px}.desk-background-controls .wallpaper-file{display:inline-flex;align-items:center;position:relative;cursor:pointer;overflow:hidden;margin:0}.wallpaper-file input{position:absolute;inset:0;opacity:0;cursor:pointer}.desk-background-controls small{color:var(--muted)}.desk-background-controls input[type=range]{width:100%}@keyframes background-reveal{from{opacity:0;scale:1.018}to{opacity:1;scale:1}}@media(prefers-reduced-motion:reduce){.desk-wallpaper{animation:none}}:root[data-motion=reduced] .desk-wallpaper{animation:none}
+
+.desk-wallpaper img{width:100%;height:100%;object-fit:cover;display:block}.desk-wallpaper>span{position:absolute;inset:0;pointer-events:none}

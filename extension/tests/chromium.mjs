@@ -182,6 +182,15 @@ try{
    await popup.locator('#bridge-enabled').uncheck();await popup.close();await site.close();
    return {productionSiteRequests:0,realUserDataMutations:0};
  });
+ await check('Browser tools use the shared Paper/Night desk and readable narrow bookmark controls',async()=>{
+   await worker.evaluate(()=>chrome.storage.local.set({hq_desk_appearance_v1:{surface:'paper',hue:152,motion:'reduced'}}));
+   await page.goto(base+'newtab.html#tool=bookmarks&request=shared-desk-test');await page.waitForFunction(()=>document.body.classList.contains('app-ready')&&document.getElementById('bookmarks-flyout').classList.contains('open'));
+   assert.equal(await page.locator('body').getAttribute('data-workspace'),'tools');assert.equal(await page.locator('#app').isVisible(),false);assert.equal(await page.locator('body').evaluate(e=>getComputedStyle(e).backgroundColor),'rgb(247, 246, 239)');
+   await page.evaluate(()=>Bookmarks.renderAccuracyGate([{bm:{id:'readable',title:'Every Chess Tip - Explained',url:'https://youtube.com/watch?v=readable',parentId:'1'},reasons:['test-only layout'],candidates:[]}]));
+   for(const width of [320,1440]){await page.setViewportSize({width,height:960});const panel=page.locator('#bookmarks-flyout'),select=page.locator('#bookmark-review-list select');const box=await select.boundingBox();assert(box.width>180);assert(await panel.evaluate(e=>e.scrollWidth<=e.clientWidth+1));await page.screenshot({path:path.join(output,`shared-desk-${width}.png`)});}
+   await worker.evaluate(()=>chrome.storage.local.set({hq_desk_appearance_v1:{surface:'ink',hue:220,motion:'reduced'}}));await page.waitForFunction(()=>document.body.dataset.deskSurface==='ink');assert.equal(await page.locator('body').evaluate(e=>getComputedStyle(e).backgroundColor),'rgb(27, 32, 28)');
+   await page.locator('#bookmarks-flyout .flyout-close').click();await page.getByRole('button',{name:'Gmail',exact:true}).click();await page.locator('#gmail-flyout').waitFor({state:'visible'});await page.screenshot({path:path.join(output,'shared-desk-gmail.png')});return {surfaceMatches:true,oldDashboardHidden:true,readableSelect:true};
+ });
  await check('Heavy AI stays unloaded and measured DOM/JS heap remain bounded',async()=>{
    assert.equal(await page.evaluate(()=>performance.getEntriesByType('resource').some(r=>/webllm-loader|web-llm\.js/.test(r.name))),false);
    const session=await context.newCDPSession(page);await session.send('Performance.enable');const metrics=await session.send('Performance.getMetrics');
@@ -192,3 +201,4 @@ try{
  await check('No uncaught browser errors across tested journeys',async()=>{assert.deepEqual(errors,[]);return {consoleErrors};});
 }catch(error){console.error(error);process.exitCode=1;if(context){for(const p of context.pages().filter(p=>p.url().includes('newtab.html'))){await p.screenshot({path:path.join(output,'failure.png')}).catch(()=>{});const diagnostics=await p.evaluate(()=>({issues:typeof BootDiagnostics==='undefined'?[]:BootDiagnostics.issues,early:window.HQEarlyDiagnostics?.entries()})).catch(()=>null);console.log('Failure diagnostics',JSON.stringify(diagnostics));console.log('Failure panel states',JSON.stringify(await p.evaluate(()=>({hash:location.hash,panels:[...document.querySelectorAll('.flyout.open')].map(e=>({id:e.id,visible:getComputedStyle(e).visibility})),errors:window.HQEarlyDiagnostics?.entries()})).catch(()=>null)));await fs.writeFile(path.join(output,'diagnostics.json'),JSON.stringify(diagnostics,null,2));}}}
 finally{await fs.writeFile(path.join(output,'chromium-results.json'),JSON.stringify({timestamp:new Date().toISOString(),results,errors,consoleErrors,network,providerTests:'External HTTP blocked; Gmail cancellation token stub. No live account or local model download.'},null,2));await context?.close();await fs.rm(profile,{recursive:true,force:true});}
+

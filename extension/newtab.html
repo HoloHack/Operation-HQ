@@ -7,8 +7,10 @@
 <title>Operation HQ</title>
 <script src="js/early-diagnostics.js"></script>
 <link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/companion-desk.css">
 </head>
 <body>
+<section id="companion-desk" hidden><header class="desk-tool-header"><a class="desk-home" href="https://operation-hq-command-center.shour-ya11.chatgpt.site/"><i>hq</i><span><b>Operation HQ</b><small>Browser tools · Your study desk</small></span></a><button type="button" id="desk-advanced">Advanced settings</button></header><main class="desk-tool-home"><p class="desk-eyebrow">YOUR BROWSER WORKSPACE</p><h1>The same desk.<br>A few extra capabilities.</h1><p>Bookmarks, Gmail and browser-only tools live here. Your main dashboard keeps your day in view.</p><nav aria-label="Browser tools" id="desk-tool-nav"></nav><p class="desk-tool-note">Close a tool to choose another. Browser data stays in this Chrome profile.</p></main></section>
 
 <aside id="safe-mode-banner" class="safe-mode-banner hidden" role="status" aria-live="polite">
   <div class="safe-mode-signal" aria-hidden="true"><i></i><span></span></div>
@@ -734,8 +736,10 @@
   <div id="bookmark-status">Accuracy first: HQ files only strong topic matches. A link without enough evidence stays in its current folder until page evidence or your verified destination resolves it—there is no catch-all or Review Queue. Exact decisions are learned, and every successful move remains undoable.</div>
   <div id="bookmark-log" class="scroll-cap"></div>
   <section id="bookmark-review-board" class="bookmark-review-board hidden" aria-labelledby="bookmark-review-heading">
-    <div class="bookmark-review-head"><div><span class="panel-kicker">Zero-wrong-placement gate</span><h3 id="bookmark-review-heading">Finish the sort</h3></div><span class="bookmark-review-badge"><strong id="bookmark-review-count">0</strong> decisions</span></div>
+    <div class="bookmark-review-head"><div><span class="panel-kicker">Topic review</span><h3 id="bookmark-review-heading">Review unresolved topics</h3></div><span class="bookmark-review-badge"><strong id="bookmark-review-count">0</strong> decisions</span></div>
     <p>These links were not moved because their topic could not be proven. Inspect when needed, confirm the correct destination, and HQ learns only that exact saved page. The sort is complete only when this count reaches zero.</p>
+    <label class="bookmark-search-label">Find an unresolved bookmark<input id="bookmark-decision-search" type="search" placeholder="Search title or address…" aria-label="Find unresolved bookmarks"></label>
+    <p class="bookmark-evidence-help">A topic needs page evidence or your choice. If a site blocks page reading, the original bookmark stays safe. Generic words such as “guide” do not prove a topic.</p>
     <div id="bookmark-review-list" class="bookmark-review-list"></div>
     <div class="bookmark-decision-footer"><span>Selected suggestions still require your confirmation.</span><button id="bookmark-complete-decisions" data-bookmark-review-action type="button">Confirm selected destinations</button></div>
   </section>
@@ -1524,6 +1528,7 @@
   </div>
 </div>
 
+<script src="js/companion-desk.js"></script>
 <script src="js/newtab.js"></script>
 </body>
 </html>
