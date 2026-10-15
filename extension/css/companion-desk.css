@@ -20,3 +20,5 @@ body[data-workspace="tools"] .flyout :is([class*="-card"],[class*="-row"],[class
 body[data-workspace="tools"] .flyout>.panel-head h2{flex:1;min-width:0;white-space:normal!important}body[data-workspace="tools"] .flyout input{min-width:0!important}
 @media(max-width:640px){body[data-workspace="tools"] :is(.gmail-search,.gmail-actions,.focus-controls,.panel-actions){flex-wrap:wrap!important}body[data-workspace="tools"] .flyout>.panel-head h2{font-size:24px!important}body[data-workspace="tools"] .gmail-search input{flex-basis:100%!important}}
 body[data-workspace="tools"][data-desk-motion="reduced"]{transition:none!important;animation:none!important}@media(prefers-reduced-motion:reduce){body[data-workspace="tools"]{transition:none!important;animation:none!important}}
+
+body[data-workspace="tools"] #toast{background:var(--desk-panel)!important;color:var(--desk-ink)!important;border:1px solid var(--desk-line)!important;box-shadow:0 8px 28px #0002!important}
