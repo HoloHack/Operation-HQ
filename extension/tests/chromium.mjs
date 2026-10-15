@@ -47,7 +47,7 @@ try{
      const close=panel.locator('.flyout-close');assert.equal(await close.count(),1,'Close count: '+id);
      const [p,c]=await Promise.all([panel.boundingBox(),close.boundingBox()]);
      assert(c&&p&&c.x>=p.x-1&&c.y>=p.y-1&&c.x+c.width<=p.x+p.width+1&&c.y+c.height<=p.y+p.height+1,'Close outside panel: '+id+' '+JSON.stringify({p,c}));
-     assert(p.x>=-1&&p.x+p.width<=width+1,'Panel outside viewport: '+id+' '+width);await page.screenshot({path:path.join(output,`panel-${id}-${width}.png`)});await close.click();assert.equal(await panel.getAttribute('aria-hidden'),'true','Close inactive: '+id);
+     assert(p.x>=-1&&p.x+p.width<=width+1,'Panel outside viewport: '+id+' '+width);for(const surface of await panel.locator('.study-mission-preview,#srs-review-area,.gleam-onboarding,.nexus-cortex,.focus-theme-proposal').all()){assert.equal(await surface.evaluate(e=>getComputedStyle(e).backgroundImage),'none','Legacy gradient survived in '+id);assert.match(await surface.evaluate(e=>getComputedStyle(e).backgroundColor),/^rgb\(/,'Reading surface must be opaque in '+id);}await page.screenshot({path:path.join(output,`panel-${id}-${width}.png`)});await close.click();assert.equal(await panel.getAttribute('aria-hidden'),'true','Close inactive: '+id);
    }}
    assert.deepEqual(await page.evaluate(()=>BootDiagnostics.issues),[]);
    return {panelCount:panels.length};
