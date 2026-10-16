@@ -10,6 +10,7 @@ function fixture(options={}){
  const browser={...emptyHQState(),notes:{plain:'Browser notes',updatedAt:2}};
  const f={data,calls,views,store,browser,failWrite:false,visible:true,handler:null};
  const storage={getItem:k=>data.get(k)??null,setItem(k,v){if(f.failWrite)throw Error('Device quota failure');data.set(k,v);},removeItem:k=>data.delete(k)};
+ f.storage=storage;
  const call=async message=>{calls.push(message);if(f.handler)return f.handler(message);if(message.type==='hq:bridge:pull')return {ok:true,snapshot:browser};if(message.type==='hq:sync:pair')return {ok:true,token,revision:1,snapshot:message.snapshot};if(message.type==='hq:sync:exchange')return {ok:true,revision:message.revision+1,snapshot:message.snapshot};return {ok:true};};
  f.controller=new PairedPlanning({accountId:'alice',store,storage,call,visible:()=>f.visible,changed:v=>views.push(v),lock:options.lock||(async(_name,run)=>{await run();return true;})});f.controller.start();return f;
 }
@@ -74,4 +75,10 @@ test('acknowledgements cannot reset missing preferences, normalize IDs or merge 
 });
 test('a valid newly issued token is revoked even when the pairing revision is malformed',async()=>{
  const f=fixture();f.handler=async m=>m.type==='hq:bridge:pull'?{ok:true,snapshot:f.browser}:m.type==='hq:sync:pair'?{ok:true,token,revision:0,snapshot:m.snapshot}:{ok:true};assert.equal(await f.controller.pair(true),false);assert.equal(f.calls.at(-1).type,'hq:sync:disconnect');assert.equal(f.calls.at(-1).token,token);assert.equal(f.data.has(key),false);assert.equal(f.store.generation,0);
+});
+test('explicitly forgetting a corrupt device link clears only that key and keeps planning',async()=>{
+ const f=fixture();f.data.set(key,'corrupt');f.data.set('unrelated','keep');f.controller.refresh();const before=JSON.stringify(f.store.state);assert(await f.controller.forgetLocal());assert.equal(f.data.has(key),false);assert.equal(f.data.get('unrelated'),'keep');assert.equal(JSON.stringify(f.store.state),before);assert.equal(f.calls.length,0);assert.match(f.controller.view.message,/does|If the companion is still paired/);
+});
+test('forgetting a saved link shares the mutation guard and reports a failed device deletion',async()=>{
+ const f=fixture({paired:true});f.controller.dispose();assert.equal(await f.controller.forgetLocal(),false);assert(f.data.has(key));f.controller.start();assert(await f.controller.forgetLocal());assert.equal(f.calls.length,0);assert.equal(f.controller.view.connection,null);const blocked=fixture({paired:true});blocked.storage.removeItem=()=>{throw Error('Device deletion blocked');};assert.equal(await blocked.controller.forgetLocal(),false);assert(blocked.data.has(key));assert.match(blocked.controller.view.message,/Device deletion blocked/);
 });

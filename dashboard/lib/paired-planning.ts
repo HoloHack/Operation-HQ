@@ -111,4 +111,9 @@ export class PairedPlanning{
   if(!this.current(ticket))return;if(!reply?.ok)throw Error(reply?.error||'Disconnection was not confirmed.');
   this.persist(pair,null);this.emit({paused:false,lastSuccess:null,message:'Disconnected. Existing planning copies were kept on both sides.'});
  });}
+ /** Explicit recovery for a corrupt or remotely revoked device record; never clears planning. */
+ async forgetLocal(){return this.run(async()=>{
+  this.options.storage.removeItem(this.key);
+  this.emit({connection:null,paused:false,lastSuccess:null,message:'Saved link removed from this device. Planning copies were kept. If the companion is still paired, use its Disconnect paired account control before pairing again.'});
+ });}
 }
