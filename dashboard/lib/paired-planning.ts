@@ -13,9 +13,20 @@ const same=(a:Pairing|null,b:Pairing|null)=>a?.token===b?.token&&a?.revision===b
 export function pairedSnapshot(value:unknown):HQState{
  const v=value as HQState;
  const collections=['tasks','events','schedule','assignments','exams','habits','captures'] as const;
- if(!v||v.schemaVersion!==1||typeof v.notes?.plain!=='string'||!v.settings||!v.focus||collections.some(k=>!Array.isArray(v[k]))||JSON.stringify(v).length>1500000)throw Error('The companion returned an incomplete planning document. Your dashboard was kept.');
+ if(!v||v.schemaVersion!==1||typeof v.notes?.plain!=='string'||!v.settings||typeof v.settings!=='object'||Array.isArray(v.settings)||!v.focus||typeof v.focus!=='object'||Array.isArray(v.focus)||collections.some(k=>!Array.isArray(v[k]))||JSON.stringify(v).length>1500000)throw Error('The companion returned an incomplete planning document. Your dashboard was kept.');
  const clean=sanitizeHQState(v);
- for(const key of [...collections,'releases','tombstones'] as const)if(v[key]!==undefined&&(!Array.isArray(v[key])||v[key]!.length!==clean[key]!.length))throw Error('The companion returned invalid planning records. Your dashboard was kept.');
+ const invalid=()=>{throw Error('The companion returned invalid planning records. Your dashboard was kept.');};
+ for(const key of [...collections,'releases','tombstones'] as const){
+  if(v[key]===undefined)continue;
+  if(!Array.isArray(v[key])||v[key]!.length!==clean[key]!.length)invalid();
+  const original=v[key] as {id:string;title?:string;collection?:string}[],normalized=clean[key] as {id:string;title?:string;collection?:string}[];
+  if(original.some(row=>!row||typeof row!=='object'))invalid();
+  if(new Set(original.map(row=>key==='tombstones'?row.collection+':'+row.id:row.id)).size!==original.length)invalid();
+  if(original.some((row,i)=>row.id!==normalized[i].id||('title' in row&&row.title!==normalized[i].title)))invalid();
+ }
+ if(v.notes.plain!==clean.notes.plain||v.notes.updatedAt!==clean.notes.updatedAt)invalid();
+ for(const key of ['accentHue','supportHue','motion','density','updatedAt'] as const)if(v.settings[key]!==clean.settings[key])invalid();
+ for(const key of ['mission','minutes','chapters','updatedAt'] as const)if(JSON.stringify(v.focus[key])!==JSON.stringify(clean.focus[key]))invalid();
  return clean;
 }
 export function readPairing(raw:string|null):Pairing|null{
@@ -40,12 +51,12 @@ export class PairedPlanning{
  private current(ticket:number){return this.active&&ticket===this.epoch;}
  start(){this.active=true;this.epoch++;this.refresh();}
  dispose(){this.active=false;this.epoch++;}
- refresh(){if(!this.active)return;try{const connection=this.stored();this.emit({connection,...(!connection?{paused:false,lastSuccess:null,message:'Disconnected. Planning copies were kept on both sides.'}:!this.view.connection?{message:'Pairing saved on this device. Exchanges run while the dashboard is open and visible.'}:{})});}catch(e){this.emit({connection:null,paused:true,message:(e as Error).message});}}
+ refresh(){if(!this.active)return;try{const connection=this.stored();this.emit({connection,...(!connection?{paused:false,lastSuccess:null,message:this.view.connection?'Disconnected. Planning copies were kept on both sides.':initialPairingView().message}:!this.view.connection?{message:'Pairing saved on this device. Exchanges run while the dashboard is open and visible.'}:{})});}catch(e){this.emit({connection:null,paused:true,message:(e as Error).message});}}
  private unchanged(expected:Pairing|null){if(!same(this.stored(),expected))throw Error('Pairing changed in another dashboard tab. This response was ignored; retry with the current connection.');}
  private persist(expected:Pairing|null,value:Pairing|null){this.unchanged(expected);if(value)this.options.storage.setItem(this.key,JSON.stringify(value));else this.options.storage.removeItem(this.key);this.emit({connection:value});}
  private ready(){if(!this.options.store.ready||this.options.store.pending||this.options.store.conflict)throw Error('Save and resolve your dashboard before synchronizing.');}
  private ack(reply:Reply):HQState{if(!reply?.ok)throw Error(reply?.error||'The companion did not confirm this action.');return pairedSnapshot(reply.snapshot);}
- private async revoke(pair:Pairing){try{const r=await this.options.call<Reply>({type:'hq:sync:disconnect',protocol:2,accountId:this.options.accountId,token:pair.token});return r?.ok===true;}catch{return false;}}
+ private async revoke(pair:Pick<Pairing,'token'>){try{const r=await this.options.call<Reply>({type:'hq:sync:disconnect',protocol:2,accountId:this.options.accountId,token:pair.token});return r?.ok===true;}catch{return false;}}
  private async run(action:(ticket:number)=>Promise<void>){
   if(!this.active||this.flight)return false;
   this.flight=true;const ticket=this.epoch;this.emit({busy:true});
@@ -67,15 +78,16 @@ export class PairedPlanning{
    const combined=applyBrowserImport(snapshot,reviewBrowserImport(read.snapshot),'both');
    const reply=await this.options.call<Reply>({type:'hq:sync:pair',protocol:2,accountId:this.options.accountId,approved:true,snapshot:combined},15000);
    if(!reply?.ok)throw Error(reply?.error||'Pairing was not accepted.');
-   const pair=readPairing(JSON.stringify({token:reply.token,revision:reply.revision}))!;
+   const issued=typeof reply.token==='string'&&reply.token.length>=16&&reply.token.length<=256?{token:reply.token}:null;
    // A remote pair may exist already. Revoke only its exact token on local failure.
    try{
+    const pair=readPairing(JSON.stringify({token:reply.token,revision:reply.revision}))!;
     const incoming=pairedSnapshot(reply.snapshot);
     if(!this.current(ticket))throw Error('Pairing was cancelled because this dashboard closed.');
     if(generation!==this.options.store.generation||JSON.stringify(snapshot)!==JSON.stringify(this.options.store.state))throw Error('Work changed while pairing. Your newer edits were kept. Save them, then pair again.');
     this.ready();this.persist(expected,pair);this.options.store.change(()=>incoming);
     this.emit({paused:false,lastSuccess:Date.now(),message:'Paired. Both notes versions were preserved. Planning exchanges every 30 seconds while the dashboard is open and visible; cloud status confirms saved work.'});
-   }catch(e){const revoked=await this.revoke(pair);throw Error((e as Error).message+(revoked?' The unfinished pairing was revoked; existing planning copies were kept.':' The companion did not confirm revocation. Check its pairing controls before reconnecting.'));}
+   }catch(e){const revoked=issued?await this.revoke(issued):false;throw Error((e as Error).message+(revoked?' The unfinished pairing was revoked; existing planning copies were kept.':' The companion did not confirm revocation. Check its pairing controls before reconnecting.'));}
   });
  }
  async exchange(manual=true){

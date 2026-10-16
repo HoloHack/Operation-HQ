@@ -69,3 +69,9 @@ test('failed revocation retains the saved association and reports the actual err
 test('partial and malformed planning records are refused without sanitizing them away',()=>{
  assert.throws(()=>pairedSnapshot({schemaVersion:1,notes:{plain:'x'}}),/incomplete/);assert.throws(()=>pairedSnapshot({...emptyHQState(),events:[{id:'bad',title:'No date',updatedAt:1}]}),/invalid/);assert.equal(pairedSnapshot(emptyHQState()).notes.plain,'');
 });
+test('acknowledgements cannot reset missing preferences, normalize IDs or merge duplicate records',()=>{
+ for(const value of [{...emptyHQState(),settings:{}},{...emptyHQState(),settings:'invalid'},{...emptyHQState(),focus:{}},{...emptyHQState(),tasks:[{id:'same',title:'A',updatedAt:1},{id:'same',title:'B',updatedAt:1}]},{...emptyHQState(),tasks:[{id:'a'.repeat(130),title:'A',updatedAt:1}]}])assert.throws(()=>pairedSnapshot(value));
+});
+test('a valid newly issued token is revoked even when the pairing revision is malformed',async()=>{
+ const f=fixture();f.handler=async m=>m.type==='hq:bridge:pull'?{ok:true,snapshot:f.browser}:m.type==='hq:sync:pair'?{ok:true,token,revision:0,snapshot:m.snapshot}:{ok:true};assert.equal(await f.controller.pair(true),false);assert.equal(f.calls.at(-1).type,'hq:sync:disconnect');assert.equal(f.calls.at(-1).token,token);assert.equal(f.data.has(key),false);assert.equal(f.store.generation,0);
+});
