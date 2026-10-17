@@ -6,6 +6,7 @@ import type {HQState} from '../lib/hq-state';
 import type {SyncCoordinator} from '../lib/sync-coordinator';
 import {PairedPlanning,initialPairingView} from '../lib/paired-planning';
 
+/** Own one account's controller, visible-tab polling and settings portal; dispose listeners on account exit. */
 export default function PairedSync({accountId,coordinator,call,target}:{accountId:string;coordinator:SyncCoordinator<HQState>;call:<T>(message:unknown,timeout?:number)=>Promise<T>;target:Element|null}){
  const [view,setView]=useState(initialPairingView),[approved,setApproved]=useState(false);
  const controller=useMemo(()=>new PairedPlanning({accountId,store:coordinator,call,changed:setView,visible:()=>!document.hidden,

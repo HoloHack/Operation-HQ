@@ -3,6 +3,7 @@ import {applyBrowserImport,reviewBrowserImport} from './browser-import.ts';
 
 export type Pairing={token:string;revision:number};
 export type PairingView={connection:Pairing|null;busy:boolean;paused:boolean;message:string;lastSuccess:number|null};
+/** Fresh per-controller UI state; no account inherits an earlier connection or success time. */
 export const initialPairingView=():PairingView=>({connection:null,busy:false,paused:false,lastSuccess:null,message:'Not paired. Your browser data stays local until you enable planning sync.'});
 type Store={state:HQState;generation:number;ready:boolean;pending:boolean;conflict:unknown;flush:()=>Promise<void>;change:(update:(state:HQState)=>HQState)=>void};
 type Options={accountId:string;store:Store;storage:Pick<Storage,'getItem'|'setItem'|'removeItem'>;call:<T>(message:unknown,timeout?:number)=>Promise<T>;lock:(name:string,run:()=>Promise<void>)=>Promise<boolean>;visible:()=>boolean;changed:(view:PairingView)=>void};
@@ -29,6 +30,7 @@ export function pairedSnapshot(value:unknown):HQState{
  for(const key of ['mission','minutes','chapters','updatedAt'] as const)if(JSON.stringify(v.focus[key])!==JSON.stringify(clean.focus[key]))invalid();
  return clean;
 }
+/** Read only a bounded token/revision record; invalid saved bytes remain available for explicit recovery. */
 export function readPairing(raw:string|null):Pairing|null{
  if(raw===null)return null;
  if(raw.length>4096)throw Error('Saved pairing is invalid. It was left untouched.');
