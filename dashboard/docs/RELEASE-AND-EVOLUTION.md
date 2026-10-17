@@ -12,8 +12,8 @@ Current implementation is a reliability release, not the finished roadmap. Do no
 |---|---|---|
 | Keep Sites as production source authority; mirror reviewed dashboard snapshots to GitHub | Separate release ownership avoids two independent writers; GitHub supplies regression checks and review | Automated release parity and rollback have been verified |
 | Keep D1 for the existing account-scoped dashboard | Avoid an unneeded second database, identity migration and synchronization path | A specific Postgres/realtime/search requirement cannot be met adequately here |
-| No automatic extension-to-cloud data transfer | Origin permission is not a data-sharing consent screen | Account pairing, schema parity, data selection and deletion semantics pass tests |
-| No automatic dashboard-to-extension writes | Current parity has not been verified; rich metadata may be lost | Shared repository/operation contract and migration tests are green |
+| Unpaired browser planning never transfers automatically | Origin access is separate from account/profile approval; paired planning is explicitly enabled | Fine-grained collection selection and wider device/provider acceptance |
+| Automatic planning exchanges only after explicit account pairing | Protocol 2 retains canonical rich planning; native task/note views have their own limits; mail and bookmarks remain local | Broader schema and conflict UX acceptance, including recurrence restrictions |
 | Deterministic commands always available | Fast, cheap and predictable; no model download on startup | A model may complement these tools after explicit load and evaluation |
 | Model interpretation is advisory | Prevent hallucinated tools, deadlines, chapter links and unsafe side effects | Still require typed validation and confirmation regardless of model quality |
 | No automatic dependency/model upgrades | “Latest” is not a quality or compatibility guarantee | Candidate beats the pinned baseline on accuracy, latency, memory and safety tests |
@@ -24,7 +24,7 @@ Current implementation is a reliability release, not the finished roadmap. Do no
 |---|---|---|---|---|
 | Browser dashboard and device journal | Tasks, notes, events, preferences | Signed-in account AND separately locked tab identity | Pending copies in IndexedDB; exact same-tab reload recovery; selected copies can be recovered/exported | Cloud conflict history; encrypted exports; deletion/tombstones; target-device crash tests |
 | D1 account row | Sanitized dashboard snapshot, revision | Server-injected user identity; bound queries | Persistent, revision checked | Event-level history, deletion/tombstones, retention UI, backup restore |
-| Optional browser import | Whitelisted tasks/events/notes projection | Exact deployed origin, extension opt-in, explicit profile confirmation and read/accept | Preview; namespaced additions; existing records and preferences retained; notes choice | Revocable account pairing; full field parity; two-way operations and deletion semantics |
+| Browser import and paired planning | Whitelisted planning projection / canonical HQ schema | Exact origin, extension opt-in, explicit account/profile approval and token | Preview; namespaced additions; notes choice; revocable pairing; lifecycle and cross-tab guards | Fine-grained collection selection; broader field parity and owner-device acceptance |
 | Browser tool handoff | Requested tool name | Extension allowlist and Chrome permissions | No dashboard copying of bookmark/mail contents | Real Chrome tests cover disabled/connected bridge and Nexus handoff; live account/provider checks remain |
 | Weather | Coordinates and forecast request | Browser location permission; HTTPS provider | Response held in memory | Units/forecast settings; age label and independent provider tests |
 | Recovery export | Current planning snapshot | Explicit download action | User-controlled plaintext file | Import preview and validated restore; optional encryption |
@@ -47,8 +47,8 @@ Recovery JSON contains personal tasks/notes. It is not encrypted and should not 
 
 | Work package | Concrete next deliverable | Acceptance criteria | Dependencies |
 |---|---|---|---|
-| Extension source parity | Compare recovered/tested 3.1 companion with the exact previously installed v3.0 source | 3.1 has isolated mutation/undo/lock and native Chrome tests; comparison must identify any missing v3.0-only capabilities | Fresh archive of the previously installed version, only if parity with that version is required |
-| Shared sync protocol | Versioned domain schema, operation IDs, tombstones, paired account and per-collection selection | Concurrent edits/deletes preserve unrelated work; rich event metadata survives round trip; disconnect stops traffic | Extension audit |
+| Extension source parity | Current 3.2.3 source and install archive recovered; 94 packaged files match GitHub | Mutation/undo/lock and native Chrome evidence exists; exact historical 3.0 comparison remains unverified | Historical archive only for that historical comparison, not as a blocker to current-source development |
+| Shared sync protocol | Delivered explicit protocol-2 pairing, canonical planning and tombstones; harden lifecycle and cross-tab responses | Delayed replies preserve newer notes; shared lock; malformed acks refused; disconnect/recovery tested. Remaining: finer data selection and broader conflict/device acceptance | Companion 3.2.3 and account-scoped dashboard |
 | Calendar/timetable | Real month/week/day/agenda plus recurring timetable projection and editable events | Local dates, DST, recurrence exceptions, week start, overlapping sessions, tomorrow rollover and ICS round trip | Shared schema; actual timetable fixture |
 | Tasks/planner | Task details, subtasks, dependencies, effort and deadlines; reviewed rescheduling | Math 5/7/8/10 now asks due date and estimate; remaining: respects fixed blocks and capacity, shows moved tasks and exact undo | Calendar and shared store |
 | Study integration | Assignment/exam/recall/research views with linked sources and reviewed intake | Extracted deadlines confirmed; no invented rubric/metadata; duplicate imports idempotent | Shared schema |
@@ -114,6 +114,10 @@ Give each agreed capability four binary gates: source implemented, automated beh
 
 Current whole-product completion: **not independently measurable yet**. The previous 75% remains historical only. Today's verified work is a dashboard reliability slice, not completion of Calendar parity, local AI, Gleam, browser intelligence or the full roadmap.
 
-## Latest bridge and recovery release
+## Earlier bridge and recovery release
 
-See [8 October bridge and recovery update](RELEASE-2026-10-08-BRIDGE-AND-RECOVERY.md) for current evidence and limits. Historical release reports remain snapshots of their dates. Source recovery for the tested 3.1 companion is complete; exact historical 3.0 comparison is still unavailable. Device drafts and reviewed imports are now implemented; complete two-way synchronization is not.
+See [8 October bridge and recovery update](RELEASE-2026-10-08-BRIDGE-AND-RECOVERY.md) as a historical snapshot. Current companion source is 3.2.3. Explicit paired planning now exists, with bounded canonical exchanges; that is not a claim of complete provider or schema parity. Exact historical 3.0 comparison remains unavailable.
+
+## Latest paired-planning safety release
+
+See [16 October paired-planning safety](RELEASE-2026-10-16-PAIRED-PLANNING.md) for current source, tests and limitations. This replaces earlier statements that all two-way planning is unimplemented. It does not mark full calendar-provider integration, model-backed general assistance, live Gmail acceptance or the Mac memory target complete. The [recorded-flow repair](RELEASE-2026-10-16-SMOKE-TEST.md) documents the shared visual desk, wallpaper and bookmark fixes.
