@@ -290,13 +290,21 @@ const Schedule = {
     const profile = structuredClone(SCHEDULE_SEED_REGULAR);
     profile.name = "Master Timetable v8";
     profile.masterVersion = 8;
+    profile.sourceRevision = 2;
+    const block=(s,e,t,d='')=>({s,e,t,d});
+    const evening=[block('16:30','18:00','Park / casual sport'),block('18:00','18:15','Shower'),block('18:15','18:55','Dinner + family'),block('18:55','21:00','PM flex / study','Phase priority is guidance; competition cadence is still provisional.'),block('21:00','21:30','Singing'),block('21:30','22:00','Wind down')];
+    for(const day of ['mon','wed','fri'])profile.days[day]=[...profile.days[day].filter(b=>b.e<='15:20'),block('15:20','16:20','Evening run + cooldown'),block('16:20','16:30','Change'),...structuredClone(evening)];
+    profile.days.tue=[...profile.days.tue.filter(b=>b.e<='14:50'),block('14:50','15:50','Evening run + cooldown'),block('15:50','16:30','Extra flex / study'),...structuredClone(evening)];
+    profile.days.thu=[...profile.days.thu.filter(b=>b.e<='19:15'),block('19:15','20:15','Recovery run + cooldown'),block('20:15','20:30','Shower'),block('20:30','21:05','Dinner + family'),block('21:05','21:35','Short PM flex / study'),block('21:35','22:00','Singing')];
+    for(const day of ['mon','wed'])profile.altDays[day]=[...profile.days[day].filter(b=>b.e<='16:30'),block('16:30','18:30','Marking job'),block('18:30','18:45','Shower / reset','Provisional transition: review against actual travel.'),block('18:45','19:20','Dinner + family','Provisional timing to preserve singing and 22:00 wind-down boundary.'),block('19:20','21:00','Job-week PM flex / study','Source says approximately 19:20–21:30; bounded here to retain daily singing. Review this conflict.'),block('21:00','21:30','Singing'),block('21:30','22:00','Wind down')];
     profile.phases = structuredClone(MASTER_V8_PHASES);
-    profile.sourceNote = "Imported from shourya_master_timetable_v8.md";
+    profile.sourceNote = "shourya_master_timetable_v8.md · source correction 2. Weekday park/run/job/singing times reconciled. Job-week evening transitions are labelled provisional. Weekend structure is inherited. Phase C competition cadence remains unconfirmed. Existing saved profiles are never replaced without Refresh confirmation.";
     return profile;
   },
 
   async syncMasterV8({ activate = true, announce = true } = {}) {
     if (announce && this.profiles["master-v8"] && !confirm("Refresh the managed Master Timetable v8 profile? Any edits inside that profile will be replaced. Your other profiles and calendar entries will remain untouched.")) return;
+    if(this.profiles['master-v8'])await chrome.storage.local.set({hq_master_source_recovery_v1:{profile:structuredClone(this.profiles['master-v8']),savedAt:Date.now()}});
     this.profiles["master-v8"] = this.buildMasterV8Profile();
     if (activate) this.activeId = "master-v8";
     await this.saveProfiles();
@@ -325,7 +333,13 @@ const Schedule = {
 
     document.getElementById("schedule-profile-select").onchange = (e) => this.selectProfile(e.target.value);
     document.getElementById("schedule-add-profile-btn").onclick = () => this.addProfile();
-    document.getElementById("schedule-import-master-btn").onclick = () => this.syncMasterV8();
+    document.getElementById("schedule-import-master-btn").onclick = () => {void this.syncMasterV8().catch(e=>Wallpaper?.toast?.(e.message||'Timetable refresh failed; the previous copy was kept.'));};
+    document.getElementById('schedule-restore-source-btn').onclick=async()=>{
+      const saved=(await chrome.storage.local.get('hq_master_source_recovery_v1')).hq_master_source_recovery_v1;
+      if(!saved?.profile?.days){Wallpaper?.toast?.('No pre-refresh timetable copy is saved.');return;}
+      if(!confirm('Restore your pre-refresh Master profile? Other profiles and calendar events stay as they are.'))return;
+      this.profiles['master-v8']=structuredClone(saved.profile);await this.saveProfiles();this.renderProfileSelect();this.render();Wallpaper?.toast?.('Previous Master timetable restored.');
+    };
     document.getElementById("schedule-rename-profile-btn").onclick = () => this.renameProfile();
     document.getElementById("schedule-delete-profile-btn").onclick = () => this.deleteProfile();
     document.getElementById("schedule-profile-editor").onsubmit = event => { event.preventDefault(); this.saveProfileEditor(); };
@@ -424,6 +438,7 @@ const Schedule = {
     sel.innerHTML = Object.entries(this.profiles).map(([id, p]) =>
       `<option value="${id}" ${id === this.activeId ? "selected" : ""}>${escapeHtml(p.name)}</option>`
     ).join("") || '<option value="">No profile yet</option>';
+    const note=document.getElementById('schedule-source-note');if(note)note.textContent=this.active?.sourceNote||'Custom timetable. Refresh Master v8 creates the supplied profile separately.';
     const hasProfile = !!this.active;
     document.getElementById("schedule-first-run").classList.toggle("hidden", hasProfile);
     document.getElementById("schedule-profile-select").disabled = !hasProfile;

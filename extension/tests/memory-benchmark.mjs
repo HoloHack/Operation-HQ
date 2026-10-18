@@ -18,12 +18,12 @@ for(const [label,root] of [['baseline',path.resolve(baseline)],['candidate',curr
   const page=await context.newPage();await page.emulateMedia({reducedMotion:'reduce'});await page.goto(`chrome-extension://${new URL(worker.url()).host}/newtab.html`);await page.waitForFunction(()=>document.body.classList.contains('app-ready'));
   const before=await profileMemory(profile);
   const panels=await page.evaluate(()=>[...document.querySelectorAll('.flyout[id]')].map(p=>p.id));
-  for(let cycle=0;cycle<2;cycle++)for(const id of panels){await page.evaluate(async id=>{await HQPanels.open(id);},id);await page.locator('#'+id).waitFor({state:'visible'});await page.waitForTimeout(100);await page.evaluate(()=>HQPanels.close());}
+  for(const width of [320,1440]){await page.setViewportSize({width,height:960});for(const id of panels){await page.evaluate(async id=>{await HQPanels.open(id);},id);await page.locator('#'+id).waitFor({state:'visible'});await page.waitForTimeout(100);await page.screenshot();await page.evaluate(()=>HQPanels.close());}}
   await page.waitForTimeout(10000);
   const after=await profileMemory(profile),session=await context.newCDPSession(page),metrics=await session.send('Performance.getMetrics');
-  results.push({label,before,after,heapBytes:metrics.metrics.find(v=>v.name==='JSHeapUsedSize')?.value,cycles:2,panels:panels.length});
+  results.push({label,before,after,heapBytes:metrics.metrics.find(v=>v.name==='JSHeapUsedSize')?.value,viewports:[320,1440],panels:panels.length});
  }finally{await context?.close();await fs.rm(profile,{recursive:true,force:true});}
 }
 const old=results[0].after,newer=results[1].after;
-const result={baselineCommit:'9924ef1b6fe71ffc21425066929d17bb51975080',results,rendererReductionBytes:old.rendererPssBytes-newer.rendererPssBytes,rendererReductionPercent:100*(1-newer.rendererPssBytes/old.rendererPssBytes),note:'Sequential cold disposable Linux profiles, same 1440×960 viewport, reduced motion, 2× all-panel cycles, no screenshots/model/provider responses, ten seconds settled. PSS is not Mac per-tab memory; one paired run is not a leak or 300MB certification.'};
+const result={baselineCommit:'9924ef1b6fe71ffc21425066929d17bb51975080',results,rendererReductionBytes:old.rendererPssBytes-newer.rendererPssBytes,rendererReductionPercent:100*(1-newer.rendererPssBytes/old.rendererPssBytes),note:'Sequential cold disposable Linux profiles, same 320/1440×960 viewports, reduced motion, all-panel screenshot cycles, no model/provider responses, ten seconds settled. PSS is not Mac per-tab memory; one paired run is not a leak or 300MB certification.'};
 await fs.writeFile(path.join(output,'memory-comparison.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
