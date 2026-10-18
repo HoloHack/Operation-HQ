@@ -51,8 +51,8 @@ export function previewCalendarImport(text:string,options:{from:string;until:str
  const records=parseProperties(text),events:HQEvent[]=[],warnings:string[]=[],seen=new Set<string>();let duplicates=0,conflicts=0,outside=0,work=0;
  for(const properties of records){
   const all=(name:string)=>properties.filter(p=>p.name===name),one=(name:string)=>{const found=all(name);if(found.length>1)throw Error('Duplicate '+name+' property.');return found[0];};
-  if(one('STATUS')?.value==='CANCELLED')continue;
   if(one('RECURRENCE-ID'))throw Error('This file contains edited recurring instances. Export a finite occurrence snapshot from the original calendar before importing.');
+  if(one('STATUS')?.value==='CANCELLED')continue;
   const uid=one('UID')?.value,title=unescape(one('SUMMARY')?.value||'').trim(),startProp=one('DTSTART');
   if(!uid||uid.length>1000||!title||title.length>500||!startProp)throw Error('Each event needs a UID, title and start.');
   const start=wallProperty(startProp),endProp=one('DTEND');
@@ -70,7 +70,7 @@ export function previewCalendarImport(text:string,options:{from:string;until:str
    const interval=Number(values.INTERVAL||1),count=Number(values.COUNT||Infinity);
    if(!Number.isInteger(interval)||interval<1||interval>52||count!==Infinity&&(!Number.isInteger(count)||count<1||count>10000)||values.COUNT&&values.UNTIL)throw Error('Unsupported recurrence interval or count.');
    const days=['SU','MO','TU','WE','TH','FR','SA'],weekStart=days.indexOf(values.WKST||'MO'),by=values.BYDAY?values.BYDAY.split(',').map(v=>days.indexOf(v)):[new Date(start.date+'T12:00:00').getDay()];
-   if(weekStart<0||by.some(v=>v<0)||values.FREQ==='DAILY'&&values.BYDAY)throw Error('Unsupported recurrence weekdays.');
+   if(weekStart<0||by.some(v=>v<0)||values.FREQ==='DAILY'&&values.BYDAY||values.FREQ==='WEEKLY'&&!by.includes(new Date(start.date+'T12:00:00').getDay()))throw Error('Unsupported recurrence weekdays.');
    const until=values.UNTIL?wallProperty({name:'UNTIL',params:{},value:values.UNTIL}):null;
    dates.clear();let occurrences=0;const startDay=new Date(start.date+'T12:00:00').getDay(),firstWeek=Date.parse(start.date)-((startDay-weekStart+7)%7)*86400000;
    const stop=shiftDate(options.until,2),iterations=Math.round((Date.parse(stop)-Date.parse(start.date))/86400000);

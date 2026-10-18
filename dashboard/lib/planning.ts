@@ -40,7 +40,7 @@ export function planCapacity(state:HQState,options:{from:string;until:string;sub
  const events:HQEvent[]=[],unscheduled:string[]=[];const existing=state.events.filter(e=>!replacedIds.has(e.id));
  const working={...state,events:existing};
  for(const task of tasks){
-  const retainedMinutes=existing.filter(e=>e.category==='study-plan'&&e.notes===`Task: ${task.id}`&&e.start&&e.end&&(e.date>today||e.date===today&&minute(e.end)>nowMinute)).reduce((total,e)=>total+Math.max(0,minute(e.end!)-Math.max(minute(e.start!),e.date===today?nowMinute:0)),0);
+  const retainedMinutes=existing.filter(e=>e.category==='study-plan'&&e.notes===`Task: ${task.id}`&&(!task.due||e.date<=task.due.slice(0,10))&&e.start&&e.end&&(e.date>today||e.date===today&&minute(e.end)>nowMinute)).reduce((total,e)=>total+Math.max(0,minute(e.end!)-Math.max(minute(e.start!),e.date===today?nowMinute:0)),0);
   let remaining=Math.max(0,(task.estimateMinutes||25)-retainedMinutes);const chunks:HQEvent[]=[];
   for(let i=0;i<days&&remaining;i++){const date=shiftDate(options.from,i);if(date<today)continue;if(task.due&&date>task.due.slice(0,10))break;
    const occupied=dayAgenda(working,date).filter(e=>e.category!=='availability').concat(events.filter(e=>e.date===date),chunks.filter(e=>e.date===date));
