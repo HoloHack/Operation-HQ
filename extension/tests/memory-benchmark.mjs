@@ -1,0 +1,29 @@
+// Comparable whole-process PSS samples. CI only; never the owner's Chrome profile.
+import {chromium} from 'playwright';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import os from 'node:os';
+import {profileMemory} from './process-memory.mjs';
+const current=path.resolve(import.meta.dirname,'..'),baseline=process.env.HQ_MEMORY_BASELINE;
+if(!baseline)throw Error('Supply the exact baseline extension directory.');
+const output=path.join(current,'test-results');await fs.mkdir(output,{recursive:true});
+const results=[];
+for(const [label,root] of [['baseline',path.resolve(baseline)],['candidate',current]]){
+ const profile=await fs.mkdtemp(path.join(os.tmpdir(),'hq-memory-'+label+'-'));let context;
+ try{
+  context=await chromium.launchPersistentContext(profile,{channel:'chromium',headless:true,viewport:{width:1440,height:960},args:[`--disable-extensions-except=${root}`,`--load-extension=${root}`,'--no-sandbox']});
+  await context.route(/^https?:\/\//,r=>r.abort());
+  const worker=context.serviceWorkers()[0]||await context.waitForEvent('serviceworker');
+  await worker.evaluate(()=>chrome.storage.local.set({hq_boot_sequence_v1:'off',hq_weather_auto_location:false,hq_realtime_sort_enabled:false}));
+  const page=await context.newPage();await page.emulateMedia({reducedMotion:'reduce'});await page.goto(`chrome-extension://${new URL(worker.url()).host}/newtab.html`);await page.waitForFunction(()=>document.body.classList.contains('app-ready'));
+  const before=await profileMemory(profile);
+  const panels=await page.evaluate(()=>[...document.querySelectorAll('.flyout[id]')].map(p=>p.id));
+  for(let cycle=0;cycle<2;cycle++)for(const id of panels){await page.evaluate(async id=>{await HQPanels.open(id);},id);await page.locator('#'+id).waitFor({state:'visible'});await page.waitForTimeout(100);await page.evaluate(()=>HQPanels.close());}
+  await page.waitForTimeout(10000);
+  const after=await profileMemory(profile),session=await context.newCDPSession(page),metrics=await session.send('Performance.getMetrics');
+  results.push({label,before,after,heapBytes:metrics.metrics.find(v=>v.name==='JSHeapUsedSize')?.value,cycles:2,panels:panels.length});
+ }finally{await context?.close();await fs.rm(profile,{recursive:true,force:true});}
+}
+const old=results[0].after,newer=results[1].after;
+const result={baselineCommit:'9924ef1b6fe71ffc21425066929d17bb51975080',results,rendererReductionBytes:old.rendererPssBytes-newer.rendererPssBytes,rendererReductionPercent:100*(1-newer.rendererPssBytes/old.rendererPssBytes),note:'Sequential cold disposable Linux profiles, same 1440×960 viewport, reduced motion, 2× all-panel cycles, no screenshots/model/provider responses, ten seconds settled. PSS is not Mac per-tab memory; one paired run is not a leak or 300MB certification.'};
+await fs.writeFile(path.join(output,'memory-comparison.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
