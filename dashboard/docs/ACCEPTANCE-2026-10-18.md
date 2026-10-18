@@ -38,7 +38,7 @@ Local dashboard regression: **112 pass**; TypeScript: **pass**. Native companion
 
 Native Chromium exercises all 21 packaged flyouts at 320px and 1440px, contained close controls, calendar widths, notes reload, bookmark transactions, queue contention/title updates, saved groups, unknown commands, chapter extraction, bridge boundaries, reduced motion and Gmail cancellation. Dashboard Chromium covers actual components, IndexedDB, Web Locks, offline/conflict recovery, real companion pairing and focus reload/two-tab actions. Provider API responses and account identities are test fixtures; no owner data is touched.
 
-Linux process-memory files report proportional set size for an entire disposable Chromium profile, renderer processes and GPU separately at clean start and after tool journeys. They are **not** a Mac per-tab measure or a 30-minute leak test. Measured native CI startup: renderer aggregate 147.4 MiB, GPU 41.0 MiB, whole profile 424.4 MiB. After all tool journeys: renderer aggregate 485.6 MiB, GPU 103.4 MiB, whole profile 842.5 MiB. The workspace renderer itself rose from 100.2 to 439.2 MiB during this screenshot-heavy run; JS heap at the final heap checkpoint was 21.8 MiB. This is a performance follow-up, not evidence that the 300 MB target is met. No 300 MB result is claimed without the corresponding measurement.
+Linux process-memory files report proportional set size for an entire disposable Chromium profile, renderer processes and GPU separately at clean start and after tool journeys. They are **not** a Mac per-tab measure or a 30-minute leak test. Earlier, before the closed-panel rendering repair, native CI measured startup: renderer aggregate 147.4 MiB, GPU 41.0 MiB, whole profile 424.4 MiB. After all tool journeys: renderer aggregate 485.6 MiB, GPU 103.4 MiB, whole profile 842.5 MiB. The workspace renderer itself rose from 100.2 to 439.2 MiB during this screenshot-heavy run; JS heap at the final heap checkpoint was 21.8 MiB. This is a performance follow-up, not evidence that the 300 MB target is met. No 300 MB result is claimed without the corresponding measurement.
 
 The hosted platform sign-in route previously returned 404 in the available environment. Product fixture tests cannot certify or repair platform-owned dispatch. No owner identity is fabricated to get around this limitation.
 
@@ -55,3 +55,26 @@ Rollback website to saved version 11 (source `90637152e620d158902e2940c2ebe0f1d0
 1. Accept this release's real Chrome evidence and CodeRabbit findings before merge/publish; retain exact package and source provenance.
 2. Verify the owner's upgraded profile, real bookmark examples and Gmail lifecycle; retain a target-Mac 30-minute memory/frame trace before making device claims.
 3. Finish the defined calendar/provider, broader planning/local-command and title-source acceptance packages incrementally, with regression tests and rollback per stage.
+
+
+## Final release provenance
+
+Published dashboard **version 12** succeeded on 18 October 2026. Sites source: `be316e40893428aa3c7f964fdc691d960ff353b4`. All 99 tracked dashboard runtime files match the tested GitHub candidate. Saved version: `appgprj_6aadff7e3da0819187238acbe434e132~appgver_85a0e246ba0481918ceeb62202f6eb95`. Deployment: `appgdep_6ad410e679e0819187936d39de0cd0ff`. Existing public entry/account data isolation is preserved.
+
+[PR 14](https://github.com/HoloHack/Operation-HQ/pull/14) merged at `6bddc9b2ea5f6c397156d69d24d3deb1682a2682`; tested candidate `218d505f175666687af569764a8981e6112bddbb`. [Final dashboard workflow](https://github.com/HoloHack/Operation-HQ/actions/runs/39082146184): all 112 tests, minimum-Node tests, TypeScript, build, production high-severity audit and **37 Chromium journeys pass**. [Final extension workflow](https://github.com/HoloHack/Operation-HQ/actions/runs/39082146161): **16 suites and 22 Chromium journeys pass**, including no uncaught page errors. HTTP provider calls were blocked or controlled fixtures; these are not live Gmail/provider acceptance.
+
+Companion **3.2.4**, **95 packaged files**, **2,911,017 bytes**, SHA-256 `1026ed3795da3966da3ac24212ad9258c66f3bd04985cd83e6fa32f891ffd19c`. Local package bytes and all packaged file blobs match the final CI candidate. The CI install archive is available in [the companion artifact](https://github.com/HoloHack/Operation-HQ/actions/runs/39082146161/artifacts/12119545623); download artifacts require GitHub access and expire according to retention. Rebuild from versioned source with `python3 extension/scripts/package-release.py` when needed.
+
+Final closed-panel run, Linux PSS (bytes, deliberately retaining exact scope):
+
+| Checkpoint | All renderers | GPU process | Entire test profile | Workspace renderer |
+|---|---:|---:|---:|---:|
+| Clean workspace | 137440256 | 44068864 | 429972480 | 87877632 |
+| After all tool/screenshot journeys | 441253888 | 108672000 | 820413440 | 392553472 |
+| Panels closed, ten seconds idle | 410831872 | 82614272 | 759647232 | 362493952 |
+
+The 300 MB target remains unmet/unverified for the all-tools case, and no Mac result exists. Closed panels have zero layout width/display none; memory still includes loaded modules and Chromium's own rendering caches. This is not a controlled before/after performance benchmark or a leak diagnosis. No model was loaded. Ordinary new tabs do not load the HQ workspace.
+
+CodeRabbit full review was explicitly requested and acknowledged on PR 14. It was still processing with no submitted review or inline findings at publication. The code was manually reviewed and regression/Chromium-tested before release; **a completed CodeRabbit approval is not claimed**. Follow up on its eventual findings rather than interpreting an empty pending result as approval.
+
+No production bookmark, task, note, calendar or email data was modified by these tests. No new permissions, OAuth scopes, provider model, dependency, paid service or Supabase migration was introduced. Full roadmap completion remains unclaimed; the capability ledger above lists the actual unfinished work.
