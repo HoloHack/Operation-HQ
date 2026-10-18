@@ -325,20 +325,23 @@ const Classifier = {
 
   fingerprint(bookmark) {
     try {
-      const url = new URL(bookmark.url);
-      const domain = url.hostname.toLowerCase().replace(/^www\./, "");
-      const variableDomain = this.contentVariesBase(domain);
-      const keyDomain = variableDomain || domain;
-      const segments = url.pathname.split("/").filter(Boolean);
-      // Content-variable services need a content identifier, not merely a
-      // shared route such as /watch or /document/d. Otherwise correcting one
-      // video or document silently teaches a rule for every other one.
-      if (variableDomain === "youtube.com" && url.searchParams.get("v")) return `youtube.com/watch?v=${url.searchParams.get("v")}`;
-      if (domain === "youtu.be" && segments[0]) return `${domain}/${segments[0]}`;
-      if (["docs.google.com", "sheets.google.com", "drive.google.com"].includes(variableDomain)) return `${variableDomain}/${segments.slice(0, 4).join("/")}`.replace(/\/$/, "");
-      const depth = variableDomain ? 3 : 2;
-      return `${keyDomain}/${segments.slice(0, depth).join("/")}`.replace(/\/$/, "");
-    } catch { return this.domainOf(bookmark.url); }
+      const url=new URL(bookmark.url),domain=url.hostname.toLowerCase().replace(/^www\./,''),segments=url.pathname.split('/').filter(Boolean);
+      if(this.contentVariesBase(domain)==='youtube.com'&&url.searchParams.get('v'))return `youtube.com/watch?v=${url.searchParams.get('v')}`;
+      if(domain==='youtu.be'&&segments[0])return `${domain}/${segments[0]}`;
+      if(['docs.google.com','sheets.google.com','drive.google.com'].includes(domain)){
+        const d=segments.indexOf('d');if(d>=0&&segments[d+1])return `${domain}/${segments.slice(0,d+2).join('/')}`;
+        if(domain==='drive.google.com'&&url.searchParams.get('id'))return `drive.google.com/file/d/${url.searchParams.get('id')}`;
+      }
+      url.hostname=domain;url.username='';url.password='';
+      for(const key of [...url.searchParams.keys()])if(/^utm_/i.test(key)||['fbclid','gclid'].includes(key))url.searchParams.delete(key);
+      if(!/^#!?\//.test(url.hash))url.hash='';
+      return 'page:'+url.href;
+    }catch{return 'invalid:'+String(bookmark.url||'');}
+  },
+  // Historical keys are retained only as unverified suggestions unless they
+  // contain a concrete document ID. They must not authorize a whole domain.
+  legacyFingerprint(bookmark) {
+    try{const u=new URL(bookmark.url),domain=u.hostname.toLowerCase().replace(/^www\./,''),variable=this.contentVariesBase(domain),segments=u.pathname.split('/').filter(Boolean);return `${variable||domain}/${segments.slice(0,['docs.google.com','sheets.google.com','drive.google.com'].includes(variable)?4:variable?3:2).join('/')}`.replace(/\/$/,'');}catch{return '';}
   },
 
   scoredKeywordMatch(bookmark) {
@@ -411,15 +414,16 @@ const Classifier = {
     const fingerprint = this.fingerprint(bookmark);
 
     // 1) learned from a manual correction — exact site/path fingerprint
-    // wins. Legacy domain rules remain a fallback only for stable domains.
+    // wins. Older broad keys remain suggestions, never automatic authorities.
     if (learnedMap && learnedMap[fingerprint]) {
       const learned = this.normalizePath(learnedMap[fingerprint], { allowOperational: false });
       if (learned) return { path: learned, confidence: "high", source: "learned-exact" };
     }
-    if (learnedMap && learnedMap[domain] && !this.contentVariesBase(domain)) {
-      const learned = this.normalizePath(learnedMap[domain], { allowOperational: false });
-      if (learned) return { path: learned, confidence: "high", source: "learned-domain" };
-    }
+    const legacyKey=this.legacyFingerprint(bookmark);
+    const legacyPath=this.normalizePath(learnedMap?.[legacyKey]||learnedMap?.[domain],{allowOperational:false});
+    // Old Google editor URLs still carry a concrete document ID, so a known
+    // exact correction can survive the change to canonical editor-independent IDs.
+    if(legacyPath&&/^(?:docs|sheets|drive)\.google\.com\/(?:document|spreadsheets|presentation|file)\/d\/[^/]+/.test(legacyKey))return {path:legacyPath,confidence:'high',source:'learned-exact'};
 
     // 2) Topic beats platform for EVERY bookmark. This is the black-and-
     // white rule: classify what the saved page says it is about first;
@@ -427,17 +431,17 @@ const Classifier = {
     const topic = this.scoredKeywordMatch(bookmark);
     if (topic && topic.confidence !== "medium") return topic;
 
-    // A bookmark already placed inside the supported taxonomy is an explicit
-    // owner decision. Preserve it when no stronger title/URL topic contradicts
-    // it, including older manual placements that predate exact learning.
-    const currentPath = this.normalizePath(bookmark.sourcePath, { allowOperational:false });
-    if (currentPath) return { path:currentPath, confidence:"high", source:"current-placement", reasons:["existing curated placement"], candidates:[{ path:currentPath, score:9, reasons:["current folder"] }] };
+    // A folder name is a useful suggestion, not evidence that the page was
+    // consciously verified; old automatic sorts may have put it there.
+    const currentPath=this.normalizePath(bookmark.sourcePath,{allowOperational:false});
+    const provisional=currentPath||legacyPath;
+    const held=provisional?{path:provisional,confidence:'medium',source:'unverified-placement',reasons:['existing placement or old broad correction needs page evidence'],candidates:[{path:provisional,score:4,reasons:['unverified previous placement']}]}:null;
 
     // 3) Content-variable platforms never receive a broad domain guess.
     if (this.contentVariesBase(domain)) {
       // An ambiguous multi-topic platform stays where the person put it until
       // page evidence or an explicit decision identifies its real topic.
-      return topic || { path: null, confidence: "needs-evidence", source: "needs-content", reasons: ["platform content varies"], candidates:[] };
+      return topic || held || { path: null, confidence: "needs-evidence", source: "needs-content", reasons: ["platform content varies"], candidates:[] };
     }
 
     // 4) curated stable-domain table
@@ -445,6 +449,7 @@ const Classifier = {
     if (stablePath) return { path: stablePath, confidence: "high", source: "domain", candidates:[{ path:stablePath, score:10, reasons:[domain] }] };
 
     if (topic) return topic;
+    if (held) return held;
 
     // 5) a subfolder you (or a previous sort) already legitimately created
     // inside one of the fixed roots — never a stray top-level folder
