@@ -24,6 +24,6 @@ const CompanionDesk = {
       const button=document.createElement('button');button.type='button';button.disabled=true;button.textContent=label;button.dataset.deskPanel=id;button.onclick=()=>{void window.HQPanels.open(id,button).then(ok=>{if(!ok)document.getElementById('desk-tool-status').textContent='This tool could not open. Check Advanced settings → General for startup diagnostics.';}).catch(()=>{document.getElementById('desk-tool-status').textContent='This tool could not open. Try again or check Advanced settings.';});};document.getElementById('desk-tool-nav').append(button);
     }
   },
-  ready(){if(!this.active)return;document.querySelectorAll("#companion-desk button").forEach(b=>b.disabled=false);document.getElementById("desk-tool-status").textContent=BootDiagnostics.issues.length?"Some modules need attention. Advanced settings → General has the details.":"Choose a tool. Your main dashboard keeps your day in view.";},
+  ready(){if(!this.active)return;document.querySelectorAll("#companion-desk button").forEach(b=>b.disabled=false);document.getElementById("desk-tool-status").textContent=BootDiagnostics.issues.length?"Some modules need attention. Advanced settings → General has the details.":"Choose a tool. Your main dashboard keeps your day in view. Companion 3.2.4 · Study desk layout.";},
 };
 if(CompanionDesk.active)document.body.dataset.workspace='tools';

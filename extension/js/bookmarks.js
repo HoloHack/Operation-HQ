@@ -87,8 +87,10 @@ const Bookmarks = {
     this.operationToken = crypto.randomUUID();
     try {
       if (!globalThis.navigator?.locks?.request) throw new Error("Browser coordination is unavailable. No bookmarks were changed.");
-      return await navigator.locks.request("hq-bookmark-mutations", { ifAvailable: true }, async lock => {
-        if (!lock) { this.log("Another bookmark operation is running. Nothing was changed."); return { blocked: true }; }
+      return await navigator.locks.request("hq-bookmark-foreground", { ifAvailable: true }, async foreground => {
+        if (!foreground) { this.log("Another bookmark operation is running. Nothing was changed."); return { blocked: true }; }
+        // Wait for a bounded background batch instead of dropping the owner's click.
+        return navigator.locks.request("hq-bookmark-mutations", async () => {
         const saved = await chrome.storage.local.get(this.JOURNAL_KEY);
         if (saved[this.JOURNAL_KEY]?.moves?.length && label !== "Undo") {
           throw new Error("An interrupted sort has recovery steps. Use Undo before starting another sort.");
@@ -96,6 +98,7 @@ const Bookmarks = {
         this.pendingTransaction = null;
         this.journalFailed = false;
         return await operation();
+        });
       });
     } catch (error) {
       this.log(`${label} stopped safely: ${String(error?.message || error)}`);
@@ -353,7 +356,7 @@ const Bookmarks = {
       this.log(`${plan.filter(item => item.keep).length} stay pinned at root.`);
       this.log(uncertain.length
         ? `${uncertain.length} item${uncertain.length === 1 ? " needs" : "s need"} a verified destination. Each remains exactly where it is.`
-        : "Every bookmark has a confident destination.", !uncertain.length);
+        : "All unpinned links in this preview have a strong classifier match. Review the suggested destinations before sorting.", !uncertain.length);
       this.log("Preview only. Nothing moved.");
       await this.recordAudit("preview", { reviewed: plan.length, uncertain: uncertain.length });
     });
@@ -362,7 +365,7 @@ const Bookmarks = {
   async auditSavedDecisions() {
     return this.runExclusive("Saved decision review",async()=>{
       const {nodes}=await this.getAllBookmarks(),learned=await this.getLearnedMap(),conflicts=[];
-      for(const bm of nodes){const remembered=Classifier.normalizePath(learned[Classifier.fingerprint(bm)],{allowOperational:false});if(!remembered)continue;
+      for(const bm of nodes){const remembered=Classifier.normalizePath(learned[Classifier.fingerprint(bm)]||learned[Classifier.legacyFingerprint(bm)]||learned[Classifier.domainOf(bm.url)],{allowOperational:false});if(!remembered)continue;
         const topic=Classifier.scoredKeywordMatch({title:bm.title,url:bm.url});const path=Classifier.normalizePath(topic?.path,{allowOperational:false});
         if(path&&topic.confidence==='high'&&path.join(' / ')!==remembered.join(' / '))conflicts.push({bm,suggestedPath:path,reasons:['Saved correction differs from the page topic; choose which to keep'],candidates:[{path,score:9,reasons:topic.reasons||[]},{path:remembered,score:8,reasons:['your saved decision']}]});
       }
@@ -800,7 +803,7 @@ const Bookmarks = {
       const retired = await this.cleanupLegacyHoldingFolders(barId);
       await this.recordAudit("verified-destination", { bookmarkId, path, moved: moves.length, retired });
       this.log(`Verified and learned: ${bm.title || bm.url} → ${path.join(" › ")}`, true);
-      if (!this.decisionItems.length) this.log("Accuracy gate complete. No unresolved bookmarks remain.", true);
+      if (!this.decisionItems.length) this.log("Saved destination decisions are complete. Preview again to check the current Bookmark Bar.", true);
       await this.refreshInboxCount();
     });
   },
@@ -839,7 +842,7 @@ const Bookmarks = {
       const retired = await this.cleanupLegacyHoldingFolders(barId);
       await this.recordAudit("verified-destinations", { completed:completed.size, failed, moved:moves.length, retired });
       this.log(`${completed.size} verified destination${completed.size === 1 ? "" : "s"} filed${failed ? `; ${failed} stopped safely` : ""}.`, failed === 0);
-      if (!this.decisionItems.length) this.log("Accuracy gate complete. No unresolved bookmarks remain.", true);
+      if (!this.decisionItems.length) this.log("Saved destination decisions are complete. Preview again to check the current Bookmark Bar.", true);
       await this.refreshInboxCount();
     });
   },
@@ -885,7 +888,7 @@ const Bookmarks = {
     if (!el) return;
     const decisions = this.decisionItems.length;
     if (!inbox) {
-      el.textContent = decisions ? `${decisions} bookmark destination${decisions === 1 ? "" : "s"} must be verified to finish sorting` : "All classified—no unresolved bookmark destinations";
+      el.textContent = decisions ? `${decisions} bookmark destination${decisions === 1 ? "" : "s"} must be verified to finish sorting` : "No saved decisions to review. Preview checks your current Bookmark Bar.";
       return;
     }
     const { nodes } = await this.getAllBookmarks(inbox.id);
@@ -895,10 +898,23 @@ const Bookmarks = {
   async peekSummary() {
     const stack = await this.readUndoStack();
     if (this.decisionItems.length) return `${this.decisionItems.length} destination${this.decisionItems.length === 1 ? "" : "s"} need verification`;
-    return stack.length ? `Undo available: ${stack[stack.length - 1].kind.replace(/-/g, " ")}` : "All classified";
+    return stack.length ? `Undo available: ${stack[stack.length - 1].kind.replace(/-/g, " ")}` : "Preview to check current destinations";
   },
 
+  async refreshAutomation() {
+    const saved=await chrome.storage.local.get(['hq_realtime_sort_enabled','hq_bookmark_automation_status_v1']);
+    const enabled=saved.hq_realtime_sort_enabled!==false,status=saved.hq_bookmark_automation_status_v1||{};
+    for(const id of ['bookmark-auto-toggle','toggle-realtime-sort']){const toggle=this.el(id);if(toggle)toggle.checked=enabled;}
+    const label=this.el('bookmark-auto-status');
+    if(label)label.textContent=!enabled?'Automatic sorting is off. New bookmarks are kept where you save them.':status.lastError?`Automatic sorting needs attention: ${status.lastError}`:`Automatic sorting is on. ${status.pending||0} waiting to retry; ${status.needsEvidence||0} awaiting a clearer title or page evidence.${status.lastOutcome?.outcome==='sorted'?' Last sorted: '+status.lastOutcome.title+'.':''}`;
+    const retry=this.el('bookmark-auto-retry');if(retry)retry.disabled=!enabled||!(status.pending||status.needsEvidence);
+  },
   async init() {
+    await this.refreshAutomation();
+    const auto=this.el('bookmark-auto-toggle'),retry=this.el('bookmark-auto-retry');
+    if(auto)auto.onchange=async()=>{auto.disabled=true;try{await chrome.storage.local.set({hq_realtime_sort_enabled:auto.checked});await this.refreshAutomation();}catch(e){this.log('Automatic sorting preference was not saved: '+e.message);await this.refreshAutomation().catch(()=>{});}finally{auto.disabled=false;}};
+    if(retry)retry.onclick=async()=>{retry.disabled=true;try{const reply=await chrome.runtime.sendMessage({type:'hq:bookmarks:auto:retry'});if(!reply?.ok)throw Error(reply?.error||'The worker did not confirm a retry.');}catch(e){this.log('Automatic sorting retry: '+e.message);}finally{await this.refreshAutomation().catch(()=>{});}};
+    if(!this._automationListener&&chrome.storage?.onChanged){this._automationListener=true;chrome.storage.onChanged.addListener((changes,area)=>{if(area==='local'&&(changes.hq_realtime_sort_enabled||changes.hq_bookmark_automation_status_v1))void this.refreshAutomation().catch(()=>{});});}
     await this.restoreDecisions();
     await this.updateUndoButton();
     await this.refreshInboxCount();

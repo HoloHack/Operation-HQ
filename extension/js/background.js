@@ -10,6 +10,7 @@ importScripts("context-bus.js");
 importScripts("calendar-repository.js");
 importScripts("credential-vault.js");
 importScripts("classifier.js");
+importScripts("bookmark-automation.js");
 importScripts("claude-client.js");
 importScripts("daily-planner.js");
 importScripts("idea-radar.js");
@@ -313,43 +314,45 @@ async function moveSelf(id, parentId) {
   } finally { setTimeout(() => selfMovedIds.delete(id), 3000); }
 }
 
-// --- Real-time sort on bookmark creation ---
-chrome.bookmarks.onCreated.addListener(safely("Bookmark auto-sort", async (id, bookmark) => {
-  if (!bookmark.url) return; // it's a folder, ignore
-  return withBookmarkLock(async () => {
-  // Event snapshots can be stale by the time the worker wakes up.
-  const [current] = await chrome.bookmarks.get(id);
-  if (!current?.url || current.parentId !== bookmark.parentId || current.url !== bookmark.url) return;
-  bookmark = current;
-  const { hq_realtime_sort_enabled } = await chrome.storage.local.get("hq_realtime_sort_enabled");
-  if (hq_realtime_sort_enabled === false) return; // user disabled it in settings
-  const { hq_bulk_sort_active } = await chrome.storage.local.get("hq_bulk_sort_active");
-  if (bulkBookmarkOperationActive(hq_bulk_sort_active)) return; // a deliberate bulk transaction owns mutation order
-
-  if (Classifier.shouldNeverSort(bookmark.title)) return;
-
-  const barId = await getBarId();
-  const { hq_learned_domains } = await chrome.storage.local.get("hq_learned_domains");
-  const legitFolders = await scanLegitFolders(barId);
-  const bookmarkWithPath = { ...bookmark, sourcePath:await bookmarkFolderPath(bookmark.parentId, barId) };
-  const result = Classifier.classify(bookmarkWithPath, hq_learned_domains || {}, legitFolders);
-
-  if (result.path && result.confidence === "high") {
-    const targetParent = await getOrCreateFolderPath(result.path, barId);
-    if (String(targetParent) !== String(bookmark.parentId)) await moveSelf(id, targetParent);
-    await clearBookmarkDecision(id);
-  } else {
-    // No fake catch-all and no surprise move. The next Bookmark Intelligence
-    // view exposes the unresolved destination while the link stays exactly
-    // where the person saved it.
-    await markBookmarkDecision({ ...bookmarkWithPath, id }, result);
+// Queue creation events before competing for the shared mutation lock.
+async function sortAutomaticBookmark(entry) {
+  let current;try{[current]=await chrome.bookmarks.get(entry.id);}catch{return {done:true,outcome:'deleted'};}
+  if(!current?.url||current.url!==entry.url||String(current.parentId)!==entry.parentId)return {done:true,outcome:'changed-by-owner'};
+  const barId=await getBarId();let ancestor=current.parentId,inside=false;
+  for(let depth=0;ancestor&&depth<32;depth++){if(ancestor===barId){inside=true;break;}try{const [folder]=await chrome.bookmarks.get(ancestor);ancestor=folder?.parentId;}catch{break;}}
+  if(!inside||Classifier.shouldNeverSort(current.title))return {done:true,outcome:'outside-sort-scope',title:current.title};
+  const saved=await chrome.storage.local.get(['hq_learned_domains','hq_bookmark_evidence_v1']);
+  const bm={...current,sourcePath:await bookmarkFolderPath(current.parentId,barId)};
+  // Reuse only already-authorized cached metadata; never fetch arbitrary pages automatically.
+  let cacheKey;try{const u=new URL(bm.url);u.hash='';cacheKey='url:'+u.href;}catch{}
+  const cached=cacheKey&&saved.hq_bookmark_evidence_v1?.[cacheKey];
+  const evidence=cached&&Date.now()-cached.at<7*86400000?String(cached.text||'').slice(0,2400):'';
+  const result=Classifier.classify({...bm,title:[bm.title,evidence].filter(Boolean).join(' ')},saved.hq_learned_domains||{},await scanLegitFolders(barId));
+  const path=Classifier.normalizePath(result.path,{allowOperational:false});
+  if(path&&result.confidence==='high'){
+    const parent=await getOrCreateFolderPath(path,barId),[latest]=await chrome.bookmarks.get(entry.id);
+    if(latest.url!==entry.url||String(latest.parentId)!==entry.parentId||latest.title!==current.title)return {done:false,outcome:'changed-during-read',title:latest.title};
+    if(String(parent)!==String(latest.parentId))await moveSelf(entry.id,parent);
+    await clearBookmarkDecision(entry.id);return {done:true,outcome:'sorted',title:latest.title};
   }
-  });
-}));
+  await markBookmarkDecision(bm,result);return {done:false,outcome:'needs-evidence',title:bm.title};
+}
+const BookmarkAutomation=new BookmarkAutoQueue({storage:chrome.storage.local,locks:navigator.locks,alarms:chrome.alarms,sort:sortAutomaticBookmark});
+chrome.bookmarks.onCreated.addListener(safely('Bookmark auto-sort',async(id,bm)=>{if(bm.url)await BookmarkAutomation.enqueue(id,bm);}));
+chrome.bookmarks.onChanged.addListener(safely('Bookmark title update',async(id,change)=>{if(change.title!==undefined||change.url!==undefined)await BookmarkAutomation.changed(id,change);}));
+chrome.alarms.onAlarm.addListener(safely('Bookmark automation retry',async alarm=>{if(alarm.name===BookmarkAutomation.alarm)await BookmarkAutomation.wake();}));
+chrome.storage.onChanged.addListener(safely('Bookmark automation preference',async(changes,area)=>{if(area==='local'&&changes.hq_realtime_sort_enabled)await BookmarkAutomation.wake();}));
+chrome.runtime.onMessage.addListener((message,sender,reply)=>{
+  if(message?.type!=='hq:bookmarks:auto:retry')return false;
+  if(sender.id!==chrome.runtime.id){reply({ok:false,error:'Only companion controls can retry bookmarks.'});return false;}
+  BookmarkAutomation.retry().then(status=>reply({ok:true,status})).catch(error=>reply({ok:false,error:String(error?.message||error)}));return true;
+});
+void BookmarkAutomation.wake().catch(error=>recordBackgroundError('Bookmark automation startup',error));
 
 // --- Learn from manual re-files ---
 chrome.bookmarks.onMoved.addListener(safely("Bookmark learning", async (id, moveInfo) => {
   if (selfMovedIds.has(id)) { selfMovedIds.delete(id); return; } // our own real-time move
+  await BookmarkAutomation.cancel(id); // a later manual move wins
   return withBookmarkLock(async () => {
   const { hq_bulk_sort_active } = await chrome.storage.local.get("hq_bulk_sort_active");
   if (bulkBookmarkOperationActive(hq_bulk_sort_active)) return; // ignore moves happening during a current bulk transaction
@@ -390,6 +393,7 @@ chrome.bookmarks.onMoved.addListener(safely("Bookmark learning", async (id, move
 }));
 
 chrome.bookmarks.onRemoved.addListener(safely("Bookmark decision cleanup", async id => {
+  await BookmarkAutomation.cancel(id);
   await clearBookmarkDecision(id);
 }));
 

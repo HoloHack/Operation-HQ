@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {chromium} from 'playwright';
+import {profileMemory} from './process-memory.mjs';
 const root=path.resolve(import.meta.dirname,'..');
 const profile=await fs.mkdtemp(path.join(os.tmpdir(),'hq-chromium-'));
 const output=path.join(root,'test-results');await fs.mkdir(output,{recursive:true});
@@ -21,6 +22,7 @@ try{
  await context.route(/^https?:\/\//,route=>{network.push(route.request().url());return route.abort();});
  const page=await context.newPage();await page.emulateMedia({reducedMotion:'reduce'});
  await page.goto(base+'newtab.html');await page.waitForFunction(()=>document.body?.classList.contains('app-ready'));
+ await check('Clean browser process memory is measured',async()=>{const memory=await profileMemory(profile);assert(memory.available);await fs.writeFile(path.join(output,'memory-clean.json'),JSON.stringify(memory,null,2));return memory;});
  await check('Native service worker boots without startup errors',async()=>{
    const issues=await worker.evaluate(()=>chrome.storage.local.get('hq_background_errors'));
    assert.equal((await page.evaluate(()=>BootDiagnostics.issues)).length,0);assert.deepEqual(issues.hq_background_errors||[],[]);
@@ -179,11 +181,20 @@ try{
  await check('Browser tools use the shared Paper/Night desk and readable narrow bookmark controls',async()=>{
    await worker.evaluate(()=>chrome.storage.local.set({hq_desk_appearance_v1:{surface:'paper',hue:152,motion:'reduced'}}));
    await page.goto(base+'newtab.html#tool=bookmarks&request=shared-desk-test');await page.waitForFunction(()=>document.body.classList.contains('app-ready')&&document.getElementById('bookmarks-flyout').classList.contains('open'));
-   assert.equal(await page.locator('body').getAttribute('data-workspace'),'tools');assert.equal(await page.locator('#app').isVisible(),false);assert.equal(await page.locator('body').evaluate(e=>getComputedStyle(e).backgroundColor),'rgb(247, 246, 239)');
+   assert.equal(await page.locator('body').getAttribute('data-workspace'),'tools');assert.equal(await page.locator('#app').isVisible(),false);assert.equal(await page.locator('body').evaluate(e=>getComputedStyle(e).backgroundColor),'rgb(241, 240, 233)');
    await page.evaluate(()=>Bookmarks.renderAccuracyGate([{bm:{id:'readable',title:'Every Chess Tip - Explained',url:'https://youtube.com/watch?v=readable',parentId:'1'},reasons:['test-only layout'],candidates:[]}]));
    for(const width of [320,1440]){await page.setViewportSize({width,height:960});const panel=page.locator('#bookmarks-flyout'),select=page.locator('#bookmark-review-list select');const box=await select.boundingBox();assert(box.width>180);assert(await panel.evaluate(e=>e.scrollWidth<=e.clientWidth+1));await page.waitForFunction(()=>getComputedStyle(document.getElementById('bookmarks-flyout')).opacity==='1');await page.screenshot({path:path.join(output,`shared-desk-${width}.png`)});}
    await worker.evaluate(()=>chrome.storage.local.set({hq_desk_appearance_v1:{surface:'ink',hue:220,motion:'reduced'}}));await page.waitForFunction(()=>document.body.dataset.deskSurface==='ink'&&getComputedStyle(document.body).backgroundColor==='rgb(27, 32, 28)');assert.equal(await page.locator('body').evaluate(e=>getComputedStyle(e).backgroundColor),'rgb(27, 32, 28)');
    await page.locator('#bookmarks-flyout .flyout-close').click();await page.getByRole('button',{name:'Gmail',exact:true}).click();await page.locator('#gmail-flyout').waitFor({state:'visible'});await page.screenshot({path:path.join(output,'shared-desk-gmail.png')});return {surfaceMatches:true,oldDashboardHidden:true,readableSelect:true};
+ });
+ await check('Automatic bookmarks retry busy locks and resolve late titles',async()=>{
+   await worker.evaluate(async()=>{await chrome.storage.local.set({hq_realtime_sort_enabled:false});globalThis.HQAutoStarted=false;void navigator.locks.request('hq-bookmark-mutations',async()=>{globalThis.HQAutoStarted=true;await new Promise(resolve=>globalThis.HQReleaseAuto=resolve);});});await waitForSaved(()=>worker.evaluate(()=>globalThis.HQAutoStarted),Boolean);
+   const created=await worker.evaluate(async()=>{const bar=(await chrome.bookmarks.getTree())[0].children[0].id;await chrome.storage.local.set({hq_realtime_sort_enabled:true});return chrome.bookmarks.create({parentId:bar,title:'Chess endgame practice',url:'https://example.org/auto-chess'});});
+   try{await waitForSaved(()=>worker.evaluate(async()=> (await chrome.storage.local.get('hq_bookmark_auto_queue_v1')).hq_bookmark_auto_queue_v1||[]),items=>items.some(v=>v.id===created.id));assert.equal((await worker.evaluate(id=>chrome.bookmarks.get(id),created.id))[0].parentId,created.parentId);}finally{await worker.evaluate(()=>globalThis.HQReleaseAuto());}
+   await worker.evaluate(()=>BookmarkAutomation.wake());const destination=await worker.evaluate(async id=>{const [b]=await chrome.bookmarks.get(id),[parent]=await chrome.bookmarks.get(b.parentId),[root]=await chrome.bookmarks.get(parent.parentId);return [root.title,parent.title];},created.id);assert.deepEqual(destination,['Gaming & Roblox Dev','Chess']);
+   const vague=await worker.evaluate(async()=>chrome.bookmarks.create({parentId:(await chrome.bookmarks.getTree())[0].children[0].id,title:'Watch this',url:'https://youtube.com/watch?v=hqdelayedfixture'}));await waitForSaved(()=>worker.evaluate(async()=> (await chrome.storage.local.get('hq_bookmark_auto_queue_v1')).hq_bookmark_auto_queue_v1||[]),items=>items.some(v=>v.id===vague.id));assert.equal((await worker.evaluate(id=>chrome.bookmarks.get(id),vague.id))[0].parentId,vague.parentId);
+   await worker.evaluate(id=>chrome.bookmarks.update(id,{title:'Piano chords and scales lesson'}),vague.id);await waitForSaved(()=>worker.evaluate(id=>chrome.bookmarks.get(id),vague.id),items=>items[0].parentId!==vague.parentId);assert.equal(await worker.evaluate(async id=>{const [b]=await chrome.bookmarks.get(id);return (await chrome.bookmarks.get(b.parentId))[0].title;},vague.id),'Music');
+   await page.evaluate(()=>HQPanels.open('bookmarks-flyout'));await page.locator('#bookmark-auto-toggle').uncheck();await page.getByText('Automatic sorting is off. New bookmarks are kept where you save them.',{exact:true}).waitFor();await page.screenshot({path:path.join(output,'bookmark-automation.png')});await page.locator('#bookmarks-flyout .flyout-close').click();return {busyRetry:true,lateTitle:true,noGuesses:true};
  });
  await check('Heavy AI stays unloaded and measured DOM/JS heap remain bounded',async()=>{
    assert.equal(await page.evaluate(()=>performance.getEntriesByType('resource').some(r=>/webllm-loader|web-llm\.js/.test(r.name))),false);
@@ -191,6 +202,11 @@ try{
    const heap=metrics.metrics.find(m=>m.name==='JSHeapUsedSize')?.value,dom=await page.locator('*').count();
    assert(heap<128*1024*1024,'JS heap exceeded test budget');assert(dom<20000,'DOM exceeded test budget');
    return {jsHeapUsedBytes:heap,domElements:dom,note:'JS heap only. Not renderer RSS, GPU memory, or a measured 300 MB Mac limit.'};
+ });
+ await check('Process memory is measured after all native tools',async()=>{const memory=await profileMemory(profile);assert(memory.available);await fs.writeFile(path.join(output,'memory-after-tools.json'),JSON.stringify(memory,null,2));return memory;});
+ await check('Closed tools release their layout and record settled profile memory',async()=>{
+   await page.evaluate(()=>HQPanels.close());const hidden=await page.locator('.flyout').evaluateAll(items=>items.map(e=>({id:e.id,display:getComputedStyle(e).display,width:e.getBoundingClientRect().width})));assert(hidden.every(e=>e.display==='none'&&e.width===0),'Closed panels retained layout: '+JSON.stringify(hidden.filter(e=>e.width>0)));assert.equal(await page.locator('#settings-drawer').evaluate(e=>getComputedStyle(e).display),'none');
+   await new Promise(resolve=>setTimeout(resolve,10000));const memory=await profileMemory(profile);assert(memory.available);await fs.writeFile(path.join(output,'memory-settled.json'),JSON.stringify(memory,null,2));return {closedPanels:hidden.length,memory};
  });
  await check('No uncaught browser errors across tested journeys',async()=>{assert.deepEqual(errors,[]);return {consoleErrors};});
 }catch(error){console.error(error);process.exitCode=1;if(context){for(const p of context.pages().filter(p=>p.url().includes('newtab.html'))){await p.screenshot({path:path.join(output,'failure.png')}).catch(()=>{});const diagnostics=await p.evaluate(()=>({issues:typeof BootDiagnostics==='undefined'?[]:BootDiagnostics.issues,early:window.HQEarlyDiagnostics?.entries()})).catch(()=>null);console.log('Failure diagnostics',JSON.stringify(diagnostics));console.log('Failure panel states',JSON.stringify(await p.evaluate(()=>({hash:location.hash,panels:[...document.querySelectorAll('.flyout.open')].map(e=>({id:e.id,visible:getComputedStyle(e).visibility})),errors:window.HQEarlyDiagnostics?.entries()})).catch(()=>null)));await fs.writeFile(path.join(output,'diagnostics.json'),JSON.stringify(diagnostics,null,2));}}}

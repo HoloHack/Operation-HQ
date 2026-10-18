@@ -11,6 +11,7 @@ import { assertHQCapacity, emptyHQState, HQState, mergeHQState, sanitizeHQState,
 import { SyncCoordinator } from "../lib/sync-coordinator";
 import { DraftJournal, DraftSummary, claimDraftTab } from "../lib/draft-journal";
 import { applyBrowserImport, browserImportSummary, reviewBrowserImport, NotesChoice } from "../lib/browser-import";
+import {focusSession,restoreFocusSession} from "../lib/focus-session";
 import { parseChapters, remainingSeconds } from "../lib/focus-clock";
 import { createChapterTasks } from "../lib/study-plan";
 import { Dialog, DialogContent, DialogTitle } from "../components/ui/dialog";
@@ -146,12 +147,25 @@ export default function Dashboard({ displayName, signedIn, accountId }: { displa
   const [running, setRunning] = useState(false);
   const [secondsLeft, setSecondsLeft] = useState(25 * 60);
   const deadline = useRef<number | null>(null);
+  const [clockNotice,setClockNotice]=useState("");
+  const clockKey="hq-focus-clock-v1:"+accountId;
+  const persistClock=(seconds:number,end:number|null,expected?:number|null)=>{
+    const value=focusSession(state.focus,seconds,end);setClockNotice("Saving focus clock on this device…");
+    void (async()=>{if(!navigator.locks?.request)throw Error('Shared clock coordination is unavailable.');await navigator.locks.request('hq-focus-clock:'+accountId,()=>{
+      if(expected!==undefined){const raw=localStorage.getItem(clockKey);const saved=raw&&raw.length<=4096?JSON.parse(raw):null;if(saved?.deadline!==expected||saved?.mission!==value.mission)return;}
+      localStorage.setItem(clockKey,JSON.stringify(value));
+    });setClockNotice("");})().catch(()=>setClockNotice("Timer works in this tab, but its device copy could not be saved. Keep this tab open."));
+  };
   const [now, setNow] = useState<Date | null>(null);
   const [weather, setWeather] = useState<{ temp: number; label: string } | null>(null);
   const [weatherState, setWeatherState] = useState<"idle" | "loading" | "denied" | "error">("idle");
 
   useEffect(() => { if (!transition) return; const timer = setTimeout(() => setTransition(0), 1300); return () => clearTimeout(timer); }, [transition]);
-  useEffect(() => { if (!running) setSecondsLeft(state.focus.minutes * 60); }, [state.focus.minutes]);
+  useEffect(()=>{
+    if(!coordinator.ready)return;
+    const restore=()=>{try{const clock=restoreFocusSession(localStorage.getItem(clockKey),state.focus);deadline.current=clock.deadline;setSecondsLeft(clock.secondsLeft);setRunning(clock.deadline!==null);setClockNotice("");}catch(error){deadline.current=null;setRunning(false);setSecondsLeft(state.focus.minutes*60);setClockNotice(String((error as Error).message));}};
+    restore();const changed=(event:StorageEvent)=>{if(event.key===clockKey||event.key===null)restore();};window.addEventListener('storage',changed);return()=>window.removeEventListener('storage',changed);
+  },[coordinator.ready,clockKey,state.focus.mission,state.focus.minutes]);
   useEffect(() => {
     let cancelled=false;let release: (()=>void) | undefined;
     void (async()=> {
@@ -186,14 +200,14 @@ export default function Dashboard({ displayName, signedIn, accountId }: { displa
   }, []);
   useEffect(() => {
     if (!running) return;
-    const tick = () => { const value = remainingSeconds(deadline.current ?? Date.now()); setSecondsLeft(value); if (value === 0) { deadline.current = null; setRunning(false); } };
+    const tick = () => { const value = remainingSeconds(deadline.current ?? Date.now()); setSecondsLeft(value); if (value === 0) { const completed=deadline.current;deadline.current = null;setRunning(false);persistClock(0,null,completed); } };
     const id = window.setInterval(tick, 1000); document.addEventListener("visibilitychange", tick);
     return () => { clearInterval(id); document.removeEventListener("visibilitychange", tick); };
-  }, [running]);
+  }, [running,clockKey,state.focus.mission,state.focus.minutes]);
 
   const toggleTimer = () => {
-    if (running) { setSecondsLeft(remainingSeconds(deadline.current ?? Date.now())); deadline.current = null; setRunning(false); }
-    else { const seconds = secondsLeft > 0 ? secondsLeft : state.focus.minutes * 60; deadline.current = Date.now() + seconds * 1000; setSecondsLeft(seconds); setRunning(true); }
+    if (running) { const seconds=remainingSeconds(deadline.current ?? Date.now());setSecondsLeft(seconds);deadline.current = null;setRunning(false);persistClock(seconds,null); }
+    else { const seconds = secondsLeft > 0 ? secondsLeft : state.focus.minutes * 60; deadline.current = Date.now() + seconds * 1000; setSecondsLeft(seconds); setRunning(true);persistClock(seconds,deadline.current); }
   };
 
   const update = useCallback((mutator: (current: HQState) => HQState) => {
@@ -317,7 +331,7 @@ export default function Dashboard({ displayName, signedIn, accountId }: { displa
     if(intent.kind==='panel'){setPanel(intent.panel);setCommandResult({title:intent.panel==='calendar'?'Calendar opened':intent.panel==='tasks'?'Tasks opened':intent.panel==='study'?'Study opened':intent.panel==='releases'?'Release radar opened':'Notes opened',subject:intent.subject,detail:intent.panel==='calendar'?'Choose your study window and preview before applying. Classes and other fixed commitments stay put.':intent.panel==='tasks'?`${activeTasks.length} unfinished actions, ranked by priority and deadline.`:'The requested workspace is open.'});return;}
     if(intent.kind==='browser'){setCommandResult({title:"Browser review ready",tool:intent.tool as BrowserTool,detail:intent.tool==='gmail'?'Open your read-only Gmail workspace in the companion. No messages are sent.':intent.tool==='tabs'?'Open the companion tab and workspace review. No tabs close without your review.':intent.tool==='gleam'?'Open Gleam social-skills practice in the companion.':intent.tool==='settings'?'Open Advanced settings in the companion, then choose Local AI. A model must be loaded explicitly; large models use additional memory.':'Open your bookmark review in the companion. Preview before moving anything.'});void openBrowserTool(intent.tool);return;}
     if(intent.kind==='weather'){void requestWeather();setCommandResult({title:'Weather requested',detail:'The weather widget shows the result or a permission/provider error.'});return;}
-    if(intent.kind==='pause'){if(running){setSecondsLeft(remainingSeconds(deadline.current??Date.now()));deadline.current=null;setRunning(false);}setCommandResult({title:'Timer paused',detail:'Your remaining focus time is kept.'});return;}
+    if(intent.kind==='pause'){if(running)toggleTimer();setCommandResult({title:'Timer paused',detail:'Your remaining focus time is kept.'});return;}
     setCommandResult({title:intent.kind==='help'?'What Commands can do':'I need one clearer instruction',detail:'Commands can open workspaces, stage chapter tasks, preview scheduling, propose colours and open companion tools. It is a local command router, not a general chat model. Try one of the examples below.'});
   };
 
@@ -368,7 +382,7 @@ export default function Dashboard({ displayName, signedIn, accountId }: { displa
         {liveContext?.current && <div className="current-commitment"><CalendarDays size={18}/><span>Now: <strong>{liveContext.current.title}</strong> until {liveContext.current.end}</span></div>}
         <div className="widget-grid">
           <article className="widget foresight-card"><header><span className="widget-icon"><BrainCircuit/></span><div><small>01 / NEXT ACTION</small><h2>One thing to start.</h2></div><span className="signal">TASKS</span></header>{nextTask ? <><div className="focus-line"><span className={`priority-dot ${nextTask.priority}`}/><div><strong>{nextTask.title}</strong><p>{nextTask.subject || "Your task"} · {nextTask.estimateMinutes ? `${nextTask.estimateMinutes} min` : "Add an estimate in Tasks"}</p></div></div><button className="text-button" onClick={() => setPanel("tasks")}>Review tasks <ChevronRight size={15}/></button></> : <Empty title="The queue is clear" detail="Add a task or ask Nexus to build a study mission."/>}</article>
-          <article className="widget focus-card"><header><span className="widget-icon"><Focus/></span><div><small>02 / FOCUS SESSION</small><h2>{state.focus.mission || "A little room to focus"}</h2></div></header><div className="timer-face"><svg viewBox="0 0 120 120" aria-hidden="true"><circle cx="60" cy="60" r="52"/><circle className="timer-progress" cx="60" cy="60" r="52" pathLength="100" style={{ strokeDashoffset: 100 - ((state.focus.minutes * 60 - secondsLeft) / Math.max(1, state.focus.minutes * 60)) * 100 }}/></svg><strong>{formatClock(secondsLeft)}</strong></div><div className="button-row"><button className="round-action" onClick={toggleTimer} aria-label={running ? "Pause focus timer" : "Start focus timer"}>{running ? <Pause/> : <Play/>}</button><button className="round-action secondary" onClick={() => { deadline.current = null; setRunning(false); setSecondsLeft(state.focus.minutes * 60); }} aria-label="Reset focus timer"><TimerReset/></button></div><p className="focus-note">{running?"One task. One session.":"Press play when you’re ready."}</p></article>
+          <article className="widget focus-card"><header><span className="widget-icon"><Focus/></span><div><small>02 / FOCUS SESSION</small><h2>{state.focus.mission || "A little room to focus"}</h2></div></header><div className="timer-face"><svg viewBox="0 0 120 120" aria-hidden="true"><circle cx="60" cy="60" r="52"/><circle className="timer-progress" cx="60" cy="60" r="52" pathLength="100" style={{ strokeDashoffset: 100 - ((state.focus.minutes * 60 - secondsLeft) / Math.max(1, state.focus.minutes * 60)) * 100 }}/></svg><strong>{formatClock(secondsLeft)}</strong></div><div className="button-row"><button className="round-action" onClick={toggleTimer} disabled={!coordinator.ready} aria-label={running ? "Pause focus timer" : "Start focus timer"}>{running ? <Pause/> : <Play/>}</button><button className="round-action secondary" onClick={() => { deadline.current = null; setRunning(false); setSecondsLeft(state.focus.minutes * 60);persistClock(state.focus.minutes*60,null); }} aria-label="Reset focus timer"><TimerReset/></button></div><p className="focus-note">{clockNotice||(running?"One task. One session. Your clock survives a refresh.":secondsLeft===0?"Session complete. Take a breath.":"Press play when you’re ready.")}</p></article>
           <article className="widget schedule-card"><header><span className="widget-icon"><CalendarDays/></span><div><small>DAY PLAN</small><h2>{todayEvents.length ? `${todayEvents.length} scheduled` : "Today is open"}</h2></div></header><div className="timeline-list">{todayEvents.slice(0,3).map(event => <button key={event.id} onClick={() => setPanel("calendar")}><time>{event.start || "All day"}</time><span>{event.title}</span></button>)}{!todayEvents.length && <Empty title="Open capacity" detail="Add your timetable in Calendar to see the shape of your day."/>}</div></article>
           <article className="widget tasks-card"><header><span className="widget-icon"><ListTodo/></span><div><small>TASKS</small><h2>{activeTasks.length ? `${activeTasks.length} active` : "Queue clear"}</h2></div><button className="mini-add" onClick={() => setPanel("tasks")} aria-label="Add task"><Plus/></button></header><div className="mini-list">{activeTasks.slice(0,4).map(task => <button key={task.id} onClick={() => update(current => ({...current,tasks:current.tasks.map(item => item.id===task.id ? {...item,completed:true,updatedAt:Date.now()} : item)}))}><Circle/><span>{task.title}</span><small>{task.priority}</small></button>)}{!activeTasks.length && <Empty title="Nothing pending" detail="Capture an action when one becomes real."/>}</div></article>
           <article className="widget weather-card"><header><span className="widget-icon"><Cloud/></span><div><small>WEATHER</small><h2>{weather ? weather.label : "Outside, right now"}</h2></div></header>{weather ? <div className="weather-reading"><strong>{weather.temp}°</strong><span>Current temperature · °C<button className="small-button" onClick={requestWeather} disabled={weatherState === "loading"}>{weatherState === "loading" ? "Refreshing…" : weatherState === "error" ? "Refresh failed · retry" : "Refresh"}</button></span></div> : <button className="weather-request" onClick={requestWeather} disabled={weatherState === "loading"}>{weatherState === "loading" ? <RefreshCw className="spin"/> : <Cloud/>}<span>{weatherState === "denied" ? "Location blocked—change this site’s permission to retry" : weatherState === "error" ? "Weather unavailable—retry" : "Use my current location"}</span></button>}</article>

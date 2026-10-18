@@ -732,9 +732,10 @@
     <button id="audit-bookmarks-btn" data-bookmark-operation>Recheck saved decisions</button>
     <button id="undo-bookmarks-btn" data-bookmark-operation data-has-undo="false" disabled>Nothing to undo</button>
   </div>
+  <section class="bookmark-automation" aria-label="Automatic bookmark sorting"><h3>New bookmarks, handled.</h3><p>Strong topic matches sort automatically. Busy operations retry; uncertain links stay where you saved them. For your existing collection, use Preview, then Sort + verify evidence.</p><label><input id="bookmark-auto-toggle" type="checkbox" aria-label="Automatically sort new bookmarks">Automatically sort new bookmarks</label><p id="bookmark-auto-status" role="status" aria-live="polite">Checking automatic sorting…</p><button id="bookmark-auto-retry" class="secondary-btn" type="button">Retry waiting bookmarks</button></section>
   <div id="bookmark-operation-state" class="bookmark-operation-state" role="status" aria-live="polite">Ready</div>
   <div id="bookmark-progress"><div id="bookmark-progress-bar"><div id="bookmark-progress-fill"></div></div><span id="bookmark-progress-label"></span></div>
-  <div id="bookmark-status">Accuracy first: HQ files only strong topic matches. A link without enough evidence stays in its current folder until page evidence or your verified destination resolves it—there is no catch-all or Review Queue. Exact decisions are learned, and every successful move remains undoable.</div>
+  <div id="bookmark-status">Accuracy first: HQ files only strong topic matches. A link without enough evidence stays in its current folder until page evidence or your verified destination resolves it—there is no catch-all or Review Queue. Exact decisions are learned. Recent operations have Undo; a later manual re-file is preserved.</div>
   <div id="bookmark-log" class="scroll-cap"></div>
   <section id="bookmark-review-board" class="bookmark-review-board hidden" aria-labelledby="bookmark-review-heading">
     <div class="bookmark-review-head"><div><span class="panel-kicker">Topic review</span><h3 id="bookmark-review-heading">Review unresolved topics</h3></div><span class="bookmark-review-badge"><strong id="bookmark-review-count">0</strong> decisions</span></div>

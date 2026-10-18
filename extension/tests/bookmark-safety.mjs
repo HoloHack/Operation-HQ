@@ -181,3 +181,11 @@ test('large pending collections survive persistence and restore without a 250-it
   await f.book.persistDecisions(pending);assert.equal(f.data[f.book.DECISIONS_KEY].length,320);
   const fresh=f.page();await fresh.restoreDecisions();assert.equal(fresh.decisionItems.length,320);assert.equal(f.data[f.book.DECISIONS_KEY].length,320);
 });
+
+test('an owner action waits for background work while another owner action is rejected',async()=>{
+ const f=fixture();let release,started;const ready=new Promise(r=>started=r),hold=new Promise(r=>release=r);
+ const background=navigator.locks.request('hq-bookmark-mutations',async()=>{started();await hold;});await ready;
+ let ran=false;const owner=f.book.runExclusive('Undo',async()=>{ran=true;});await new Promise(r=>setTimeout(r,20));assert.equal(ran,false);assert.equal(f.book.busy,true);
+ const second=await f.page().runExclusive('Sort',async()=>assert.fail('A second foreground operation ran'));assert.equal(second.blocked,true);
+ release();await background;await owner;assert.equal(ran,true);assert.equal(f.book.busy,false);
+});
