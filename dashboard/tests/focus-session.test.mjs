@@ -1,0 +1,10 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {restoreFocusSession,focusSession} from '../lib/focus-session.ts';
+const focus={mission:'Maths chapter 5',minutes:25};
+test('running focus restores exact wall-clock time after reload',()=>{const raw=JSON.stringify(focusSession(focus,1500,2000000));assert.equal(restoreFocusSession(raw,focus,1940000).secondsLeft,60);assert.equal(restoreFocusSession(raw,focus,1940000).deadline,2000000);});
+test('paused focus preserves its remainder across reload',()=>{assert.equal(restoreFocusSession(JSON.stringify(focusSession(focus,437,null)),focus,9000000).secondsLeft,437);});
+test('finished focus remains at zero until restarted',()=>{const done=restoreFocusSession(JSON.stringify(focusSession(focus,1500,2000000)),focus,3000000);assert.equal(done.secondsLeft,0);assert.equal(done.deadline,null);});
+test('a different mission or duration never inherits an old clock',()=>{const raw=JSON.stringify(focusSession(focus,17,2000000));assert.equal(restoreFocusSession(raw,{...focus,mission:'Science'},1940000).secondsLeft,1500);assert.equal(restoreFocusSession(raw,{...focus,minutes:50},1940000).secondsLeft,3000);});
+test('corrupt clocks fail visibly without replacing their bytes',()=>{for(const raw of ['broken','null','{}',JSON.stringify({...focusSession(focus,10,null),secondsLeft:-1}),JSON.stringify({...focusSession(focus,10,null),deadline:'tomorrow'}),'x'.repeat(4097)])assert.throws(()=>restoreFocusSession(raw,focus));});
+test('absent clocks start paused and runtime seconds are bounded',()=>{assert.equal(restoreFocusSession(null,focus).deadline,null);assert.equal(focusSession(focus,99999,null).secondsLeft,1500);});
