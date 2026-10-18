@@ -26,7 +26,7 @@ export function makeEvent(input:Partial<HQEvent>,id:string,now:number):HQEvent{
  if(Boolean(input.start)!==Boolean(input.end)||input.start&&(!validTime(input.start)||!validTime(input.end!)||input.end!<=input.start))throw Error('Choose an end time after the start; overnight events need separate daily entries.');
  return {id,title,date:input.date!,start:input.start||undefined,end:input.end||undefined,notes:input.notes,location:input.location,category:input.category,updatedAt:now};
 }
-export function planCapacity(state:HQState,options:{from:string;until:string;subject?:string;start:string;end:string;breakMinutes:number},id:()=>string,now:number){
+export function planCapacity(state:HQState,options:{from:string;until:string;subject?:string;start:string;end:string;breakMinutes:number;timetableOnly?:boolean},id:()=>string,now:number){
  if(!validDate(options.from)||!validDate(options.until)||options.until<options.from||!validTime(options.start)||!validTime(options.end)||options.end<=options.start)throw Error('Choose a valid date range and daily study window.');
  const days=Math.round((Date.parse(options.until)-Date.parse(options.from))/86400000)+1;if(days>90)throw Error('Plan at most 90 days at a time.');
  const breaks=Math.max(0,Math.min(30,options.breakMinutes));
@@ -39,13 +39,25 @@ export function planCapacity(state:HQState,options:{from:string;until:string;sub
  const replacedIds=new Set(replaced.map(e=>e.id));
  const events:HQEvent[]=[],unscheduled:string[]=[];const existing=state.events.filter(e=>!replacedIds.has(e.id));
  const working={...state,events:existing};
- for(const task of tasks){let remaining=task.estimateMinutes||25;const chunks:HQEvent[]=[];
+ for(const task of tasks){
+  const retainedMinutes=existing.filter(e=>e.category==='study-plan'&&e.notes===`Task: ${task.id}`&&(!task.due||e.date<=task.due.slice(0,10))&&e.start&&e.end&&(e.date>today||e.date===today&&minute(e.end)>nowMinute)).reduce((total,e)=>total+Math.max(0,minute(e.end!)-Math.max(minute(e.start!),e.date===today?nowMinute:0)),0);
+  let remaining=Math.max(0,(task.estimateMinutes||25)-retainedMinutes);const chunks:HQEvent[]=[];
   for(let i=0;i<days&&remaining;i++){const date=shiftDate(options.from,i);if(date<today)continue;if(task.due&&date>task.due.slice(0,10))break;
    const occupied=dayAgenda(working,date).filter(e=>e.category!=='availability').concat(events.filter(e=>e.date===date),chunks.filter(e=>e.date===date));
    if(occupied.some(e=>!e.start||!e.end))continue; // All-day commitments reserve the day.
    let cursor=minute(options.start),end=minute(options.end);const instant=new Date(now);if(date===localDate(instant))cursor=Math.max(cursor,instant.getHours()*60+instant.getMinutes()+1);
    const spans=occupied.map(e=>({start:minute(e.start!),end:minute(e.end!)})).sort((a,b)=>a.start-b.start);
-   for(const span of [...spans,{start:end,end}]){const stop=Math.min(end,span.start);while(cursor+5<=stop&&remaining){const duration=Math.min(50,remaining,stop-cursor);if(duration<5)break;chunks.push({id:id(),title:task.title,date,start:clock(cursor),end:clock(cursor+duration),category:'study-plan',notes:`Task: ${task.id}`,updatedAt:now});remaining-=duration;cursor+=duration+breaks;}cursor=Math.max(cursor,span.end+breaks);if(cursor>=end||!remaining)break;}
+   const available=options.timetableOnly?dayAgenda(working,date).filter(e=>e.category==='availability'&&e.start&&e.end).map(e=>({start:Math.max(cursor,minute(e.start!)),end:Math.min(end,minute(e.end!))})).filter(v=>v.end>v.start).sort((a,b)=>a.start-b.start):[{start:cursor,end}];
+   const ranges:{start:number;end:number}[]=[];for(const span of available){const last=ranges.at(-1);if(last&&span.start<=last.end)last.end=Math.max(last.end,span.end);else ranges.push({...span});}
+   for(const range of ranges){
+    let position=range.start;
+    for(const span of [...spans,{start:range.end,end:range.end}]){
+     if(span.end<position)continue;const stop=Math.min(range.end,span.start);
+     while(position+5<=stop&&remaining){const duration=Math.min(50,remaining,stop-position);if(duration<5)break;chunks.push({id:id(),title:task.title,date,start:clock(position),end:clock(position+duration),category:'study-plan',notes:`Task: ${task.id}`,updatedAt:now});remaining-=duration;position+=duration+breaks;}
+     position=Math.max(position,span.end+breaks);if(position>=range.end||!remaining)break;
+    }
+    if(!remaining)break;
+   }
   }
   if(remaining){unscheduled.push(`${task.title}: ${remaining} minutes do not fit before its deadline.`);}events.push(...chunks);
  }

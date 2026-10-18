@@ -19,7 +19,7 @@ class BookmarkAutoQueue {
     await this.wake();
   }
   async changed(id,change){let found=false;await this.edit(items=>items.map(v=>{if(v.id!==String(id))return v;found=true;return {...v,url:change.url||v.url,version:v.version+1,attempts:0,nextAt:this.now()};}));if(found)await this.wake();}
-  async cancel(id){await this.edit(items=>items.filter(v=>v.id!==String(id)));await this.publish();}
+  async cancel(id){await this.edit(items=>items.filter(v=>v.id!==String(id)));await this.schedule();await this.publish();}
   async retry(){await this.edit(items=>items.map(v=>({...v,version:v.version+1,attempts:0,nextAt:this.now()})));return this.wake();}
   async publish(extra={}){
     const saved=await this.storage.get(['hq_realtime_sort_enabled',this.statusKey]),items=await this.read();
@@ -46,8 +46,13 @@ class BookmarkAutoQueue {
         const due=(await this.read()).filter(v=>v.nextAt!==null&&v.nextAt<=this.now()).slice(0,25);
         for(const entry of due){
           if((await this.storage.get('hq_realtime_sort_enabled')).hq_realtime_sort_enabled===false)break;
+          // A prior move may have failed after writing intent. Never overwrite that journal.
+          if((await this.storage.get('hq_bookmark_pending_v1')).hq_bookmark_pending_v1?.moves?.length){await this.publish({lastError:'An interrupted bookmark move needs Undo before automatic sorting resumes.'});break;}
           const current=(await this.read()).find(v=>v.id===entry.id);if(!current||current.version!==entry.version)continue;
-          let result;try{result=await this.sort(entry);}catch(error){await this.publish({lastError:String(error?.message||error).slice(0,400)});continue;}
+          let result;try{result=await this.sort(entry);}catch(error){
+            await this.edit(items=>items.map(v=>v.id!==entry.id||v.version!==entry.version?v:{...v,attempts:Math.min(3,v.attempts+1),nextAt:v.attempts+1>=3?null:this.now()+60000}));
+            await this.publish({lastError:String(error?.message||error).slice(0,400)});break;
+          }
           await this.edit(items=>items.flatMap(v=>{if(v.id!==entry.id||v.version!==entry.version)return [v];if(result.done)return [];const attempts=v.attempts+1;return [{...v,attempts,nextAt:attempts>=3?null:this.now()+60000}];}));
           await this.publish({lastError:'',lastOutcome:{id:entry.id,outcome:result.outcome,title:String(result.title||'').slice(0,180),at:this.now()}});
         }

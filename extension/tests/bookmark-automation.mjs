@@ -23,3 +23,17 @@ test('a stale acknowledgement cannot delete newer queued evidence',async()=>{con
 test('corrupt saved work fails closed and remains untouched',async()=>{const f=fixture();f.data[f.queue.key]='corrupt';await assert.rejects(f.queue.enqueue('one',bm),/left untouched/);assert.equal(f.data[f.queue.key],'corrupt');assert.equal(f.calls.length,0);});
 test('worker runs handle at most 25 links and retain the remainder',async()=>{const f=fixture();f.data[f.queue.key]=Array.from({length:30},(_,i)=>({id:String(i),...bm,version:1,attempts:0,nextAt:1}));await f.queue.wake();assert.equal(f.calls.length,25);assert.equal(f.data[f.queue.key].length,5);assert(f.alarms.has(f.queue.alarm));});
 test('unknown title changes do not enroll the existing collection',async()=>{const f=fixture();await f.queue.changed('unknown',{title:'Maths'});assert.equal(f.calls.length,0);assert.equal(f.data[f.queue.key].length,0);});
+
+test('a move failure journal stops the rest of its batch and survives subsequent wakes',async()=>{
+ const f=fixture();f.busy(true);await f.queue.enqueue('one',bm);await f.queue.enqueue('two',bm);f.busy(false);
+ let moves=0;f.sort(async()=>{moves++;f.data.hq_bookmark_pending_v1={moves:[{id:'one'}]};throw Error('journal commit failed');});
+ await f.queue.wake();assert.equal(moves,1);assert.equal(f.data[f.queue.key].length,2);
+ await f.restart().wake();assert.equal(moves,1);assert.equal(f.data.hq_bookmark_pending_v1.moves[0].id,'one');
+});
+test('persistent Chrome errors stop automatic polling after three attempts',async()=>{
+ const f=fixture();let calls=0;f.sort(async()=>{calls++;throw Error('Chrome unavailable');});await f.queue.enqueue('one',bm);
+ for(let i=0;i<4;i++){f.advance(60001);await f.queue.wake();}
+ assert.equal(calls,3);assert.equal(f.data[f.queue.key][0].nextAt,null);assert(!f.alarms.has(f.queue.alarm));
+ assert.match(f.data[f.queue.statusKey].lastError,/Chrome unavailable/);
+});
+test('cancelling the last waiting link clears its alarm immediately',async()=>{const f=fixture();f.busy(true);await f.queue.enqueue('one',bm);await f.queue.cancel('one');assert(!f.alarms.has(f.queue.alarm));});

@@ -49,3 +49,12 @@ body[data-workspace="tools"] .flyout.open{top:0!important;right:0!important;left
    previously opened workspace alive in the compositor behind the desk. */
 body[data-workspace="tools"] .flyout:not(.open),
 body[data-workspace="tools"] #settings-drawer.hidden{display:none!important}
+
+/* The opaque desk needs no legacy per-row compositor layers or blur textures. */
+body[data-workspace="tools"] *,body[data-workspace="tools"] *::before,body[data-workspace="tools"] *::after{
+  will-change:auto!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important;transform-style:flat!important;
+}
+body[data-workspace="tools"] .flyout *,body[data-workspace="tools"] .flyout *::before,body[data-workspace="tools"] .flyout *::after{
+  filter:none!important;animation:none!important;
+}
+body[data-workspace="tools"] .flyout.open{will-change:auto!important;contain:layout paint;}

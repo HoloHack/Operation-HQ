@@ -1,6 +1,6 @@
 {
   "name": "operation-hq-browser-companion",
-  "version": "3.2.4",
+  "version": "3.2.5",
   "private": true,
   "scripts": {
     "test": "node tests/run.mjs",
