@@ -8,7 +8,7 @@ const current=path.resolve(import.meta.dirname,'..'),baseline=process.env.HQ_MEM
 if(!baseline)throw Error('Supply the exact baseline extension directory.');
 const output=path.join(current,'test-results');await fs.mkdir(output,{recursive:true});
 const results=[];
-for(const [label,root] of [['baseline',path.resolve(baseline)],['candidate',current]]){
+for(let sample=0;sample<3;sample++)for(const [label,root] of (sample%2?[['candidate',current],['baseline',path.resolve(baseline)]]:[['baseline',path.resolve(baseline)],['candidate',current]])){
  const profile=await fs.mkdtemp(path.join(os.tmpdir(),'hq-memory-'+label+'-'));let context;
  try{
   context=await chromium.launchPersistentContext(profile,{channel:'chromium',headless:true,viewport:{width:1440,height:960},args:[`--disable-extensions-except=${root}`,`--load-extension=${root}`,'--no-sandbox']});
@@ -20,10 +20,12 @@ for(const [label,root] of [['baseline',path.resolve(baseline)],['candidate',curr
   const panels=await page.evaluate(()=>[...document.querySelectorAll('.flyout[id]')].map(p=>p.id));
   for(const width of [320,1440]){await page.setViewportSize({width,height:960});for(const id of panels){await page.evaluate(async id=>{await HQPanels.open(id);},id);await page.locator('#'+id).waitFor({state:'visible'});await page.waitForTimeout(100);await page.screenshot();await page.evaluate(()=>HQPanels.close());}}
   await page.waitForTimeout(10000);
-  const after=await profileMemory(profile),session=await context.newCDPSession(page),metrics=await session.send('Performance.getMetrics');
-  results.push({label,before,after,heapBytes:metrics.metrics.find(v=>v.name==='JSHeapUsedSize')?.value,viewports:[320,1440],panels:panels.length});
+  const after=await profileMemory(profile),session=await context.newCDPSession(page);await session.send('Performance.enable');const metrics=await session.send('Performance.getMetrics');
+  results.push({label,sample,before,after,heapBytes:metrics.metrics.find(v=>v.name==='JSHeapUsedSize')?.value,viewports:[320,1440],panels:panels.length});
  }finally{await context?.close();await fs.rm(profile,{recursive:true,force:true});}
 }
-const old=results[0].after,newer=results[1].after;
-const result={baselineCommit:'9924ef1b6fe71ffc21425066929d17bb51975080',results,rendererReductionBytes:old.rendererPssBytes-newer.rendererPssBytes,rendererReductionPercent:100*(1-newer.rendererPssBytes/old.rendererPssBytes),note:'Sequential cold disposable Linux profiles, same 320/1440×960 viewports, reduced motion, all-panel screenshot cycles, no model/provider responses, ten seconds settled. PSS is not Mac per-tab memory; one paired run is not a leak or 300MB certification.'};
+const median=values=>values.sort((a,b)=>a-b)[Math.floor(values.length/2)];
+const summary=label=>Object.fromEntries(['rendererPssBytes','gpuPssBytes','profilePssBytes'].map(k=>[k,median(results.filter(r=>r.label===label).map(r=>r.after[k]))]));
+const old=summary('baseline'),newer=summary('candidate');
+const result={baselineCommit:'9924ef1b6fe71ffc21425066929d17bb51975080',results,medianBaseline:old,medianCandidate:newer,rendererReductionBytes:old.rendererPssBytes-newer.rendererPssBytes,rendererReductionPercent:100*(1-newer.rendererPssBytes/old.rendererPssBytes),note:'Three alternating-order pairs of cold disposable Linux profiles, same 320/1440×960 viewports, reduced motion, all-panel screenshot cycles, no model/provider responses, ten seconds settled. PSS is not Mac per-tab memory; three short paired runs are not a leak or 300MB certification.'};
 await fs.writeFile(path.join(output,'memory-comparison.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
