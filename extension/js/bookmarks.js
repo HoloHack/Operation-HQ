@@ -87,8 +87,10 @@ const Bookmarks = {
     this.operationToken = crypto.randomUUID();
     try {
       if (!globalThis.navigator?.locks?.request) throw new Error("Browser coordination is unavailable. No bookmarks were changed.");
-      return await navigator.locks.request("hq-bookmark-mutations", { ifAvailable: true }, async lock => {
-        if (!lock) { this.log("Another bookmark operation is running. Nothing was changed."); return { blocked: true }; }
+      return await navigator.locks.request("hq-bookmark-foreground", { ifAvailable: true }, async foreground => {
+        if (!foreground) { this.log("Another bookmark operation is running. Nothing was changed."); return { blocked: true }; }
+        // Wait for a bounded background batch instead of dropping the owner's click.
+        return navigator.locks.request("hq-bookmark-mutations", async () => {
         const saved = await chrome.storage.local.get(this.JOURNAL_KEY);
         if (saved[this.JOURNAL_KEY]?.moves?.length && label !== "Undo") {
           throw new Error("An interrupted sort has recovery steps. Use Undo before starting another sort.");
@@ -96,6 +98,7 @@ const Bookmarks = {
         this.pendingTransaction = null;
         this.journalFailed = false;
         return await operation();
+        });
       });
     } catch (error) {
       this.log(`${label} stopped safely: ${String(error?.message || error)}`);
@@ -362,7 +365,7 @@ const Bookmarks = {
   async auditSavedDecisions() {
     return this.runExclusive("Saved decision review",async()=>{
       const {nodes}=await this.getAllBookmarks(),learned=await this.getLearnedMap(),conflicts=[];
-      for(const bm of nodes){const remembered=Classifier.normalizePath(learned[Classifier.fingerprint(bm)],{allowOperational:false});if(!remembered)continue;
+      for(const bm of nodes){const remembered=Classifier.normalizePath(learned[Classifier.fingerprint(bm)]||learned[Classifier.legacyFingerprint(bm)]||learned[Classifier.domainOf(bm.url)],{allowOperational:false});if(!remembered)continue;
         const topic=Classifier.scoredKeywordMatch({title:bm.title,url:bm.url});const path=Classifier.normalizePath(topic?.path,{allowOperational:false});
         if(path&&topic.confidence==='high'&&path.join(' / ')!==remembered.join(' / '))conflicts.push({bm,suggestedPath:path,reasons:['Saved correction differs from the page topic; choose which to keep'],candidates:[{path,score:9,reasons:topic.reasons||[]},{path:remembered,score:8,reasons:['your saved decision']}]});
       }
