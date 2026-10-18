@@ -1,20 +1,18 @@
 # Operation HQ Command Centre
 
-A signed-in, cross-device planning dashboard paired with the Operation HQ Chrome browser-power extension. The site may have a public sign-in entry; personal state is account-scoped.
+The everyday Study desk dashboard pairs with the Chrome companion for browser-only tools. Personal planning is account-scoped in D1. No Supabase project or new provider key is required for this release.
 
-The dashboard currently provides basic tasks, an agenda, one notes document, Focus, current weather, visual themes, Cinema mode and limited deterministic Nexus commands. It is not yet a full replacement for the extension's Calendar, timetable, Study OS, Gmail or local AI.
+The dashboard includes tasks and chapter-plan previews, calendar/agenda and timetable projection, notes, a durable device focus clock, current weather, local wallpaper, Paper/Night surfaces, Cinema mode, release tracking and deterministic Nexus handoffs. The companion provides Chrome bookmarks, tab groups, Gmail OAuth and the deeper native study modules. Shared visual design does not imply identical browser permissions.
 
-Account state is stored in D1 with optimistic revisions. Saves are serialized per page, later edits survive outstanding requests, and divergent notes require explicit review. Pending work remains in browser memory: keep the tab open or export it if saving fails. Durable offline recovery is not implemented.
+Planning saves use optimistic revisions, serialized writes, a durable account/tab draft journal and explicit divergent-note choices. Protocol-2 pairing exchanges supported planning after account/profile approval; it can be paused, retried and disconnected. Notes typed during a delayed pairing or sync reply are preserved. Mail, bookmarks, secrets and raw provider data are not automatically copied to the cloud.
 
-Browser import is explicit and previewed. Automatic cloud copying and extension writeback are disabled. The extension itself still needs a fresh account-pairing/schema review. See [the audit](docs/AUDIT-2026-09-29.md) and [completion and maintenance plan](docs/RELEASE-AND-EVOLUTION.md).
+Focus start/pause/reset survives refresh and reflects actions in other dashboard tabs on this device. It writes actions rather than a storage update on every timer tick. The clock is device-local; it is not a cross-device timer service.
 
-## Verification — reliability pass, 29 September 2026
+Read [current acceptance and limits](docs/ACCEPTANCE-2026-10-18.md), [controlled evolution](docs/RELEASE-AND-EVOLUTION.md), and the historical [audit](docs/AUDIT-2026-09-29.md). Earlier release documents describe earlier snapshots and must not be treated as current test evidence.
 
-- `npm test`: executable regression tests for delayed saves, startup edits, conflicts, request validation, account isolation and real SQLite compare-and-swap behavior.
-- `npm run typecheck`: required, separate from bundling.
-- Browser and target-Mac tests are not claimed by this pass; no supported browser-control skill is available. Prior browser QA applies to the older release only.
-- Reduced Motion now applies to both canvas and CSS. Balanced drawing is capped at 24fps; hidden canvas buffers are released. These are implementation limits, not measured RAM guarantees.
-- Node 24 is required for the test harness; the application retains its existing runtime dependencies.
+## Verification
+
+`npm test` runs 112 regression tests. `npm run typecheck` is a separate required check. GitHub Actions also builds, audits production dependencies and runs real Chromium product/companion journeys using isolated account/API fixtures. Tests do not mutate production user data or prove live provider authorization. The owner's Mac 300 MB target remains unverified.
 
 ## Prerequisites
 
