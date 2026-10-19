@@ -1,5 +1,5 @@
 # Operation HQ — New Tab
-
+// ready for review//
 ## Version 2.4 release highlights — Resilient Surface
 
 - Fixed the main-screen click failure at its CSS root: the later cinematic rule had lowered the app beneath the full-screen scrim. Wallpaper, scrim, and ambient layers are now permanently pointer-transparent and the app has one final foreground stack level.
