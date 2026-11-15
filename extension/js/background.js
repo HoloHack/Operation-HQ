@@ -324,7 +324,7 @@ async function sortAutomaticBookmark(entry) {
   const saved=await chrome.storage.local.get(['hq_learned_domains','hq_bookmark_evidence_v1']);
   const bm={...current,sourcePath:await bookmarkFolderPath(current.parentId,barId)};
   // Reuse only already-authorized cached metadata; never fetch arbitrary pages automatically.
-  let cacheKey;try{const u=new URL(bm.url);u.hash='';cacheKey='url:'+u.href;}catch{}
+  let cacheKey;try{const u=new URL(bm.url);if(!/^#!?\//.test(u.hash))u.hash='';cacheKey='url:'+u.href;}catch{}
   const cached=cacheKey&&saved.hq_bookmark_evidence_v1?.[cacheKey];
   const evidence=cached&&Date.now()-cached.at<7*86400000?String(cached.text||'').slice(0,2400):'';
   const result=Classifier.classify({...bm,title:[bm.title,evidence].filter(Boolean).join(' ')},saved.hq_learned_domains||{},await scanLegitFolders(barId));

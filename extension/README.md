@@ -1,4 +1,4 @@
-# Operation HQ — Browser Companion 3.2.6
+# Operation HQ — Browser Companion 3.2.7 candidate
 
 The browser companion opens browser-only tools on demand. Ordinary new tabs remain ordinary Chrome tabs. The website and companion share the Study desk layout, Paper/Night colours, navigation and readable drawers; they have different capabilities because a website cannot directly manage Chrome bookmarks, tabs or extension OAuth.
 
@@ -7,7 +7,7 @@ The browser companion opens browser-only tools on demand. Ordinary new tabs rema
 1. Unzip the release into a permanent folder.
 2. Open `chrome://extensions`, enable Developer mode, and load the folder containing `manifest.json`.
 3. If already installed, update the existing unpacked folder and click **Reload**. Do not uninstall it or clear storage. The extension key, ID, Gmail client and permissions are unchanged.
-4. Pin Operation HQ. Open its popup, check version **3.2.6**, and choose **Connect dashboard** if you want the exact-origin bridge. Pairing planning data is a separate, explicit step in dashboard Settings.
+4. Pin Operation HQ. Open its popup, check version **3.2.7**, and choose **Connect dashboard** if you want the exact-origin bridge. Pairing planning data is a separate, explicit step in dashboard Settings. This candidate's verification limits are recorded in `docs/BOOKMARK-2026-11-16.md`; it does not update an existing unpacked installation automatically.
 5. Refresh existing browser-tool and dashboard tabs after updating. An open older tab can retain old scripts.
 
 ## Bookmarks

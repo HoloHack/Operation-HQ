@@ -234,8 +234,11 @@ const Bookmarks = {
     for (const item of raw) {
       try {
         const [bm] = await chrome.bookmarks.get(String(item?.bm?.id || ""));
-        if (bm?.url) current.push({ ...item, bm:{ ...item.bm, ...bm } });
-      } catch { /* deleted bookmarks disappear from the pending accuracy gate */ }
+        // A stored suggestion belongs to the resource and placement reviewed,
+        // not merely to a Chrome ID that may have been edited since then.
+        if (bm?.url && item.bm.url === bm.url && item.bm.title === bm.title && item.bm.parentId === bm.parentId) current.push({ ...item, bm:{ ...item.bm, ...bm } });
+        else this.decisionSelections.delete(String(item?.bm?.id || ""));
+      } catch { this.decisionSelections.delete(String(item?.bm?.id || "")); /* Deleted bookmarks disappear from the pending accuracy gate. */ }
     }
     await this.persistDecisions(current);
     this.renderAccuracyGate(current);
@@ -407,7 +410,7 @@ const Bookmarks = {
   },
 
   async fetchPageContext(url) {
-    let key;try{const parsed=new URL(url);parsed.hash="";key="url:"+parsed.href;}catch{return "";}
+    let key;try{const parsed=new URL(url);if(!/^#!?\//.test(parsed.hash))parsed.hash="";key="url:"+parsed.href;}catch{return "";}
     try{const cache=(await chrome.storage.local.get(this.EVIDENCE_KEY))[this.EVIDENCE_KEY]||{};if(cache[key]?.text&&Date.now()-cache[key].at<7*86400000)return cache[key].text;}catch{}
     const text=await this.readPageContext(url);
     if(text){try{await (this._evidenceWrite=(this._evidenceWrite||Promise.resolve()).catch(()=>{}).then(async()=>{const cache=(await chrome.storage.local.get(this.EVIDENCE_KEY))[this.EVIDENCE_KEY]||{};cache[key]={text,at:Date.now()};const entries=Object.entries(cache).sort((a,b)=>b[1].at-a[1].at).slice(0,600);await chrome.storage.local.set({[this.EVIDENCE_KEY]:Object.fromEntries(entries)});}));}catch{}}
@@ -422,6 +425,10 @@ const Bookmarks = {
   },
 
   async readPageContext(url) {
+    // A fragment route identifies content rendered by the site's own app.
+    // Fetching its HTML returns only the shared shell, not that route's page.
+    // Do not turn generic shell metadata into evidence for every saved route.
+    try { if (/^#!?\//.test(new URL(url).hash)) return ""; } catch { return ""; }
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 7000);
     try {
@@ -465,7 +472,7 @@ const Bookmarks = {
     });
     walk(root?.children);
     const pendingIds = new Set(this.decisionItems.map(item => String(item.bm.id)));
-    return allBookmarks.filter(bm => pendingIds.has(String(bm.id)) || legacyHoldingDescendants.has(bm.id) || (!pendingOnly && Classifier.isContentVariesDomain(Classifier.domainOf(bm.url))));
+    return allBookmarks.filter(bm => !Classifier.shouldNeverSort(bm.title) && (pendingIds.has(String(bm.id)) || legacyHoldingDescendants.has(bm.id) || (!pendingOnly && Classifier.isContentVariesDomain(Classifier.domainOf(bm.url)))));
   },
 
   async refineUncategorized({ pendingOnly = false } = {}, permission) {
@@ -654,7 +661,7 @@ const Bookmarks = {
   async moveAndRecord(bm, targetParentId, targetPath, barId, moves) {
     if (this.journalFailed) throw new Error("Recovery storage failed; further moves are paused.");
     const [current] = await chrome.bookmarks.get(bm.id);
-    if (!current?.url || current.url !== bm.url || String(current.parentId) !== String(bm.parentId)) throw new Error("Bookmark changed after preview. Refresh before sorting it.");
+    if (!current?.url || current.url !== bm.url || current.title !== bm.title || String(current.parentId) !== String(bm.parentId)) throw new Error("Bookmark changed after preview. Refresh before sorting it.");
     if (String(current.parentId) === String(targetParentId)) return false;
     const inverse = { id: current.id, url: current.url, fromParentId: current.parentId, fromIndex: current.index, fromPath: await this.folderPath(current.parentId, barId), toParentId: targetParentId, toPath: [...targetPath] };
     const transaction = this.pendingTransaction ||= { id: this.operationToken || crypto.randomUUID(), kind: "interrupted-sort", createdAt: Date.now(), moves: [] };

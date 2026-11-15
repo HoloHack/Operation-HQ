@@ -1,0 +1,77 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import vm from 'node:vm';
+
+function fixture() {
+  const data = {};
+  const nodes = new Map();
+  const add = node => { nodes.set(node.id, {...node}); return node; };
+  add({id:'1',title:'Bookmarks Bar'});
+  const tree = id => { const n = {...nodes.get(id)}; if(!n.url)n.children=[...nodes.values()].filter(c=>c.parentId===id).map(c=>tree(c.id)); return n; };
+  let reads = 0;
+  const chrome = {
+    storage:{local:{get:async key=>({[key]:structuredClone(data[key])}),set:async value=>Object.assign(data,structuredClone(value))}},
+    bookmarks:{getSubTree:async id=>[tree(id)],get:async id=>{if(!nodes.has(id))throw Error('Missing bookmark');return [{...nodes.get(id)}];}},
+  };
+  const ctx=vm.createContext({URL,console,chrome,AbortController,setTimeout,clearTimeout,fetch:async()=>{reads++;throw Error('Unexpected fetch');}});
+  for(const name of ['classifier','bookmarks'])vm.runInContext(fs.readFileSync(new URL(`../js/${name}.js`,import.meta.url),'utf8'),ctx);
+  return {book:vm.runInContext('Bookmarks',ctx),data,add,reads:()=>reads};
+}
+
+test('hash-router resources never share page evidence or reuse old shell evidence',async()=>{
+  const {book,data}=fixture();
+  data[book.EVIDENCE_KEY]={'url:https://example.org/':{text:'Old shared shell',at:Date.now()}};
+  const seen=[];
+  book.readPageContext=async url=>{seen.push(url);return url.endsWith('/math')?'Calculus lesson':'Guitar music';};
+  assert.equal(await book.fetchPageContext('https://example.org/#/math'),'Calculus lesson');
+  assert.equal(await book.fetchPageContext('https://example.org/#/music'),'Guitar music');
+  assert.equal(await book.fetchPageContext('https://example.org/#/math'),'Calculus lesson');
+  assert.equal(seen.length,2);
+});
+
+test('ordinary document anchors reuse evidence for the same page',async()=>{
+  const {book}=fixture();let reads=0;
+  book.readPageContext=async()=>{reads++;return 'Chemistry chapter';};
+  assert.equal(await book.fetchPageContext('https://example.org/lesson#one'),'Chemistry chapter');
+  assert.equal(await book.fetchPageContext('https://example.org/lesson#two'),'Chemistry chapter');
+  assert.equal(reads,1);
+});
+
+test('static fetch cannot claim evidence for hash-router content',async()=>{
+  const f=fixture();
+  for(const url of ['https://example.org/#/math','https://example.org/#!/music'])assert.equal(await f.book.fetchPageContext(url),'');
+  assert.equal(f.reads(),0);
+});
+
+test('Deep Review preserves protected titles in pending, legacy and variable-platform scopes',async()=>{
+  const f=fixture();f.add({id:'legacy',parentId:'1',title:'Uncategorized'});
+  const protectedLink=f.add({id:'keep',parentId:'legacy',title:' INBOX ',url:'https://youtube.com/watch?v=keep'});
+  const regular=f.add({id:'sort',parentId:'legacy',title:'Calculus',url:'https://youtube.com/watch?v=sort'});
+  f.book.decisionItems=[{bm:protectedLink},{bm:regular}];
+  for(const pendingOnly of [true,false]){
+    const candidates=await f.book.collectEvidenceCandidates('1',[protectedLink,regular],{pendingOnly});
+    assert.deepEqual(Array.from(candidates,item=>item.id),['sort']);
+  }
+  assert.equal(protectedLink.parentId,'legacy');
+});
+
+test('restored decisions cannot rebind old evidence to changed resources or placements',async()=>{
+  const f=fixture();
+  const old={id:'changed',parentId:'1',title:'Math resource',url:'https://example.org/math'};
+  const stable={id:'stable',parentId:'1',title:'Stable resource',url:'https://example.org/stable'};
+  f.book.renderAccuracyGate=()=>{};
+  for(const edit of [{url:'https://example.org/music'},{title:'Music resource'},{parentId:'manual-folder'},null]){
+    if(edit)f.add({...old,...edit});
+    else f.add({...old,id:'different'});
+    f.add(stable);
+    // For the deletion case, request an ID absent from the mutable tree.
+    const saved=edit?old:{...old,id:'deleted'};
+    f.data[f.book.DECISIONS_KEY]=[{bm:saved,context:'Old mathematical evidence',suggestedPath:['School & Academics','Mathematics'],candidates:[],reasons:['Old evidence']},{bm:stable,context:'Still applicable',candidates:[],reasons:[]}];
+    f.book.decisionSelections.set(saved.id,JSON.stringify(['School & Academics','Mathematics']));
+    const restored=await f.book.restoreDecisions();
+    assert.deepEqual(Array.from(restored,item=>item.bm.id),['stable']);
+    assert.equal(f.book.decisionSelections.has(saved.id),false);
+    assert.equal(f.data[f.book.DECISIONS_KEY].length,1);
+  }
+});
