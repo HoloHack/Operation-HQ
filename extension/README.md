@@ -1,4 +1,4 @@
-# Operation HQ — Browser Companion 3.2.4
+# Operation HQ — Browser Companion 3.2.5
 
 The browser companion opens browser-only tools on demand. Ordinary new tabs remain ordinary Chrome tabs. The website and companion share the Study desk layout, Paper/Night colours, navigation and readable drawers; they have different capabilities because a website cannot directly manage Chrome bookmarks, tabs or extension OAuth.
 
@@ -7,7 +7,7 @@ The browser companion opens browser-only tools on demand. Ordinary new tabs rema
 1. Unzip the release into a permanent folder.
 2. Open `chrome://extensions`, enable Developer mode, and load the folder containing `manifest.json`.
 3. If already installed, update the existing unpacked folder and click **Reload**. Do not uninstall it or clear storage. The extension key, ID, Gmail client and permissions are unchanged.
-4. Pin Operation HQ. Open its popup, check version **3.2.4**, and choose **Connect dashboard** if you want the exact-origin bridge. Pairing planning data is a separate, explicit step in dashboard Settings.
+4. Pin Operation HQ. Open its popup, check version **3.2.5**, and choose **Connect dashboard** if you want the exact-origin bridge. Pairing planning data is a separate, explicit step in dashboard Settings.
 5. Refresh existing browser-tool and dashboard tabs after updating. An open older tab can retain old scripts.
 
 ## Bookmarks
@@ -24,10 +24,10 @@ Exact corrections distinguish deep paths, meaningful query parameters, concrete 
 - Calendar, timetable, tasks, notes, assignments, assessments, recall/study tools, focus, generated study themes, weather, wallpaper tools, Gleam practice and Nexus commands.
 - Optional on-device model: explicitly loaded, bounded and unloadable. It is not downloaded at startup and cannot make unsupported commands real.
 
-Historical feature descriptions remain in Git history; the current acceptance ledger in `dashboard/docs/ACCEPTANCE-2026-10-18.md` distinguishes implemented capabilities from unverified provider/device behaviour and unfinished roadmap work.
+Historical feature descriptions remain in Git history; the current acceptance ledger in `dashboard/docs/RELEASE-2026-11-15.md` distinguishes implemented capabilities from unverified provider/device behaviour and unfinished roadmap work.
 
 ## Verification
 
-Run `npm ci --ignore-scripts` and `npm test` for 16 suites. GitHub Actions installs Chromium and runs `npm run test:browser` against a disposable profile, then `python3 scripts/package-release.py`. All bookmark, notes and tab mutations in tests use that isolated profile, never an owner's data.
+Run `npm ci --ignore-scripts` and `npm test` for 17 suites. GitHub Actions installs Chromium and runs `npm run test:browser` against a disposable profile, then `python3 scripts/package-release.py`. All bookmark, notes and tab mutations in tests use that isolated profile, never an owner's data.
 
 Live Gmail approval, an owner's real bookmark collection, target-Mac performance, complete Google Calendar parity and general-purpose autonomous AI are not certified by these tests. A Linux profile PSS reading is not a Mac per-tab 300 MB guarantee.

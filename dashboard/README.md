@@ -1,3 +1,5 @@
+Current continuation: [Planning and reliability](docs/RELEASE-2026-11-15.md).
+
 # Operation HQ Command Centre
 
 The everyday Study desk dashboard pairs with the Chrome companion for browser-only tools. Personal planning is account-scoped in D1. No Supabase project or new provider key is required for this release.
@@ -12,7 +14,7 @@ Read [current acceptance and limits](docs/ACCEPTANCE-2026-10-18.md), [controlled
 
 ## Verification
 
-`npm test` runs 112 regression tests. `npm run typecheck` is a separate required check. GitHub Actions also builds, audits production dependencies and runs real Chromium product/companion journeys using isolated account/API fixtures. Tests do not mutate production user data or prove live provider authorization. The owner's Mac 300 MB target remains unverified.
+`npm test` runs 126 regression tests. `npm run typecheck` is a separate required check. GitHub Actions also builds, audits production dependencies and runs real Chromium product/companion journeys using isolated account/API fixtures. Tests do not mutate production user data or prove live provider authorization. The owner's Mac 300 MB target remains unverified.
 
 ## Prerequisites
 
