@@ -24,6 +24,14 @@ jobs:
       - run: npm test
       - run: npx playwright install --with-deps chromium
       - run: npm run test:browser
+      - uses: actions/checkout@v4
+        with:
+          ref: 9924ef1b6fe71ffc21425066929d17bb51975080
+          path: memory-baseline
+          sparse-checkout: extension
+      - run: node tests/memory-benchmark.mjs
+        env:
+          HQ_MEMORY_BASELINE: ${{ github.workspace }}/memory-baseline/extension
       - run: python3 scripts/package-release.py
       - uses: actions/upload-artifact@v4
         if: always()

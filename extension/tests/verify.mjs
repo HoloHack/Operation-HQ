@@ -11,7 +11,7 @@ const pass = (message) => console.log(`✓ ${message}`);
 
 const manifest = JSON.parse(read("manifest.json"));
 assert.equal(manifest.manifest_version, 3);
-assert.equal(manifest.version, "3.2.4");
+assert.equal(manifest.version, "3.2.5");
 const extensionHex = createHash("sha256").update(Buffer.from(manifest.key, "base64")).digest("hex").slice(0, 32);
 const extensionId = [...extensionHex].map(char => String.fromCharCode(97 + parseInt(char, 16))).join("");
 assert.equal(extensionId, "cbgepkbfmcahdpahipkdeahppfbggjok", "Manifest key changed the OAuth-bound extension ID");

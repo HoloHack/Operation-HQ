@@ -677,10 +677,12 @@
   <div id="schedule-profile-row">
     <select id="schedule-profile-select" aria-label="Schedule profile"></select>
     <button id="schedule-add-profile-btn" title="New profile">+ Profile</button>
-    <button id="schedule-import-master-btn" title="Import or update the supplied master timetable">Sync v8</button>
+    <button id="schedule-import-master-btn" title="Import or update the supplied master timetable">Refresh Master v8</button>
     <button id="schedule-rename-profile-btn" title="Rename">Rename</button>
     <button id="schedule-delete-profile-btn" title="Delete">Delete</button>
   </div>
+  <p id="schedule-source-note" class="desk-tool-note"></p>
+  <button id="schedule-restore-source-btn" class="secondary-btn">Restore pre-refresh Master copy</button>
   <form id="schedule-profile-editor" class="schedule-profile-editor hidden">
     <label><span id="schedule-profile-editor-label">Profile name</span><input id="schedule-profile-name" type="text" maxlength="80" autocomplete="off" aria-label="Schedule profile name" required></label>
     <span id="schedule-profile-error" class="field-error" role="alert"></span>

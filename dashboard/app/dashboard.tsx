@@ -25,6 +25,7 @@ import BrowserAccess from "../components/browser-access";
 import {requestExtension} from "../lib/extension-client";
 import {browserTools,isBrowserTool,bridgeProblem,displayFirstName,type BrowserTool} from "../lib/browser-access";
 import {ActionJournal,createHistory,historyBasis,sameRecord,restoreHistory,type RecoveryActions} from "../lib/action-history";
+import {searchStudy,studyBrief,nextStudyTask,type LocalMatch} from '../lib/study-commands';
 import {routeCommand,commandExamples} from "../lib/command-router";
 import {contextNow,dayAgenda} from "../lib/planning";
 
@@ -138,7 +139,7 @@ export default function Dashboard({ displayName, signedIn, accountId }: { displa
   useEffect(()=>{document.documentElement.dataset.surface=surface;return ()=>{delete document.documentElement.dataset.surface;};},[surface]);
   const changeSurface=(value:"paper"|"ink")=>{setSurface(value);try{localStorage.setItem("hq-desk-surface:"+accountId,value);}catch{}setTransition(v=>v+1);};
   const [command, setCommand] = useState("");
-  const [commandResult, setCommandResult] = useState<{ title: string; detail: string; chapters?: number[]; subject?: string; reschedule?:boolean; tool?:BrowserTool } | null>(null);
+  const [commandResult, setCommandResult] = useState<{ title: string; detail: string; chapters?: number[]; subject?: string; reschedule?:boolean; tool?:BrowserTool; matches?:LocalMatch[]; focusDraft?:{mission:string;minutes:number;subject?:string;taskId?:string;basis?:string} } | null>(null);
   const [studyDue, setStudyDue] = useState("");
   const [studyMinutes, setStudyMinutes] = useState(25);
   const [studyError, setStudyError] = useState("");
@@ -147,10 +148,11 @@ export default function Dashboard({ displayName, signedIn, accountId }: { displa
   const [running, setRunning] = useState(false);
   const [secondsLeft, setSecondsLeft] = useState(25 * 60);
   const deadline = useRef<number | null>(null);
+  const pendingFocusStart=useRef<{mission:string;minutes:number}|null>(null);
   const [clockNotice,setClockNotice]=useState("");
   const clockKey="hq-focus-clock-v1:"+accountId;
-  const persistClock=(seconds:number,end:number|null,expected?:number|null)=>{
-    const value=focusSession(state.focus,seconds,end);setClockNotice("Saving focus clock on this device…");
+  const persistClock=(seconds:number,end:number|null,expected?:number|null,mission=state.focus)=>{
+    const value=focusSession(mission,seconds,end);setClockNotice("Saving focus clock on this device…");
     void (async()=>{if(!navigator.locks?.request)throw Error('Shared clock coordination is unavailable.');await navigator.locks.request('hq-focus-clock:'+accountId,()=>{
       if(expected!==undefined){const raw=localStorage.getItem(clockKey);const saved=raw&&raw.length<=4096?JSON.parse(raw):null;if(saved?.deadline!==expected||saved?.mission!==value.mission)return;}
       localStorage.setItem(clockKey,JSON.stringify(value));
@@ -164,8 +166,10 @@ export default function Dashboard({ displayName, signedIn, accountId }: { displa
   useEffect(()=>{
     if(!coordinator.ready)return;
     const restore=()=>{try{const clock=restoreFocusSession(localStorage.getItem(clockKey),state.focus);deadline.current=clock.deadline;setSecondsLeft(clock.secondsLeft);setRunning(clock.deadline!==null);setClockNotice("");}catch(error){deadline.current=null;setRunning(false);setSecondsLeft(state.focus.minutes*60);setClockNotice(String((error as Error).message));}};
-    restore();const changed=(event:StorageEvent)=>{if(event.key===clockKey||event.key===null)restore();};window.addEventListener('storage',changed);return()=>window.removeEventListener('storage',changed);
-  },[coordinator.ready,clockKey,state.focus.mission,state.focus.minutes]);
+    const pending=pendingFocusStart.current;
+    if(pending&&pending.mission===state.focus.mission&&pending.minutes===state.focus.minutes){pendingFocusStart.current=null;const seconds=pending.minutes*60,end=Date.now()+seconds*1000;deadline.current=end;setSecondsLeft(seconds);setRunning(true);persistClock(seconds,end);}
+    else restore();const changed=(event:StorageEvent)=>{if(event.key===clockKey||event.key===null)restore();};window.addEventListener('storage',changed);return()=>window.removeEventListener('storage',changed);
+  },[coordinator.ready,clockKey,state.focus.mission,state.focus.minutes,state.focus.updatedAt]);
   useEffect(() => {
     let cancelled=false;let release: (()=>void) | undefined;
     void (async()=> {
@@ -325,6 +329,16 @@ export default function Dashboard({ displayName, signedIn, accountId }: { displa
     event.preventDefault(); const text = command.trim(); if (!text) return;
     setStudyError(""); setStudyDue(""); setThemes([]);
     const intent=routeCommand(text);
+    if(intent.kind==='brief'){setCommandResult({title:'Your study brief',detail:studyBrief(state,new Date())});return;}
+    if(intent.kind==='search'){const matches=searchStudy(state,intent.query);setCommandResult({title:matches.length?'Found in your planning':'No matching local planning',detail:matches.length?`${matches.length} matches in your tasks, calendar, notes and study records. Open a workspace to review the source.`:'Try words from the title or your notes. Browser bookmarks and textbook sessions stay in the companion.',matches});return;}
+    if(intent.kind==='invalid-focus'){setCommandResult({title:'Choose a focus length',detail:'Use 5–180 whole minutes, for example: Start 50-minute focus on maths.'});return;}
+    if(intent.kind==='focus'){
+      const next=nextStudyTask(state,intent.subject),selected=intent.query&&!intent.subject?state.tasks.find(t=>!t.completed&&t.title.toLowerCase().includes(intent.query!.toLowerCase())):next;
+      if(intent.subject&&!selected){setCommandResult({title:'Add a subject task first',detail:`No unfinished ${intent.subject} task is recorded. Add a task or provide an explicit mission title.`});return;}
+      const mission=selected?.title||intent.query||state.focus.mission;
+      if(!mission){setCommandResult({title:'Choose the work first',detail:'Add a task, or use “Start 25-minute focus on algebra revision”.'});return;}
+      setCommandResult({title:'Focus session ready',detail:`${intent.minutes} minutes on ${mission}. Confirm to set this mission and start the device timer. Calendar and blocking stay as they are.`,focusDraft:{mission,minutes:intent.minutes,subject:selected?.subject||intent.subject,taskId:selected?.id,basis:selected?JSON.stringify(selected):undefined}});return;
+    }
     if(intent.kind==='invalid'){setCommandResult({title:"Check chapter list",detail:"Use whole chapter numbers, such as chapters 5, 7, 8 and 10. No tasks were changed."});return;}
     if(intent.kind==='chapters'){setCommandResult({title:`${intent.subject} mission ready`,detail:`${intent.chapters.length} chapter tasks, with a deadline and an estimate from you. Review before adding them.${intent.reschedule?' Next, Calendar will let you preview time around your fixed commitments.':''}`,chapters:intent.chapters,subject:intent.subject,reschedule:intent.reschedule});setThemes(themeChoices(text));return;}
     if(intent.kind==='theme'){setThemes(themeChoices(text));setCommandResult({title:"Colour choices ready",detail:"Three generated accents for your desk. Choose one to apply; your work stays as it is."});return;}
@@ -333,6 +347,15 @@ export default function Dashboard({ displayName, signedIn, accountId }: { displa
     if(intent.kind==='weather'){void requestWeather();setCommandResult({title:'Weather requested',detail:'The weather widget shows the result or a permission/provider error.'});return;}
     if(intent.kind==='pause'){if(running)toggleTimer();setCommandResult({title:'Timer paused',detail:'Your remaining focus time is kept.'});return;}
     setCommandResult({title:intent.kind==='help'?'What Commands can do':'I need one clearer instruction',detail:'Commands can open workspaces, stage chapter tasks, preview scheduling, propose colours and open companion tools. It is a local command router, not a general chat model. Try one of the examples below.'});
+  };
+
+
+  const applyFocusCommand=()=>{
+    const draft=commandResult?.focusDraft;if(!draft)return;
+    if(running){setCommandResult({...commandResult,detail:'Pause the current session before starting a different mission.'});return;}
+    if(draft.taskId&&JSON.stringify(state.tasks.find(t=>t.id===draft.taskId))!==draft.basis){setCommandResult({...commandResult,focusDraft:undefined,detail:'That task changed. Run the command again to review its latest version.'});return;}
+    const focus={mission:draft.mission,minutes:draft.minutes,subject:draft.subject,chapters:parseChapters(draft.mission),updatedAt:Date.now()};
+    pendingFocusStart.current={mission:focus.mission,minutes:focus.minutes};update(s=>({...s,focus}));setCommandResult({title:'Focus started',detail:`${draft.minutes} minutes on ${draft.mission}. Your current calendar and task progress were kept.`});
   };
 
   const applyStudyPlan = () => {
@@ -390,7 +413,7 @@ export default function Dashboard({ displayName, signedIn, accountId }: { displa
           <article className="widget bridge-card"><header><span className="widget-icon"><Link2/></span><div><small>BROWSER BRIDGE</small><h2>{bridge === "connected" ? "Extension connected" : bridge === "disabled" ? "Connection disabled" : bridge === "idle" ? "Browser tools not checked" : bridge === "checking" ? "Checking browser access" : "Companion unavailable"}</h2></div><span className={`bridge-light ${bridge}`}/></header><p role="status">{bridgeMessage}</p><div className="button-row"><button className="small-button" onClick={openImport}><RefreshCw/>Import from extension</button><button className="small-button" onClick={() => openBrowserTool("nexus")}><Gauge/>Browser tools</button></div></article>
         </div>
         <form className="nexus" onSubmit={runCommand}><span className="nexus-core"><Command/></span><div className="nexus-input"><label htmlFor="nexus-command">COMMANDS · LOCAL TOOLS</label><input id="nexus-command" value={command} onChange={event => setCommand(event.target.value)} placeholder="Study maths chapters 5, 7, 8 and 10" list="hq-command-examples" autoComplete="off"/></div><button type="submit">Run <ArrowRight/></button><datalist id="hq-command-examples">{commandExamples.map(example=><option key={example} value={example}/>)}</datalist></form><div className="command-help"><span>Try:</span>{["Show my timetable","Show unfinished tasks","Change theme for HSIE","Find manga releases"].map(example=><button key={example} onClick={()=>{setCommand(example);document.getElementById("nexus-command")?.focus();}}>{example}</button>)}</div>
-        {commandResult && <section className="command-result" aria-live="polite"><button className="result-close" onClick={() => setCommandResult(null)} aria-label="Dismiss result"><X/></button><span className="result-icon"><WandSparkles/></span><div><small>REVIEW BEFORE ACTION</small><h2>{commandResult.title}</h2><p>{commandResult.detail}</p>{commandResult.chapters && <div className="chapter-row">{commandResult.chapters.map(chapter => <span key={chapter}>CH {chapter}</span>)}</div>}{themes.length > 0 && <div className="theme-options">{themes.map(choice => <button key={choice.name} onClick={() => applyTheme(choice)} style={{"--choice":choice.hue} as React.CSSProperties}><i/><span>{choice.name}</span></button>)}</div>}<div className="button-row">{commandResult.chapters && <><div className="study-plan-inputs"><label>Deadline<input type="date" required min={currentDateKey || undefined} value={studyDue} onChange={event => setStudyDue(event.target.value)}/></label><label>Minutes per chapter<input type="number" min={5} max={180} step={1} value={studyMinutes} onChange={event => setStudyMinutes(Number(event.target.value))}/></label></div>{studyError && <p role="alert">{studyError}</p>}<button className="small-button accent" onClick={applyStudyPlan}><Check/>Apply study plan</button></>}{/Browser review/.test(commandResult.title) && <button className="small-button accent" onClick={() => openBrowserTool(commandResult.tool||"bookmarks")}>{commandResult.tool==="gmail"?<Mail/>:commandResult.tool==="settings"?<Settings/>:commandResult.tool==="gleam"?<BrainCircuit/>:commandResult.tool==="tabs"?<Link2/>:<Bookmark/>}Open {browserTools[commandResult.tool||"bookmarks"]}</button>}</div></div></section>}
+        {commandResult && <section className="command-result" aria-live="polite"><button className="result-close" onClick={() => setCommandResult(null)} aria-label="Dismiss result"><X/></button><span className="result-icon"><WandSparkles/></span><div><small>REVIEW BEFORE ACTION</small><h2>{commandResult.title}</h2><p>{commandResult.detail}</p>{commandResult.chapters && <div className="chapter-row">{commandResult.chapters.map(chapter => <span key={chapter}>CH {chapter}</span>)}</div>}{themes.length > 0 && <div className="theme-options">{themes.map(choice => <button key={choice.name} onClick={() => applyTheme(choice)} style={{"--choice":choice.hue} as React.CSSProperties}><i/><span>{choice.name}</span></button>)}</div>}<div className="command-matches">{commandResult.matches?.map(match=><button className="calendar-event" key={match.panel+match.id} onClick={()=>setPanel(match.panel)}><strong>{match.title}</strong><small>{match.detail}</small></button>)}</div><div className="button-row">{commandResult.focusDraft&&<button className="small-button accent" onClick={applyFocusCommand}><Play/>Confirm and start focus</button>}{commandResult.chapters && <><div className="study-plan-inputs"><label>Deadline<input type="date" required min={currentDateKey || undefined} value={studyDue} onChange={event => setStudyDue(event.target.value)}/></label><label>Minutes per chapter<input type="number" min={5} max={180} step={1} value={studyMinutes} onChange={event => setStudyMinutes(Number(event.target.value))}/></label></div>{studyError && <p role="alert">{studyError}</p>}<button className="small-button accent" onClick={applyStudyPlan}><Check/>Apply study plan</button></>}{/Browser review/.test(commandResult.title) && <button className="small-button accent" onClick={() => openBrowserTool(commandResult.tool||"bookmarks")}>{commandResult.tool==="gmail"?<Mail/>:commandResult.tool==="settings"?<Settings/>:commandResult.tool==="gleam"?<BrainCircuit/>:commandResult.tool==="tabs"?<Link2/>:<Bookmark/>}Open {browserTools[commandResult.tool||"bookmarks"]}</button>}</div></div></section>}
       </section>
       <Dialog open={Boolean(panel)} onOpenChange={open => { if (!open) {setPanel(null);cancelBrowserHandoff();} }}><DialogContent className="module-panel hq-dialog" showCloseButton={false} aria-describedby={undefined} onCloseAutoFocus={event => { event.preventDefault(); panelOpener.current?.focus(); }}><header className="panel-head"><div><small>OPERATION HQ</small><DialogTitle>{panel === "tasks" ? "Tasks" : panel === "calendar" ? "Calendar" : panel === "notes" ? "Notes" : panel === "study" ? "Study overview" : panel === "releases" ? "Release radar" : panel === "browser" ? browserTools[browserTool] : "System settings"}</DialogTitle></div><button onClick={() => {cancelBrowserHandoff();setPanel(null);}} aria-label="Close panel"><X/></button></header>
         {panel === "browser" && <BrowserAccess tool={browserTool} status={bridge} title={browserTitle} message={bridgeMessage} retry={()=>void openBrowserTool(browserTool)} settings={()=>{cancelBrowserHandoff();setPanel('settings');}}/>}

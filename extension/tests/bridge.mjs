@@ -43,3 +43,12 @@ test('concurrent tool clicks reuse one workspace and reject arbitrary routes',as
 });
 
 test('request identities reopen the same tool without another workspace',async()=>{const f=fixture();await f.bridge.openTool('gmail');const first=f.tabs[0].url;await f.bridge.openTool('gmail');assert.equal(f.tabs.length,1);assert.notEqual(f.tabs[0].url,first);assert.equal(new URLSearchParams(new URL(f.tabs[0].url).hash.slice(1)).get('tool'),'gmail');});
+test('projected alternate weeks match native job weeks and respect overrides',()=>{
+ const f=fixture(),block=t=>({s:'16:30',e:'18:30',t}),profile={days:{mon:[block('Park')]},altDays:{mon:[block('Marking job')]},altAnchorDate:'2026-09-16',altIntervalWeeks:2,altWeekOverride:null};
+ const saved={hq_schedule_profiles:{master:profile},hq_active_schedule_profile:'master'};
+ const projected=f.bridge.project(saved).schedule;
+ assert.equal(projected.find(b=>b.title==='Marking job').weekParity,0);assert.equal(projected.find(b=>b.title==='Park').weekParity,1);
+ assert.equal(projected[0].altAnchor,'2026-09-14');
+ for(const override of [true,false]){profile.altWeekOverride=override;const rows=f.bridge.project(saved).schedule;assert.equal(rows.length,1);assert.equal(rows[0].title,override?'Marking job':'Park');assert.equal(rows[0].weekParity,undefined);}
+ profile.altWeekOverride=null;profile.altIntervalWeeks=3;assert.throws(()=>f.bridge.project(saved),/unsupported interval/);
+});
