@@ -26,7 +26,7 @@ jobs:
       - run: npm run test:browser
       - uses: actions/checkout@v4
         with:
-          ref: 9924ef1b6fe71ffc21425066929d17bb51975080
+          ref: a9bf15bcfe71c4e5f913887c3678f074cfdc7b83
           path: memory-baseline
           sparse-checkout: extension
       - run: node tests/memory-benchmark.mjs

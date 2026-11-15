@@ -204,12 +204,14 @@ const Tasks = {
   render() {
     const filter = document.getElementById("task-filter")?.value || "all";
     const list = document.getElementById("task-list");
-    let items = this.data.filter(t => filter === "all" || t.venture === filter).sort((a, b) => this.taskRank(b) - this.taskRank(a));
+    // The hosted desk renders tasks; preserve data without hidden legacy rows.
+    const renderRows = typeof CompanionDesk === "undefined" || !CompanionDesk.active;
+    let items = renderRows ? this.data.filter(t => filter === "all" || t.venture === filter).sort((a, b) => this.taskRank(b) - this.taskRank(a)) : [];
     if (typeof ProfessionalView !== "undefined" && ProfessionalView.isActive()) {
       items = items.filter(t => !ProfessionalView.isPersonal(t.venture));
     }
 
-    list.innerHTML = items.map(t => {
+    list.innerHTML = renderRows ? items.map(t => {
       const tracking = !!t.activeSince;
       const pct = t.estMinutes ? Math.min(100, Math.round((t.trackedSeconds / (t.estMinutes * 60)) * 100)) : null;
       return `
@@ -221,7 +223,7 @@ const Tasks = {
         <button class="task-del" aria-label="Delete task">${Icons.span("x")}</button>
       </li>
     `;
-    }).join("") || '<li class="empty-state">No tasks here. Add one to get moving.</li>';
+    }).join("") || '<li class="empty-state">No tasks here. Add one to get moving.</li>' : "";
 
     list.querySelectorAll(".task-check").forEach(el => {
       el.onclick = () => this.toggle(el.closest(".task-item").dataset.id);

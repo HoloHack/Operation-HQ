@@ -54,6 +54,28 @@ try{
    assert.deepEqual(await page.evaluate(()=>BootDiagnostics.issues),[]);
    return {panelCount:panels.length};
  });
+ await check('Hidden legacy task rows are not retained; all 2000 records remain usable',async()=>{
+   const result=await page.evaluate(()=>{
+     const original=Tasks.data;
+     try { Tasks.data=Array.from({length:2000},(_,i)=>({id:'memory-task-'+i,text:'Memory task '+i,priority:'low',done:i%2===0,created:Date.now()}));Tasks.render();
+       return {rows:document.querySelectorAll('#task-list .task-item').length,records:Tasks.data.length,open:Tasks.data.filter(t=>!t.done).length,label:document.getElementById('task-progress-label').textContent};
+     } finally { Tasks.data=original;Tasks.render(); }
+   });assert.deepEqual(result,{rows:0,records:2000,open:1000,label:'1000 / 2000 done'});return result;
+ });
+ await check('Charts release closed buffers and reopen from unchanged records',async()=>{
+   const result=await page.evaluate(async()=>{
+     await HQPanels.close();await HQPanels.open('stats-flyout');await WeeklyStats.render();
+     const first=Boolean(WeeklyStats.chart)&&document.getElementById('weekly-stats-canvas').width>1;
+     HQPanels.close();const released=WeeklyStats.chart===null&&document.getElementById('weekly-stats-canvas').width===1;
+     await HQPanels.open('stats-flyout');await WeeklyStats.render();const reopened=Boolean(WeeklyStats.chart);
+     const original={data:Tasks.data,ventures:Tasks.ventures,selected:VentureDashboard.selected,metrics:VentureDashboard.metrics};
+     try { Tasks.ventures=['Memory fixture'];Tasks.data=[{id:'chart-task',text:'Retained task',venture:'Memory fixture',done:false}];VentureDashboard.selected='Memory fixture';VentureDashboard.metrics=[{id:'m1',venture:'Memory fixture',date:'2026-01-01',mrr:10},{id:'m2',venture:'Memory fixture',date:'2026-02-01',mrr:20}];
+       await HQPanels.open('venture-dash-flyout');const ventureOpen=Boolean(VentureDashboard.chart&&VentureDashboard.metricsChart);
+       HQPanels.close();VentureDashboard.render();const canvases=['weekly-stats-canvas','venture-dash-canvas','venture-metrics-canvas'].map(id=>({width:document.getElementById(id).width,height:document.getElementById(id).height}));
+       return {first,released,reopened,ventureOpen,canvases,charts:Object.keys(Chart.instances).length,records:Tasks.data.length,metrics:VentureDashboard.metrics.length};
+     } finally { HQPanels.close();Tasks.data=original.data;Tasks.ventures=original.ventures;VentureDashboard.selected=original.selected;VentureDashboard.metrics=original.metrics;VentureDashboard.render();Tasks.render(); }
+   });assert(result.first&&result.released&&result.reopened&&result.ventureOpen);assert.equal(result.charts,0);assert(result.canvases.every(c=>c.width===1&&c.height===1));assert.equal(result.records,1);assert.equal(result.metrics,2);return result;
+ });
  await check('Settings and safe-mode exit remain usable',async()=>{
    await page.locator('#desk-advanced').click();await page.waitForFunction(()=>!document.getElementById('settings-drawer').classList.contains('hidden'));
    await page.locator('#close-settings').click();

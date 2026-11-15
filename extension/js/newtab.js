@@ -232,10 +232,7 @@ const ScriptLoader = {
   },
 };
 
-// The HTML declares only diagnostics plus this bootstrap. Core definitions are
-// loaded here in one inspectable manifest, while panel-only code stays out of
-// the first-use path below. A missing core file is recorded independently and
-// does not prevent later definitions from being attempted.
+// Load core definitions independently; panels and vendor bundles stay lazy.
 const CORE_SCRIPTS = Object.freeze([
   "js/icons.js",
   "js/storage-schema.js",
@@ -993,6 +990,23 @@ function wireDock() {
   }
   moreButton.onclick = () => setMoreOpen(moreTray.classList.contains("hidden"));
 
+  // Release chart resources while retaining their records.
+  function releasePanelResources(id) {
+    if (id === "stats-flyout" && typeof WeeklyStats !== "undefined") WeeklyStats.release();
+    if (id === "venture-dash-flyout" && typeof VentureDashboard !== "undefined") VentureDashboard.release();
+  }
+  function resumePanelResources(id) {
+    if (id === "stats-flyout" && typeof WeeklyStats !== "undefined") {
+      void WeeklyStats.render().catch(error => window.HQEarlyDiagnostics?.record("stats-render", String(error?.message || error)));
+    }
+    if (id === "venture-dash-flyout" && typeof VentureDashboard !== "undefined") VentureDashboard.render();
+  }
+  document.addEventListener("visibilitychange", () => {
+    const id = document.querySelector(".flyout.open")?.id;
+    if (document.hidden) releasePanelResources(id);
+    else resumePanelResources(id);
+  });
+
   let panelRequestGeneration = 0;
   function closeAll(restoreFocus = false) {
     panelRequestGeneration += 1;
@@ -1008,6 +1022,7 @@ function wireDock() {
       else document.activeElement?.blur?.();
     }
     document.querySelectorAll(".flyout").forEach(f => {
+      if (f.classList.contains("open")) releasePanelResources(f.id);
       f.classList.remove("open");
       f.classList.remove("panel-fullscreen");
       f.dataset.depth = "mini";
@@ -1053,7 +1068,7 @@ function wireDock() {
     // Live data panels re-render on open rather than only once at boot —
     // Tasks change constantly through the day, so a dashboard that only
     // reflected page-load-time state would go stale within minutes.
-    if (panelId === "venture-dash-flyout" && typeof VentureDashboard !== "undefined") VentureDashboard.render();
+    resumePanelResources(panelId);
     if (panelId === "today-flyout" && typeof Today !== "undefined") Today.render();
     // The weather panel specifically focuses the city search box rather
     // than the generic "first focusable element" — that would land on
