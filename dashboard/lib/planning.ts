@@ -50,7 +50,7 @@ export function planCapacity(state:HQState,options:{from:string;until:string;sub
    const available=options.timetableOnly?dayAgenda(working,date).filter(e=>e.category==='availability'&&e.start&&e.end).map(e=>({start:Math.max(cursor,minute(e.start!)),end:Math.min(end,minute(e.end!))})).filter(v=>v.end>v.start).sort((a,b)=>a.start-b.start):[{start:cursor,end}];
    const ranges:{start:number;end:number}[]=[];for(const span of available){const last=ranges.at(-1);if(last&&span.start<=last.end)last.end=Math.max(last.end,span.end);else ranges.push({...span});}
    for(const range of ranges){
-    let position=range.start;
+    const prior=chunks.at(-1);let position=Math.max(range.start,prior?.date===date?minute(prior.end!)+breaks:range.start);
     for(const span of [...spans,{start:range.end,end:range.end}]){
      if(span.end<position)continue;const stop=Math.min(range.end,span.start);
      while(position+5<=stop&&remaining){const duration=Math.min(50,remaining,stop-position);if(duration<5)break;chunks.push({id:id(),title:task.title,date,start:clock(position),end:clock(position+duration),category:'study-plan',notes:`Task: ${task.id}`,updatedAt:now});remaining-=duration;position+=duration+breaks;}

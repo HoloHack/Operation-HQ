@@ -48,3 +48,11 @@
 
 /* Every dashboard widget needs its own opaque surface over a photo. */
 .hq-shell:has(.desk-wallpaper) .widget-grid{row-gap:20px}
+
+/* Import controls shrink inside the calendar grid instead of sizing the page. */
+.calendar-body > *, .timetable-editor, .timetable-editor label { min-width: 0; }
+.timetable-editor > label { display: grid; gap: 8px; font-size: 13px; }
+.timetable-editor input[type="file"] { width: 100%; min-width: 0; max-width: 100%; font: inherit; padding: 12px 0; }
+.timetable-editor .field-grid { margin-block: 18px; }
+.timetable-editor .plan-review { min-width: 0; }
+.command-matches { display: grid; min-width: 0; gap: 8px; margin-top: 16px; }
