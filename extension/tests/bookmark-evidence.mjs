@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
+import { webcrypto } from 'node:crypto';
 
 function fixture() {
   const data = {};
@@ -14,9 +15,9 @@ function fixture() {
     storage:{local:{get:async key=>({[key]:structuredClone(data[key])}),set:async value=>Object.assign(data,structuredClone(value))}},
     bookmarks:{getSubTree:async id=>[tree(id)],get:async id=>{if(!nodes.has(id))throw Error('Missing bookmark');return [{...nodes.get(id)}];}},
   };
-  const ctx=vm.createContext({URL,console,chrome,AbortController,setTimeout,clearTimeout,fetch:async()=>{reads++;throw Error('Unexpected fetch');}});
+  const ctx=vm.createContext({URL,console,chrome,crypto:webcrypto,TextEncoder,AbortController,setTimeout,clearTimeout,fetch:async()=>{reads++;throw Error('Unexpected fetch');}});
   for(const name of ['classifier','bookmarks'])vm.runInContext(fs.readFileSync(new URL(`../js/${name}.js`,import.meta.url),'utf8'),ctx);
-  return {book:vm.runInContext('Bookmarks',ctx),data,add,reads:()=>reads};
+  return {book:vm.runInContext('Bookmarks',ctx),data,add,ctx,reads:()=>reads};
 }
 
 test('hash-router resources never share page evidence or reuse old shell evidence',async()=>{
@@ -73,5 +74,48 @@ test('restored decisions cannot rebind old evidence to changed resources or plac
     assert.deepEqual(Array.from(restored,item=>item.bm.id),['stable']);
     assert.equal(f.book.decisionSelections.has(saved.id),false);
     assert.equal(f.data[f.book.DECISIONS_KEY].length,1);
+  }
+});
+
+function renamedConfirmationFixture(title = 'INBOX') {
+  const f=fixture();
+  const reviewed={id:'renamed',parentId:'1',title:'Math page',url:'https://example.org/math'};
+  f.add({...reviewed,title});
+  f.book.decisionItems=[{bm:{...reviewed},suggestedPath:['School & Academics','Mathematics']}];
+  f.book.decisionSelections.set(reviewed.id,JSON.stringify(['School & Academics','Mathematics']));
+  f.ctx.document={querySelectorAll:()=>[]};
+  const calls={destinations:0,moves:0};
+  Object.assign(f.book,{
+    runExclusive:async(_name,operation)=>operation(),
+    getAllBookmarks:async()=>({barId:'1',nodes:[]}),
+    getOrCreateFolderPath:async()=>{calls.destinations++;return 'destination';},
+    moveAndRecord:async()=>{calls.moves++;return true;},
+    getLearnedMap:async()=>({}),
+    commitTransaction:async()=>{},
+    renderAccuracyGate:()=>{},
+    cleanupLegacyHoldingFolders:async()=>0,
+    recordAudit:async()=>{},
+    refreshInboxCount:async()=>{},
+    log:()=>{},
+  });
+  return {...f,calls,reviewed};
+}
+
+test('single confirmation rejects protected and ordinary title-only changes while review stays open',async()=>{
+  for(const title of ['INBOX','Music page']){
+    const f=renamedConfirmationFixture(title);
+    await assert.rejects(f.book.applyCorrection(f.reviewed.id,['School & Academics','Mathematics']),/changed after review/);
+    assert.deepEqual(f.calls,{destinations:0,moves:0});
+    assert.equal(f.data.hq_learned_domains,undefined);
+  }
+});
+
+test('batch confirmation rejects protected and ordinary title-only changes before destination creation or learning',async()=>{
+  for(const title of ['INBOX','Music page']){
+    const f=renamedConfirmationFixture(title);
+    await f.book.applySelectedDecisions();
+    assert.deepEqual(f.calls,{destinations:0,moves:0});
+    assert.deepEqual(f.data.hq_learned_domains,{});
+    assert.equal(f.book.decisionItems.length,1);
   }
 });

@@ -13,7 +13,7 @@ let context;
 async function waitForSaved(read,accept){const end=Date.now()+12000;while(Date.now()<end){const value=await read();if(accept(value))return value;await new Promise(r=>setTimeout(r,50));}throw new Error("Saved data did not reach the expected state.");}
 async function check(name,run){const start=Date.now();try{const details=await run();results.push({name,passed:true,milliseconds:Date.now()-start,details});console.log('✓ '+name+(details?' '+JSON.stringify(details):''));}catch(error){results.push({name,passed:false,error:String(error.stack||error)});throw error;}}
 try{
- context=await chromium.launchPersistentContext(profile,{channel:'chromium',headless:true,viewport:{width:1440,height:960},args:[`--disable-extensions-except=${root}`,`--load-extension=${root}`,'--no-sandbox']});
+ context=await chromium.launchPersistentContext(profile,{channel:'chromium',...(process.env.HQ_CHROMIUM_EXECUTABLE?{executablePath:process.env.HQ_CHROMIUM_EXECUTABLE}:{}),headless:true,viewport:{width:1440,height:960},args:[`--disable-extensions-except=${root}`,`--load-extension=${root}`,'--no-sandbox']});
  context.setDefaultTimeout(12000);
  let worker=context.serviceWorkers()[0]||await context.waitForEvent('serviceworker');
  const extensionId=new URL(worker.url()).host,base=`chrome-extension://${extensionId}/`;
@@ -229,6 +229,28 @@ try{
  await check('Closed tools release their layout and record settled profile memory',async()=>{
    await page.evaluate(()=>HQPanels.close());const hidden=await page.locator('.flyout').evaluateAll(items=>items.map(e=>({id:e.id,display:getComputedStyle(e).display,width:e.getBoundingClientRect().width})));assert(hidden.every(e=>e.display==='none'&&e.width===0),'Closed panels retained layout: '+JSON.stringify(hidden.filter(e=>e.width>0)));assert.equal(await page.locator('#settings-drawer').evaluate(e=>getComputedStyle(e).display),'none');
    await new Promise(resolve=>setTimeout(resolve,10000));const memory=await profileMemory(profile);assert(memory.available);await fs.writeFile(path.join(output,'memory-settled.json'),JSON.stringify(memory,null,2));return {closedPanels:hidden.length,memory};
+ });
+ await check('Long bookmark decisions survive reload and reject renamed resources',async()=>{
+   const result=await page.evaluate(async()=>{
+     await chrome.storage.local.set({hq_realtime_sort_enabled:false});
+     const bar=(await chrome.bookmarks.getTree())[0].children[0].id;
+     const saved=(await chrome.storage.local.get(Bookmarks.DECISIONS_KEY))[Bookmarks.DECISIONS_KEY];
+     const original=Bookmarks.decisionItems;
+     const bookmark=await chrome.bookmarks.create({parentId:bar,title:'Long resource '+ 'x'.repeat(600),url:'https://example.org/?resource='+ 'y'.repeat(3200)});
+     try{
+       await Bookmarks.persistDecisions([{bm:bookmark,reasons:['Synthetic decision']}]);
+       const bounded=Bookmarks.decisionItems[0],identity=bounded.resourceIdentity;
+       await Bookmarks.restoreDecisions();
+       const retained=Bookmarks.decisionItems.some(item=>item.bm.id===bookmark.id);
+       const valid=await Bookmarks.decisionMatches(bounded,bookmark);
+       const changed=await chrome.bookmarks.update(bookmark.id,{title:'INBOX'});
+       const stale=await Bookmarks.decisionMatches(bounded,changed);
+       const outcome=await Bookmarks.applyCorrection(bookmark.id,['School & Academics','Mathematics']);
+       const untouched=(await chrome.bookmarks.get(bookmark.id))[0].parentId===bar;
+       return {identity,retained,valid,stale,untouched,blocked:outcome?.error===true,titleLength:bounded.bm.title.length,urlLength:bounded.bm.url.length};
+     }finally{await chrome.bookmarks.remove(bookmark.id);Bookmarks.decisionItems=original;await chrome.storage.local.set({[Bookmarks.DECISIONS_KEY]:saved||[]});Bookmarks.renderAccuracyGate();}
+   });
+   assert.match(result.identity,/^sha256-v1:[a-f0-9]{64}$/);assert(result.retained&&result.valid&&result.untouched&&result.blocked);assert.equal(result.stale,false);assert.equal(result.titleLength,500);assert.equal(result.urlLength,3000);return result;
  });
  await check('No uncaught browser errors across tested journeys',async()=>{assert.deepEqual(errors,[]);return {consoleErrors};});
 }catch(error){console.error(error);process.exitCode=1;if(context){for(const p of context.pages().filter(p=>p.url().includes('newtab.html'))){await p.screenshot({path:path.join(output,'failure.png')}).catch(()=>{});const diagnostics=await p.evaluate(()=>({issues:typeof BootDiagnostics==='undefined'?[]:BootDiagnostics.issues,early:window.HQEarlyDiagnostics?.entries()})).catch(()=>null);console.log('Failure diagnostics',JSON.stringify(diagnostics));console.log('Failure panel states',JSON.stringify(await p.evaluate(()=>({hash:location.hash,panels:[...document.querySelectorAll('.flyout.open')].map(e=>({id:e.id,visible:getComputedStyle(e).visibility})),errors:window.HQEarlyDiagnostics?.entries()})).catch(()=>null)));await fs.writeFile(path.join(output,'diagnostics.json'),JSON.stringify(diagnostics,null,2));}}}

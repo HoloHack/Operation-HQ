@@ -68,10 +68,12 @@ function updateBookmarkDecisions(mutator) {
   return bookmarkDecisionWrite;
 }
 
-function markBookmarkDecision(bookmark, result) {
+async function markBookmarkDecision(bookmark, result) {
+  const resourceIdentity = await Classifier.decisionIdentity(bookmark);
   return updateBookmarkDecisions(current => [
     ...current.filter(item => String(item.bm.id) !== String(bookmark.id)),
     {
+      resourceIdentity,
       bm:{ id:String(bookmark.id), title:String(bookmark.title || "").slice(0,500), url:String(bookmark.url || "").slice(0,3000), parentId:String(bookmark.parentId || ""), sourcePath:Array.isArray(bookmark.sourcePath) ? bookmark.sourcePath.slice(0,12) : [] },
       reasons:(result?.reasons || ["more topic evidence needed"]).map(String).slice(0,6),
       suggestedPath:Classifier.normalizePath(result?.path, { allowOperational:false }),

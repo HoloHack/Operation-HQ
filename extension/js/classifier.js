@@ -323,6 +323,15 @@ const Classifier = {
     return NEVER_SORT_TITLES.some(k => t === k);
   },
 
+  async decisionIdentity(bookmark) {
+    // Distinct from topic-learning identity: every URL/title character is
+    // significant when deciding whether an owner's reviewed resource changed.
+    if (!globalThis.crypto?.subtle || typeof TextEncoder === "undefined") throw new Error("Bookmark identity verification is unavailable; no changes made.");
+    const bytes = new TextEncoder().encode(JSON.stringify([String(bookmark?.url || ""), String(bookmark?.title || "")]));
+    const digest = await crypto.subtle.digest("SHA-256", bytes);
+    return "sha256-v1:" + Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
+  },
+
   fingerprint(bookmark) {
     try {
       const url=new URL(bookmark.url),domain=url.hostname.toLowerCase().replace(/^www\./,''),segments=url.pathname.split('/').filter(Boolean);

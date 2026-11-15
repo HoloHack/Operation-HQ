@@ -206,8 +206,11 @@ const Bookmarks = {
     }
   },
 
-  serializeDecision(item) {
+  async serializeDecision(item) {
+    const resourceIdentity = item.resourceIdentity ?? await Classifier.decisionIdentity(item.bm);
+    if (!/^sha256-v1:[a-f0-9]{64}$/.test(resourceIdentity)) throw new Error("Invalid bookmark decision identity; refresh Preview.");
     return {
+      resourceIdentity,
       bm:{ id:String(item.bm.id), title:String(item.bm.title || "").slice(0,500), url:String(item.bm.url || "").slice(0,3000), parentId:String(item.bm.parentId || ""), sourcePath:Array.isArray(item.bm.sourcePath) ? item.bm.sourcePath.slice(0,12) : [] },
       context:String(item.context || "").slice(0,3000),
       reasons:(item.reasons || []).map(String).slice(0,6),
@@ -219,12 +222,34 @@ const Bookmarks = {
 
   async persistDecisions(items = this.decisionItems) {
     const byId = new Map();
-    items.forEach(item => {
-      if (item?.bm?.id && item?.bm?.url) byId.set(String(item.bm.id), this.serializeDecision(item));
-    });
+    for (const item of items) {
+      if (item?.bm?.id && item?.bm?.url) byId.set(String(item.bm.id), await this.serializeDecision(item));
+    }
     this.decisionItems = [...byId.values()];
     await chrome.storage.local.set({ [this.DECISIONS_KEY]:this.decisionItems });
     return this.decisionItems;
+  },
+
+  async decisionMatches(item, bookmark) {
+    if (!item?.bm || !bookmark?.url || String(item.bm.parentId) !== String(bookmark.parentId)) return false;
+    if (item.resourceIdentity != null) return /^sha256-v1:[a-f0-9]{64}$/.test(item.resourceIdentity) && item.resourceIdentity === await Classifier.decisionIdentity(bookmark);
+    // Legacy entries without a digest can only be upgraded after an exact
+    // comparison. Truncated legacy values cannot prove the full identity.
+    return item.bm.url === bookmark.url && item.bm.title === bookmark.title;
+  },
+
+  async inspectDecision(item) {
+    try {
+      const [bookmark] = await chrome.bookmarks.get(String(item?.bm?.id || ""));
+      if (!await this.decisionMatches(item, bookmark)) throw new Error("Bookmark changed after review. Refresh Preview before inspecting it.");
+      const url = new URL(bookmark.url);
+      if (!["https:", "http:"].includes(url.protocol)) throw new Error("Inspect supports web links only.");
+      await chrome.tabs.create({ url:bookmark.url });
+      return true;
+    } catch (error) {
+      this.log(`Could not inspect bookmark: ${String(error?.message || error)}`);
+      return false;
+    }
   },
 
   async restoreDecisions() {
@@ -236,7 +261,7 @@ const Bookmarks = {
         const [bm] = await chrome.bookmarks.get(String(item?.bm?.id || ""));
         // A stored suggestion belongs to the resource and placement reviewed,
         // not merely to a Chrome ID that may have been edited since then.
-        if (bm?.url && item.bm.url === bm.url && item.bm.title === bm.title && item.bm.parentId === bm.parentId) current.push({ ...item, bm:{ ...item.bm, ...bm } });
+        if (await this.decisionMatches(item, bm)) current.push({ ...item, bm:{ ...item.bm, ...bm } });
         else this.decisionSelections.delete(String(item?.bm?.id || ""));
       } catch { this.decisionSelections.delete(String(item?.bm?.id || "")); /* Deleted bookmarks disappear from the pending accuracy gate. */ }
     }
@@ -333,7 +358,7 @@ const Bookmarks = {
       open.type = "button";
       open.className = "secondary-btn";
       open.textContent = "Inspect";
-      open.onclick = () => chrome.tabs.create({ url:item.bm.url });
+      open.onclick = () => this.inspectDecision(item);
       controls.append(select, move, open);
       row.append(copy, controls);
       list.append(row);
@@ -796,7 +821,7 @@ const Bookmarks = {
       const [bm] = await chrome.bookmarks.get(bookmarkId);
       if (!bm?.url) throw new Error("That bookmark no longer exists.");
       const reviewed=this.decisionItems.find(item=>String(item.bm.id)===String(bookmarkId));
-      if(reviewed&&(reviewed.bm.url!==bm.url||reviewed.bm.parentId!==bm.parentId))throw Error("Bookmark changed after review. Refresh Preview before confirming it.");
+      if (Classifier.shouldNeverSort(bm.title) || !await this.decisionMatches(reviewed, bm)) throw Error("Bookmark changed after review. Refresh Preview before confirming it.");
       const targetParent = await this.getOrCreateFolderPath(path, barId);
       const moves = [];
       await this.moveAndRecord(bm, targetParent, path, barId, moves);
@@ -834,7 +859,7 @@ const Bookmarks = {
         try {
           const [bm] = await chrome.bookmarks.get(choice.id);
           const reviewed=this.decisionItems.find(item=>String(item.bm.id)===String(choice.id));
-          if (!bm?.url || !reviewed || reviewed.bm.url!==bm.url || reviewed.bm.parentId!==bm.parentId) { failed += 1; continue; }
+          if (!bm?.url || Classifier.shouldNeverSort(bm.title) || !await this.decisionMatches(reviewed, bm)) { failed += 1; continue; }
           const targetParent = await this.getOrCreateFolderPath(path, barId);
           await this.moveAndRecord(bm, targetParent, path, barId, moves);
           learned[Classifier.fingerprint(bm)] = path;
