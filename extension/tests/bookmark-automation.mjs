@@ -37,3 +37,14 @@ test('persistent Chrome errors stop automatic polling after three attempts',asyn
  assert.match(f.data[f.queue.statusKey].lastError,/Chrome unavailable/);
 });
 test('cancelling the last waiting link clears its alarm immediately',async()=>{const f=fixture();f.busy(true);await f.queue.enqueue('one',bm);await f.queue.cancel('one');assert(!f.alarms.has(f.queue.alarm));});
+
+test('overlapping wake callers await the follow-up pass before acknowledging completion',async()=>{
+ const f=fixture();f.queue.schedule=async()=>{};
+ let finishFirst,finishSecond,signalFirst,signalSecond,calls=0;
+ const firstStarted=new Promise(resolve=>signalFirst=resolve),secondStarted=new Promise(resolve=>signalSecond=resolve);
+ f.queue.drain=async()=>{calls++;if(calls===1){signalFirst();await new Promise(resolve=>finishFirst=resolve);return {pass:1};}signalSecond();await new Promise(resolve=>finishSecond=resolve);return {pass:2};};
+ const first=f.queue.wake();await firstStarted;let secondFinished=false;const second=f.queue.wake().then(v=>{secondFinished=true;return v;});
+ await new Promise(setImmediate);finishFirst();await secondStarted;await new Promise(setImmediate);
+ assert.equal(secondFinished,false,'A retry returned while its coalesced pass was still running');finishSecond();
+ assert.deepEqual(await first,{pass:2});assert.deepEqual(await second,{pass:2});assert.equal(calls,2);
+});

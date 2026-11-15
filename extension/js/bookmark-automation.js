@@ -34,8 +34,10 @@ class BookmarkAutoQueue {
   async wake(){
     try{await this.schedule();}catch(error){await this.storage.set({[this.statusKey]:{lastError:String(error?.message||error).slice(0,400),checkedAt:this.now()}}).catch(()=>{});throw error;}
     if(this.flight){this.again=true;return this.flight;}
-    const work=this.drain();this.flight=work;
-    try{return await work;}finally{if(this.flight===work)this.flight=null;if(this.again){this.again=false;await this.wake();}}
+    // Every caller awaits the coalesced work, not only the first drain pass.
+    const work=(async()=>{let status;do{this.again=false;status=await this.drain();}while(this.again);return status;})();
+    this.flight=work;
+    try{return await work;}finally{if(this.flight===work)this.flight=null;}
   }
   async drain(){
     try{
