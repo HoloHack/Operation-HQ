@@ -6,15 +6,27 @@
 
 const WeeklyStats = {
   chart: null,
+  generation: 0,
+
+  visible() { return !document.hidden && document.getElementById("stats-flyout")?.classList.contains("open"); },
+  release() {
+    this.generation++;
+    this.chart?.destroy(); this.chart = null;
+    const canvas = document.getElementById("weekly-stats-canvas");
+    if (canvas) { canvas.width = 1; canvas.height = 1; }
+  },
 
   async render() {
     const canvas = document.getElementById("weekly-stats-canvas");
-    if (!canvas || typeof Chart === "undefined") return;
+    if (!canvas || typeof Chart === "undefined" || !this.visible()) return;
+    const generation = ++this.generation;
 
     const days = await ActivityLog.getLastNDays(7);
     const streak = await DailyTasks.computeStreak();
     const milestone = DailyTasks.nextMilestoneGap(streak);
     const freezesLeft = DailyTasks.freezesRemaining();
+    // A close or newer render may have happened while reading storage.
+    if (generation !== this.generation || !this.visible()) return;
 
     document.getElementById("weekly-stats-headline").textContent = milestone
       ? `${milestone.gap} day${milestone.gap === 1 ? "" : "s"} to your ${milestone.next}-day streak milestone`
@@ -48,6 +60,6 @@ const WeeklyStats = {
   },
 
   init() {
-    this.render();
+    return this.render();
   },
 };

@@ -1,4 +1,4 @@
-# Operation HQ — Browser Companion 3.2.5
+# Operation HQ — Browser Companion 3.2.6
 
 The browser companion opens browser-only tools on demand. Ordinary new tabs remain ordinary Chrome tabs. The website and companion share the Study desk layout, Paper/Night colours, navigation and readable drawers; they have different capabilities because a website cannot directly manage Chrome bookmarks, tabs or extension OAuth.
 
@@ -7,7 +7,7 @@ The browser companion opens browser-only tools on demand. Ordinary new tabs rema
 1. Unzip the release into a permanent folder.
 2. Open `chrome://extensions`, enable Developer mode, and load the folder containing `manifest.json`.
 3. If already installed, update the existing unpacked folder and click **Reload**. Do not uninstall it or clear storage. The extension key, ID, Gmail client and permissions are unchanged.
-4. Pin Operation HQ. Open its popup, check version **3.2.5**, and choose **Connect dashboard** if you want the exact-origin bridge. Pairing planning data is a separate, explicit step in dashboard Settings.
+4. Pin Operation HQ. Open its popup, check version **3.2.6**, and choose **Connect dashboard** if you want the exact-origin bridge. Pairing planning data is a separate, explicit step in dashboard Settings.
 5. Refresh existing browser-tool and dashboard tabs after updating. An open older tab can retain old scripts.
 
 ## Bookmarks
@@ -28,6 +28,12 @@ Historical feature descriptions remain in Git history; the current acceptance le
 
 ## Verification
 
-Run `npm ci --ignore-scripts` and `npm test` for 17 suites. GitHub Actions installs Chromium and runs `npm run test:browser` against a disposable profile, then `python3 scripts/package-release.py`. All bookmark, notes and tab mutations in tests use that isolated profile, never an owner's data.
+Run `npm ci --ignore-scripts` and `npm test` for 18 suites. GitHub Actions installs Chromium and runs `npm run test:browser` against a disposable profile, then `python3 scripts/package-release.py`. All bookmark, notes and tab mutations in tests use that isolated profile, never an owner's data.
 
 Live Gmail approval, an owner's real bookmark collection, target-Mac performance, complete Google Calendar parity and general-purpose autonomous AI are not certified by these tests. A Linux profile PSS reading is not a Mac per-tab 300 MB guarantee.
+
+## Resource lifecycle in 3.2.6
+
+The browser-tool desk keeps task records and context without building rows in its hidden legacy home. The explicit `?legacy=1` route still renders the local task list. Statistics and venture charts release their instances and drawing buffers on close or backgrounding; reopening recreates them from the retained records. Late statistics reads cannot recreate a closed chart.
+
+Memory comparisons use disposable Linux profiles with empty and 2,000-task synthetic fixtures against commit `a9bf15b` (3.2.5), three alternating-order pairs for each fixture. CI artifacts hold the raw PSS samples. No target-Mac, per-tab 300 MB, sustained leak or model-memory claim follows from those short samples.

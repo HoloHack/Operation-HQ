@@ -10,6 +10,15 @@
 
 const VentureDashboard = {
   selected: null,
+  visible() { return !document.hidden && document.getElementById("venture-dash-flyout")?.classList.contains("open"); },
+  release() {
+    this.chart?.destroy(); this.chart = null;
+    this.metricsChart?.destroy(); this.metricsChart = null;
+    for (const id of ["venture-dash-canvas", "venture-metrics-canvas"]) {
+      const canvas = document.getElementById(id);
+      if (canvas) { canvas.width = 1; canvas.height = 1; }
+    }
+  },
   chart: null,
   metricsChart: null,
   metrics: [], // all ventures' revenue/business-metric entries, loaded once and filtered per-venture in render
@@ -129,7 +138,7 @@ const VentureDashboard = {
 
   renderChart(tasks) {
     const canvas = document.getElementById("venture-dash-canvas");
-    if (!canvas || typeof Chart === "undefined") return;
+    if (!canvas || typeof Chart === "undefined" || !this.visible()) return;
 
     const days = [];
     const d = new Date();
@@ -259,7 +268,7 @@ const VentureDashboard = {
 
   renderMetricsChart(entries) {
     const canvas = document.getElementById("venture-metrics-canvas");
-    if (!canvas || typeof Chart === "undefined") return;
+    if (!canvas || typeof Chart === "undefined" || !this.visible()) return;
 
     const withMrr = entries.filter(m => m.mrr != null);
     if (this.metricsChart) { this.metricsChart.destroy(); this.metricsChart = null; }
