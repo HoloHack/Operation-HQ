@@ -235,11 +235,13 @@ try{
      await chrome.storage.local.set({hq_realtime_sort_enabled:false});
      const bar=(await chrome.bookmarks.getTree())[0].children[0].id;
      const saved=(await chrome.storage.local.get(Bookmarks.DECISIONS_KEY))[Bookmarks.DECISIONS_KEY];
-     const original=Bookmarks.decisionItems;
+     const original=Bookmarks.decisionItems,selections=[...Bookmarks.decisionSelections];
      const bookmark=await chrome.bookmarks.create({parentId:bar,title:'Long resource '+ 'x'.repeat(600),url:'https://example.org/?resource='+ 'y'.repeat(3200)});
      try{
        await Bookmarks.persistDecisions([{bm:bookmark,reasons:['Synthetic decision']}]);
-       const bounded=Bookmarks.decisionItems[0],identity=bounded.resourceIdentity;
+       const bounded=Bookmarks.decisionItems.find(item=>String(item.bm.id)===String(bookmark.id));
+       if(!bounded)throw new Error('Synthetic long-resource decision was not persisted: '+bookmark.id);
+       const identity=bounded.resourceIdentity;
        await Bookmarks.restoreDecisions();
        const retained=Bookmarks.decisionItems.some(item=>item.bm.id===bookmark.id);
        const valid=await Bookmarks.decisionMatches(bounded,bookmark);
@@ -247,10 +249,10 @@ try{
        const stale=await Bookmarks.decisionMatches(bounded,changed);
        const outcome=await Bookmarks.applyCorrection(bookmark.id,['School & Academics','Mathematics']);
        const untouched=(await chrome.bookmarks.get(bookmark.id))[0].parentId===bar;
-       return {identity,retained,valid,stale,untouched,blocked:outcome?.error===true,titleLength:bounded.bm.title.length,urlLength:bounded.bm.url.length};
-     }finally{await chrome.bookmarks.remove(bookmark.id);Bookmarks.decisionItems=original;await chrome.storage.local.set({[Bookmarks.DECISIONS_KEY]:saved||[]});Bookmarks.renderAccuracyGate();}
+       return {identity,fixtureId:bookmark.id,boundedId:bounded.bm.id,retained,valid,stale,untouched,blocked:outcome?.error===true,titleLength:bounded.bm.title.length,urlLength:bounded.bm.url.length};
+     }finally{await chrome.bookmarks.remove(bookmark.id);await Classifier.updateDecisionStore(()=>saved||[]);Bookmarks.decisionItems=original;Bookmarks.decisionSelections=new Map(selections);Bookmarks.renderAccuracyGate();}
    });
-   assert.match(result.identity,/^sha256-v1:[a-f0-9]{64}$/);assert(result.retained&&result.valid&&result.untouched&&result.blocked);assert.equal(result.stale,false);assert.equal(result.titleLength,500);assert.equal(result.urlLength,3000);return result;
+   const diagnostic=JSON.stringify(result);assert.match(result.identity,/^sha256-v1:[a-f0-9]{64}$/,diagnostic);assert.equal(result.fixtureId,result.boundedId,diagnostic);assert(result.retained&&result.valid&&result.untouched&&result.blocked,diagnostic);assert.equal(result.stale,false,diagnostic);assert.equal(result.titleLength,500,diagnostic);assert.equal(result.urlLength,3000,diagnostic);return result;
  });
  await check('Native page and worker decision writers preserve queued additions and restores',async()=>{
    const state=await worker.evaluate(async()=>{
