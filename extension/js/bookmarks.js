@@ -692,19 +692,31 @@ const Bookmarks = {
 
   async moveAndRecord(bm, targetParentId, targetPath, barId, moves) {
     if (this.journalFailed) throw new Error("Recovery storage failed; further moves are paused.");
-    const [current] = await chrome.bookmarks.get(bm.id);
-    if (!current?.url || current.url !== bm.url || current.title !== bm.title || String(current.parentId) !== String(bm.parentId)) throw new Error("Bookmark changed after preview. Refresh before sorting it.");
+    const expected = { id:String(bm.id), url:bm.url, title:bm.title, parentId:String(bm.parentId) };
+    // Resolve asynchronous ancestry first. The inverse must come from a fresh
+    // read AFTER that traversal, not a snapshot captured before owner edits.
+    const fromPath = await this.folderPath(expected.parentId, barId);
+    const [current] = await chrome.bookmarks.get(expected.id);
+    const matches = node => node?.url && node.url === expected.url && node.title === expected.title && String(node.parentId) === expected.parentId;
+    if (!matches(current)) throw new Error("Bookmark changed after preview. Refresh before sorting it.");
     if (String(current.parentId) === String(targetParentId)) return false;
-    const inverse = { id: current.id, url: current.url, fromParentId: current.parentId, fromIndex: current.index, fromPath: await this.folderPath(current.parentId, barId), toParentId: targetParentId, toPath: [...targetPath] };
+    const inverse = { id: current.id, url: current.url, fromParentId: current.parentId, fromIndex: current.index, fromPath, toParentId: targetParentId, toPath: [...targetPath] };
     const transaction = this.pendingTransaction ||= { id: this.operationToken || crypto.randomUUID(), kind: "interrupted-sort", createdAt: Date.now(), moves: [] };
     transaction.moves.push(inverse);
+    const discardIntent = () => { const index = transaction.moves.indexOf(inverse); if (index >= 0) transaction.moves.splice(index, 1); };
     // Persist the inverse BEFORE Chrome can change the tree. A tab closed at
     // any subsequent point leaves a recoverable transaction, not an orphan move.
     try { await chrome.storage.local.set({ [this.JOURNAL_KEY]: transaction }); }
-    catch (error) { this.journalFailed = true; transaction.moves.pop(); throw error; }
-    try { await chrome.bookmarks.move(current.id, { parentId: targetParentId }); }
+    catch (error) { this.journalFailed = true; discardIntent(); throw error; }
+    try {
+      const [latest] = await chrome.bookmarks.get(expected.id);
+      if (!matches(latest) || latest.index !== current.index) throw new Error("Bookmark changed while recording recovery. Refresh before sorting it.");
+      // Chrome offers no compare-and-move API: an owner action after this last
+      // verification can still race the move. Do not claim atomicity with UI.
+      await chrome.bookmarks.move(current.id, { parentId: targetParentId });
+    }
     catch (error) {
-      transaction.moves.pop();
+      discardIntent();
       try { await chrome.storage.local.set({ [this.JOURNAL_KEY]: transaction }); }
       catch { this.journalFailed = true; }
       throw error;
