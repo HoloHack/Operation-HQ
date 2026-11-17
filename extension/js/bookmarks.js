@@ -220,22 +220,34 @@ const Bookmarks = {
     };
   },
 
-  async persistDecisions(items = this.decisionItems) {
-    const byId = new Map();
-    for (const item of items) {
-      if (item?.bm?.id && item?.bm?.url) byId.set(String(item.bm.id), await this.serializeDecision(item));
-    }
-    this.decisionItems = [...byId.values()];
-    await chrome.storage.local.set({ [this.DECISIONS_KEY]:this.decisionItems });
-    return this.decisionItems;
+  adoptDecisions(items) {
+    const previous = new Map(this.decisionItems.map(item => [String(item.bm.id), item]));
+    const next = new Map(items.map(item => [String(item.bm.id), item]));
+    for (const id of this.decisionSelections.keys()) if (!Classifier.sameDecisionRecord(previous.get(id), next.get(id))) this.decisionSelections.delete(id);
+    this.decisionItems = items;
+    return items;
+  },
+
+  async persistDecisions(items = [], removedIds = [], expectedItems = this.decisionItems) {
+    const upserts = items.map(item => ({ ...item, bm:item?.bm && { ...item.bm } }));
+    const removals = removedIds.map(String);
+    const expected = new Map(expectedItems.map(item => [String(item.bm.id), { ...item, bm:{ ...item.bm } }]));
+    const next = await Classifier.updateDecisionStore(async current => {
+      const byId = new Map(current.map(item => [String(item.bm.id), item]));
+      // Absence from this tab's snapshot is never a deletion intent.
+      for (const id of removals) if (Classifier.sameDecisionRecord(expected.get(id), byId.get(id))) byId.delete(id);
+      for (const item of upserts) {
+        if (!item?.bm?.id || !item?.bm?.url) continue;
+        let live;try{[live]=await chrome.bookmarks.get(String(item.bm.id));}catch{continue;}
+        if (await this.decisionMatches(item, live)) byId.set(String(item.bm.id), await this.serializeDecision(item));
+      }
+      return [...byId.values()];
+    });
+    return this.adoptDecisions(next);
   },
 
   async decisionMatches(item, bookmark) {
-    if (!item?.bm || !bookmark?.url || String(item.bm.parentId) !== String(bookmark.parentId)) return false;
-    if (item.resourceIdentity != null) return /^sha256-v1:[a-f0-9]{64}$/.test(item.resourceIdentity) && item.resourceIdentity === await Classifier.decisionIdentity(bookmark);
-    // Legacy entries without a digest can only be upgraded after an exact
-    // comparison. Truncated legacy values cannot prove the full identity.
-    return item.bm.url === bookmark.url && item.bm.title === bookmark.title;
+    return Classifier.decisionRecordMatches(item, bookmark);
   },
 
   async inspectDecision(item) {
@@ -253,30 +265,25 @@ const Bookmarks = {
   },
 
   async restoreDecisions() {
-    const saved = await chrome.storage.local.get(this.DECISIONS_KEY);
-    const raw = Array.isArray(saved[this.DECISIONS_KEY]) ? saved[this.DECISIONS_KEY] : [];
-    const current = [];
-    for (const item of raw) {
-      try {
-        const [bm] = await chrome.bookmarks.get(String(item?.bm?.id || ""));
-        // A stored suggestion belongs to the resource and placement reviewed,
-        // not merely to a Chrome ID that may have been edited since then.
-        if (await this.decisionMatches(item, bm)) current.push({ ...item, bm:{ ...item.bm, ...bm } });
+    const next = await Classifier.updateDecisionStore(async raw => {
+      const current = [];
+      for (const item of raw) {
+        let bm;
+        try { [bm] = await chrome.bookmarks.get(String(item?.bm?.id || "")); }
+        catch { this.decisionSelections.delete(String(item?.bm?.id || "")); continue; }
+        // Hash/serialization failure aborts, rather than erasing pending data.
+        if (await this.decisionMatches(item, bm)) current.push(await this.serializeDecision({ ...item, bm:{ ...item.bm, ...bm } }));
         else this.decisionSelections.delete(String(item?.bm?.id || ""));
-      } catch { this.decisionSelections.delete(String(item?.bm?.id || "")); /* Deleted bookmarks disappear from the pending accuracy gate. */ }
-    }
-    await this.persistDecisions(current);
-    this.renderAccuracyGate(current);
-    return current;
+      }
+      return current;
+    });
+    this.adoptDecisions(next);
+    this.renderAccuracyGate(next);
+    return next;
   },
 
   async mergeDecisions(items = [], resolvedIds = []) {
-    const byId = new Map(this.decisionItems.map(item => [String(item.bm.id), item]));
-    resolvedIds.forEach(id => byId.delete(String(id)));
-    items.forEach(item => {
-      if (item?.bm?.id) byId.set(String(item.bm.id), { ...item, createdAt:item.createdAt || Date.now() });
-    });
-    await this.persistDecisions([...byId.values()]);
+    await this.persistDecisions(items.map(item => ({ ...item, createdAt:item.createdAt || Date.now() })), resolvedIds);
     this.renderAccuracyGate();
   },
 
@@ -285,7 +292,7 @@ const Bookmarks = {
     const list = this.el("bookmark-review-list");
     const count = this.el("bookmark-review-count");
     if (!board || !list || !count) return;
-    this.decisionItems = items;
+    this.adoptDecisions(items);
     const ids=new Set(items.map(item=>String(item.bm.id)));for(const id of this.decisionSelections.keys())if(!ids.has(id))this.decisionSelections.delete(id);
     const query=this.decisionFilter.toLowerCase().trim();
     const visible=query?items.filter(item=>[item.bm.title,item.bm.url,...(item.reasons||[])].join(" ").toLowerCase().includes(query)):items;
@@ -352,7 +359,7 @@ const Bookmarks = {
       move.onclick = () => {
         let path;
         try { path = JSON.parse(select.value); } catch { return; }
-        this.applyCorrection(item.bm.id, path);
+        this.applyCorrection(item.bm.id, path, item);
       };
       const open = document.createElement("button");
       open.type = "button";
@@ -813,14 +820,16 @@ const Bookmarks = {
     return this.sortAll(inbox.id);
   },
 
-  async applyCorrection(bookmarkId, pathArr) {
+  async applyCorrection(bookmarkId, pathArr, rowDecision) {
+    const original = rowDecision || this.decisionItems.find(item=>String(item.bm.id)===String(bookmarkId));
+    const reviewed = original && { ...original, bm:{ ...original.bm } };
+    const chosenPath = Array.isArray(pathArr) ? [...pathArr] : pathArr;
     return this.runExclusive("Verified destination", async () => {
-      const path = Classifier.normalizePath(pathArr, { allowOperational: false });
+      const path = Classifier.normalizePath(chosenPath, { allowOperational: false });
       if (!path) throw new Error("That destination is outside the managed taxonomy.");
       const { barId } = await this.getAllBookmarks();
       const [bm] = await chrome.bookmarks.get(bookmarkId);
       if (!bm?.url) throw new Error("That bookmark no longer exists.");
-      const reviewed=this.decisionItems.find(item=>String(item.bm.id)===String(bookmarkId));
       if (Classifier.shouldNeverSort(bm.title) || !await this.decisionMatches(reviewed, bm)) throw Error("Bookmark changed after review. Refresh Preview before confirming it.");
       const targetParent = await this.getOrCreateFolderPath(path, barId);
       const moves = [];
@@ -829,8 +838,7 @@ const Bookmarks = {
       learned[Classifier.fingerprint(bm)] = path;
       await chrome.storage.local.set({ hq_learned_domains: learned });
       await this.commitTransaction("verified-destination", moves);
-      this.decisionItems = this.decisionItems.filter(item => String(item.bm.id) !== String(bookmarkId));
-      await this.persistDecisions();
+      await this.persistDecisions([], [bookmarkId], [reviewed]);
       this.renderAccuracyGate();
       const retired = await this.cleanupLegacyHoldingFolders(barId);
       await this.recordAudit("verified-destination", { bookmarkId, path, moved: moves.length, retired });
@@ -844,7 +852,7 @@ const Bookmarks = {
     if (typeof document === "undefined") return;
     const choices=new Map(this.decisionSelections);
     document.querySelectorAll("#bookmark-review-list select[data-bookmark-decision-id]").forEach(select=>choices.set(select.dataset.bookmarkDecisionId,select.value));
-    const selected=[...choices].map(([id,value])=>{if(!value||!this.decisionItems.some(item=>String(item.bm.id)===id))return null;try{return {id,path:JSON.parse(value)};}catch{return null;}}).filter(Boolean);
+    const selected=[...choices].map(([id,value])=>{const original=this.decisionItems.find(item=>String(item.bm.id)===id);if(!value||!original)return null;try{return {id,path:JSON.parse(value),reviewed:{...original,bm:{...original.bm}}};}catch{return null;}}).filter(Boolean);
 
     if (!selected.length) { this.log("Choose at least one verified destination first."); return; }
     return this.runExclusive("Finish selected decisions", async () => {
@@ -858,7 +866,7 @@ const Bookmarks = {
         if (!path) { failed += 1; continue; }
         try {
           const [bm] = await chrome.bookmarks.get(choice.id);
-          const reviewed=this.decisionItems.find(item=>String(item.bm.id)===String(choice.id));
+          const reviewed=choice.reviewed;
           if (!bm?.url || Classifier.shouldNeverSort(bm.title) || !await this.decisionMatches(reviewed, bm)) { failed += 1; continue; }
           const targetParent = await this.getOrCreateFolderPath(path, barId);
           await this.moveAndRecord(bm, targetParent, path, barId, moves);
@@ -868,8 +876,7 @@ const Bookmarks = {
       }
       await chrome.storage.local.set({ hq_learned_domains:learned });
       await this.commitTransaction("verified-destinations", moves);
-      this.decisionItems = this.decisionItems.filter(item => !completed.has(String(item.bm.id)));
-      await this.persistDecisions();
+      await this.persistDecisions([], [...completed], selected.map(choice=>choice.reviewed));
       this.renderAccuracyGate();
       const retired = await this.cleanupLegacyHoldingFolders(barId);
       await this.recordAudit("verified-destinations", { completed:completed.size, failed, moved:moves.length, retired });
@@ -957,7 +964,7 @@ const Bookmarks = {
       chrome.storage.onChanged.addListener((changes, area) => {
         if (area !== "local" || !changes[this.DECISIONS_KEY]) return;
         const next = Array.isArray(changes[this.DECISIONS_KEY].newValue) ? changes[this.DECISIONS_KEY].newValue : [];
-        this.decisionItems = next;
+        this.adoptDecisions(next);
         this.renderAccuracyGate();
         this.refreshInboxCount().catch(() => {});
       });

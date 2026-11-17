@@ -8,7 +8,7 @@ const source=name=>fs.readFileSync(new URL(`../js/${name}.js`,import.meta.url),'
 function fixture(){
   const data={},nodes=new Map(),opened=[];
   const chrome={storage:{local:{async get(key){return {[key]:structuredClone(data[key])};},async set(value){Object.assign(data,structuredClone(value));}}},bookmarks:{async get(id){if(!nodes.has(id))throw Error('Missing bookmark');return [structuredClone(nodes.get(id))];}},tabs:{async create(input){opened.push(input);}}};
-  const ctx=vm.createContext({URL,console,chrome,crypto:webcrypto,TextEncoder});
+  const ctx=vm.createContext({URL,console,chrome,crypto:webcrypto,TextEncoder,navigator});
   vm.runInContext(source('classifier')+'\n'+source('bookmarks'),ctx);
   const book=vm.runInContext('Bookmarks',ctx),classifier=vm.runInContext('Classifier',ctx);
   book.renderAccuracyGate=()=>{};book.log=()=>{};

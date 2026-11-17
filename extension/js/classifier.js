@@ -332,6 +332,33 @@ const Classifier = {
     return "sha256-v1:" + Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
   },
 
+  async updateDecisionStore(mutator) {
+    // Always acquire mutation before decision locks, never the reverse.
+    if (!globalThis.navigator?.locks?.request) throw new Error("Bookmark decision coordination is unavailable; no decisions changed.");
+    return navigator.locks.request("hq-bookmark-decisions-v1", async () => {
+      const key = "hq_bookmark_decisions_v1";
+      const saved = await chrome.storage.local.get(key);
+      const current = Array.isArray(saved[key]) ? saved[key] : [];
+      const next = await mutator(current);
+      if (!Array.isArray(next)) throw new Error("Invalid bookmark decision update.");
+      const valid = next.filter(item => item?.bm?.id && item?.bm?.url);
+      await chrome.storage.local.set({ [key]:valid });
+      return valid;
+    });
+  },
+
+  sameDecisionRecord(before, after) {
+    if (!before?.bm || !after?.bm || String(before.bm.parentId) !== String(after.bm.parentId)) return false;
+    if (before.resourceIdentity != null || after.resourceIdentity != null) return Boolean(before.resourceIdentity && before.resourceIdentity === after.resourceIdentity);
+    return before.bm.url === after.bm.url && before.bm.title === after.bm.title;
+  },
+
+  async decisionRecordMatches(item, bookmark) {
+    if (!item?.bm || !bookmark?.url || String(item.bm.parentId) !== String(bookmark.parentId)) return false;
+    if (item.resourceIdentity != null) return /^sha256-v1:[a-f0-9]{64}$/.test(item.resourceIdentity) && item.resourceIdentity === await this.decisionIdentity(bookmark);
+    return item.bm.url === bookmark.url && item.bm.title === bookmark.title;
+  },
+
   fingerprint(bookmark) {
     try {
       const url=new URL(bookmark.url),domain=url.hostname.toLowerCase().replace(/^www\./,''),segments=url.pathname.split('/').filter(Boolean);

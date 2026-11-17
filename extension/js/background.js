@@ -56,21 +56,16 @@ const INBOX_NAME = "Inbox";
 const BOOKMARK_MANAGED_KEY = "hq_bookmark_managed_folders_v2";
 const BOOKMARK_DECISIONS_KEY = "hq_bookmark_decisions_v1";
 const selfMovedIds = new Set(); // bookmark IDs we just moved ourselves — ignore the resulting onMoved event
-let bookmarkDecisionWrite = Promise.resolve();
-
 function updateBookmarkDecisions(mutator) {
-  bookmarkDecisionWrite = bookmarkDecisionWrite.catch(() => {}).then(async () => {
-    const saved = await chrome.storage.local.get(BOOKMARK_DECISIONS_KEY);
-    const current = Array.isArray(saved[BOOKMARK_DECISIONS_KEY]) ? saved[BOOKMARK_DECISIONS_KEY] : [];
-    const next = mutator(current).filter(item => item?.bm?.id && item?.bm?.url);
-    await chrome.storage.local.set({ [BOOKMARK_DECISIONS_KEY]:next });
-  });
-  return bookmarkDecisionWrite;
+  return Classifier.updateDecisionStore(mutator);
 }
 
 async function markBookmarkDecision(bookmark, result) {
-  const resourceIdentity = await Classifier.decisionIdentity(bookmark);
-  return updateBookmarkDecisions(current => [
+  return updateBookmarkDecisions(async current => {
+    let live;try{[live]=await chrome.bookmarks.get(String(bookmark.id));}catch{return current;}
+    if (!await Classifier.decisionRecordMatches({bm:bookmark}, live)) return current;
+    const resourceIdentity = await Classifier.decisionIdentity(bookmark);
+    return [
     ...current.filter(item => String(item.bm.id) !== String(bookmark.id)),
     {
       resourceIdentity,
@@ -80,11 +75,21 @@ async function markBookmarkDecision(bookmark, result) {
       candidates:(result?.candidates || []).slice(0,3),
       createdAt:Date.now(),
     },
-  ]);
+    ];
+  });
 }
 
-function clearBookmarkDecision(id) {
-  return updateBookmarkDecisions(current => current.filter(item => String(item.bm.id) !== String(id)));
+function clearBookmarkDecision(id, expectedBookmark) {
+  return updateBookmarkDecisions(async current => {
+    let live;try{[live]=await chrome.bookmarks.get(String(id));}catch{}
+    const next=[];
+    for(const item of current){
+      if(String(item.bm.id)!==String(id)){next.push(item);continue;}
+      const remove=expectedBookmark ? await Classifier.decisionRecordMatches(item, expectedBookmark) : !await Classifier.decisionRecordMatches(item, live);
+      if(!remove)next.push(item);
+    }
+    return next;
+  });
 }
 
 function bulkBookmarkOperationActive(value) {
@@ -335,7 +340,7 @@ async function sortAutomaticBookmark(entry) {
     const parent=await getOrCreateFolderPath(path,barId),[latest]=await chrome.bookmarks.get(entry.id);
     if(latest.url!==entry.url||String(latest.parentId)!==entry.parentId||latest.title!==current.title)return {done:false,outcome:'changed-during-read',title:latest.title};
     if(String(parent)!==String(latest.parentId))await moveSelf(entry.id,parent);
-    await clearBookmarkDecision(entry.id);return {done:true,outcome:'sorted',title:latest.title};
+    await clearBookmarkDecision(entry.id, current);return {done:true,outcome:'sorted',title:latest.title};
   }
   await markBookmarkDecision(bm,result);return {done:false,outcome:'needs-evidence',title:bm.title};
 }
