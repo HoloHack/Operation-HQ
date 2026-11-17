@@ -230,7 +230,7 @@ try{
    await page.evaluate(()=>HQPanels.close());const hidden=await page.locator('.flyout').evaluateAll(items=>items.map(e=>({id:e.id,display:getComputedStyle(e).display,width:e.getBoundingClientRect().width})));assert(hidden.every(e=>e.display==='none'&&e.width===0),'Closed panels retained layout: '+JSON.stringify(hidden.filter(e=>e.width>0)));assert.equal(await page.locator('#settings-drawer').evaluate(e=>getComputedStyle(e).display),'none');
    await new Promise(resolve=>setTimeout(resolve,10000));const memory=await profileMemory(profile);assert(memory.available);await fs.writeFile(path.join(output,'memory-settled.json'),JSON.stringify(memory,null,2));return {closedPanels:hidden.length,memory};
  });
- await check('Long bookmark decisions survive reload and reject renamed resources',async()=>{
+ await check('Long bookmark decisions survive restoration and reject renamed resources',async()=>{
    const result=await page.evaluate(async()=>{
      await chrome.storage.local.set({hq_realtime_sort_enabled:false});
      const bar=(await chrome.bookmarks.getTree())[0].children[0].id;

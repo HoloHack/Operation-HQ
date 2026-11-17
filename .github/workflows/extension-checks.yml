@@ -22,6 +22,9 @@ jobs:
           cache-dependency-path: extension/package-lock.json
       - run: npm ci --ignore-scripts
       - run: npm test
+      # Diagnostic output is not a semantic-quality pass: preserve wrong
+      # accepted predictions, coverage and abstentions for review.
+      - run: mkdir -p test-results && npm run --silent benchmark:bookmarks > test-results/bookmark-benchmark.json
       - run: npx playwright install --with-deps chromium
       - run: npm run test:browser
       - uses: actions/checkout@v4
