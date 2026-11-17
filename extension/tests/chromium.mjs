@@ -252,6 +252,53 @@ try{
    });
    assert.match(result.identity,/^sha256-v1:[a-f0-9]{64}$/);assert(result.retained&&result.valid&&result.untouched&&result.blocked);assert.equal(result.stale,false);assert.equal(result.titleLength,500);assert.equal(result.urlLength,3000);return result;
  });
+ await check('Native page and worker decision writers preserve queued additions and restores',async()=>{
+   const state=await worker.evaluate(async()=>{
+     const saved=await chrome.storage.local.get(['hq_realtime_sort_enabled','hq_bookmark_decisions_v1']);
+     await chrome.storage.local.set({hq_realtime_sort_enabled:false});
+     const bar=(await chrome.bookmarks.getTree())[0].children[0].id,fixtures=[];
+     for(const name of ['seed','worker','page'])fixtures.push(await chrome.bookmarks.create({parentId:bar,title:'HQ decision race '+name,url:'https://example.org/decision-race-'+name}));
+     return {saved,fixtures};
+   });
+   try{
+     await page.evaluate(async bookmark=>{
+       globalThis.__HQDecisionRace={original:Bookmarks.decisionItems,selections:[...Bookmarks.decisionSelections],held:false};
+       await Bookmarks.persistDecisions([{bm:bookmark,reasons:['Synthetic seed']}]);
+       globalThis.__HQDecisionRace.holder=navigator.locks.request('hq-bookmark-decisions-v1',async()=>{
+         globalThis.__HQDecisionRace.held=true;
+         await new Promise(resolve=>globalThis.__HQDecisionRace.release=resolve);
+       });
+     },state.fixtures[0]);
+     await page.waitForFunction(()=>globalThis.__HQDecisionRace.held);
+     await worker.evaluate(bookmark=>{globalThis.__HQWorkerDecisionRace=markBookmarkDecision(bookmark,{reasons:['Synthetic worker addition']});},state.fixtures[1]);
+     await waitForSaved(()=>page.evaluate(async()=>(await navigator.locks.query()).pending.filter(lock=>lock.name==='hq-bookmark-decisions-v1').length),count=>count>=1);
+     await page.evaluate(bookmark=>{
+       const state=globalThis.__HQDecisionRace;
+       state.write=Bookmarks.persistDecisions([{bm:bookmark,reasons:['Synthetic page addition']}]);
+       state.restore=Bookmarks.restoreDecisions();
+     },state.fixtures[2]);
+     await waitForSaved(()=>page.evaluate(async()=>(await navigator.locks.query()).pending.filter(lock=>lock.name==='hq-bookmark-decisions-v1').length),count=>count>=3);
+     await page.evaluate(()=>globalThis.__HQDecisionRace.release());
+     await worker.evaluate(()=>globalThis.__HQWorkerDecisionRace);
+     await page.evaluate(()=>Promise.all([globalThis.__HQDecisionRace.holder,globalThis.__HQDecisionRace.write,globalThis.__HQDecisionRace.restore]));
+     const ids=await worker.evaluate(async()=>(await chrome.storage.local.get('hq_bookmark_decisions_v1')).hq_bookmark_decisions_v1.map(item=>String(item.bm.id)));
+     for(const bookmark of state.fixtures)assert(ids.includes(bookmark.id),'Concurrent writer lost fixture '+bookmark.id);
+     assert.equal(new Set(ids).size,ids.length,'Concurrent writers duplicated decision IDs');
+     return {workerAndPageAdditionsRetained:true,restoreRetainedQueuedWrites:true,uniqueIds:true};
+   }finally{
+     await page.evaluate(async()=>{
+       const state=globalThis.__HQDecisionRace;if(!state)return;
+       state.release?.();await Promise.allSettled([state.holder,state.write,state.restore].filter(Boolean));
+     });
+     await worker.evaluate(async()=>{if(globalThis.__HQWorkerDecisionRace)await Promise.allSettled([globalThis.__HQWorkerDecisionRace]);delete globalThis.__HQWorkerDecisionRace;});
+     for(const bookmark of state.fixtures)await worker.evaluate(id=>chrome.bookmarks.remove(id),bookmark.id);
+     await page.evaluate(async saved=>{
+       await Classifier.updateDecisionStore(()=>saved.hq_bookmark_decisions_v1||[]);
+       const state=globalThis.__HQDecisionRace;if(state){Bookmarks.decisionItems=state.original;Bookmarks.decisionSelections=new Map(state.selections);Bookmarks.renderAccuracyGate();}
+       await chrome.storage.local.set({hq_realtime_sort_enabled:saved.hq_realtime_sort_enabled??false});delete globalThis.__HQDecisionRace;
+     },state.saved);
+   }
+ });
  await check('No uncaught browser errors across tested journeys',async()=>{assert.deepEqual(errors,[]);return {consoleErrors};});
 }catch(error){console.error(error);process.exitCode=1;if(context){for(const p of context.pages().filter(p=>p.url().includes('newtab.html'))){await p.screenshot({path:path.join(output,'failure.png')}).catch(()=>{});const diagnostics=await p.evaluate(()=>({issues:typeof BootDiagnostics==='undefined'?[]:BootDiagnostics.issues,early:window.HQEarlyDiagnostics?.entries()})).catch(()=>null);console.log('Failure diagnostics',JSON.stringify(diagnostics));console.log('Failure panel states',JSON.stringify(await p.evaluate(()=>({hash:location.hash,panels:[...document.querySelectorAll('.flyout.open')].map(e=>({id:e.id,visible:getComputedStyle(e).visibility})),errors:window.HQEarlyDiagnostics?.entries()})).catch(()=>null)));await fs.writeFile(path.join(output,'diagnostics.json'),JSON.stringify(diagnostics,null,2));}}}
 finally{await fs.writeFile(path.join(output,'chromium-results.json'),JSON.stringify({timestamp:new Date().toISOString(),results,errors,consoleErrors,network,providerTests:'External HTTP blocked; Gmail cancellation token stub. No live account or local model download.'},null,2));await context?.close();await fs.rm(profile,{recursive:true,force:true});}

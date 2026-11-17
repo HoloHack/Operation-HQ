@@ -15,7 +15,7 @@ function fixture() {
     storage:{local:{get:async key=>({[key]:structuredClone(data[key])}),set:async value=>Object.assign(data,structuredClone(value))}},
     bookmarks:{getSubTree:async id=>[tree(id)],get:async id=>{if(!nodes.has(id))throw Error('Missing bookmark');return [{...nodes.get(id)}];}},
   };
-  const ctx=vm.createContext({URL,console,chrome,crypto:webcrypto,TextEncoder,AbortController,setTimeout,clearTimeout,fetch:async()=>{reads++;throw Error('Unexpected fetch');}});
+  const ctx=vm.createContext({URL,console,chrome,navigator,crypto:webcrypto,TextEncoder,AbortController,setTimeout,clearTimeout,fetch:async()=>{reads++;throw Error('Unexpected fetch');}});
   for(const name of ['classifier','bookmarks'])vm.runInContext(fs.readFileSync(new URL(`../js/${name}.js`,import.meta.url),'utf8'),ctx);
   return {book:vm.runInContext('Bookmarks',ctx),data,add,ctx,reads:()=>reads};
 }
@@ -82,6 +82,9 @@ function renamedConfirmationFixture(title = 'INBOX') {
   const reviewed={id:'renamed',parentId:'1',title:'Math page',url:'https://example.org/math'};
   f.add({...reviewed,title});
   f.book.decisionItems=[{bm:{...reviewed},suggestedPath:['School & Academics','Mathematics']}];
+  // The real store predates the title edit. Without this seed the batch test
+  // accidentally checks disappearance from an empty store, not safe rejection.
+  f.data[f.book.DECISIONS_KEY]=structuredClone(f.book.decisionItems);
   f.book.decisionSelections.set(reviewed.id,JSON.stringify(['School & Academics','Mathematics']));
   f.ctx.document={querySelectorAll:()=>[]};
   const calls={destinations:0,moves:0};
@@ -117,5 +120,18 @@ test('batch confirmation rejects protected and ordinary title-only changes befor
     assert.deepEqual(f.calls,{destinations:0,moves:0});
     assert.deepEqual(f.data.hq_learned_domains,{});
     assert.equal(f.book.decisionItems.length,1);
+    assert.equal(f.data[f.book.DECISIONS_KEY][0].bm.title,'Math page');
   }
+});
+
+test('persisted decisions require matching live Chrome records and retain unrelated decisions',async()=>{
+  const f=fixture();
+  const stable=f.add({id:'stable',parentId:'1',title:'Stable page',url:'https://example.org/stable'});
+  const old={id:'changed',parentId:'1',title:'Old title',url:'https://example.org/changed'};
+  f.add({...old,title:'New title'});
+  const missing={id:'missing',parentId:'1',title:'Deleted page',url:'https://example.org/missing'};
+  await f.book.persistDecisions([{bm:stable}]);
+  await f.book.persistDecisions([{bm:old},{bm:missing}]);
+  assert.deepEqual(f.data[f.book.DECISIONS_KEY].map(item=>item.bm.id),['stable']);
+  assert.match(f.data[f.book.DECISIONS_KEY][0].resourceIdentity,/^sha256-v1:[a-f0-9]{64}$/);
 });
