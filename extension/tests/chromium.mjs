@@ -311,7 +311,7 @@ try{
        await chrome.storage.local.set({hq_realtime_sort_enabled:false});Bookmarks.pendingTransaction=null;Bookmarks.journalFailed=false;
        const source=await chrome.bookmarks.create({parentId:bar,title:'HQ Recovery Source '+phase}),target=await chrome.bookmarks.create({parentId:bar,title:'HQ Recovery Target '+phase});
        const verified=await chrome.bookmarks.create({parentId:source.id,title:'HQ verified recovery '+phase,url:'https://example.org/verified-recovery-'+phase});
-       const uncertain=await chrome.bookmarks.create({parentId:source.id,title:'HQ owner placement '+phase,url:'https://example.org/owner-recovery-'+phase});
+       const uncertain=await chrome.bookmarks.create({parentId:source.id,title:'HQ owner placement '+phase,url:'https://example.org/owner-recovery-'+phase+'?opaque='+'x'.repeat(280)});
        const applied=[];await Bookmarks.moveAndRecord(verified,target.id,[],bar,applied);
        await chrome.bookmarks.move(uncertain.id,{parentId:target.id});
        const intent={id:uncertain.id,url:uncertain.url,fromParentId:source.id,fromIndex:1,fromPath:[source.title],toParentId:target.id,toPath:[target.title],...(phase==='prepared'?{phase:'prepared'}:{})};
@@ -322,6 +322,17 @@ try{
      try{
        await page.locator('#undo-bookmarks-btn').click();await page.waitForFunction(()=>!Bookmarks.busy);
        await page.locator('#bookmark-recovery-review').waitFor({state:'visible'});
+       await page.setViewportSize({width:320,height:960});
+       const summary=page.locator('#bookmark-recovery-review summary');await summary.focus();await summary.press('Enter');
+       assert.equal(await page.locator('#bookmark-recovery-review details').evaluate(element=>element.open),true,'Recovery details did not open with Enter');
+       const geometry=await page.locator('#bookmark-recovery-review').evaluate(section=>{
+         const rect=element=>{const box=element.getBoundingClientRect();return {left:box.left,right:box.right,width:box.width};};
+         return {viewport:innerWidth,section:rect(section),button:rect(section.querySelector('button')),scrollWidth:section.scrollWidth,clientWidth:section.clientWidth};
+       });
+       for(const name of ['section','button'])assert(geometry[name].width>0&&geometry[name].left>=0&&geometry[name].right<=geometry.viewport,`${phase} narrow recovery ${name} escaped viewport: ${JSON.stringify(geometry)}`);
+       assert(geometry.scrollWidth<=geometry.clientWidth+1,'Opaque recovery URL overflowed: '+JSON.stringify(geometry));
+       await page.screenshot({path:path.join(output,'bookmark-recovery-'+phase+'-320.png')});
+       await page.setViewportSize({width:1440,height:960});
        assert.deepEqual(await worker.evaluate(id=>chrome.bookmarks.get(id),state.uncertain.id),[state.current],'Undo changed uncertain '+phase+' placement');
        const keep=page.locator('#bookmark-recovery-review').getByRole('button',{name:/Keep current locations/});
        const cancelDialog=page.waitForEvent('dialog').then(async dialog=>{assert.equal(dialog.type(),'confirm');assert.match(dialog.message(),/No bookmarks will move or be deleted/);await dialog.dismiss();});
@@ -344,8 +355,9 @@ try{
        assert.equal(owner.parentId,state.current.parentId,'Verified Undo moved the uncertain bookmark');assert.equal(owner.url,state.current.url);assert.equal(owner.title,state.current.title);
        // Removing its verified sibling legitimately renumbers Chrome's index.
        assert.deepEqual(await worker.evaluate(async id=>(await chrome.bookmarks.getChildren(id)).map(item=>item.id),state.target.id),[state.uncertain.id]);
-       await page.locator('#bookmark-recovery-review').waitFor({state:'detached'});outcomes.push({phase,uncertainUntouched:true,confirmationRequired:true,verifiedUndoPreserved:true});
+       await page.locator('#bookmark-recovery-review').waitFor({state:'detached'});outcomes.push({phase,uncertainUntouched:true,confirmationRequired:true,verifiedUndoPreserved:true,narrowRecoveryContained:true,keyboardDetails:true});
      }finally{
+       await page.setViewportSize({width:1440,height:960});
        await page.evaluate(async state=>{
          for(const id of [state.verified.id,state.uncertain.id,state.source.id,state.target.id])await chrome.bookmarks.remove(id);
          await navigator.locks.request('hq-bookmark-mutations',async()=>{await chrome.storage.local.remove(state.keys);await chrome.storage.local.set(state.saved);});

@@ -14,6 +14,8 @@ Undo partitions pending journals: only applied records can be automatically reve
 
 A visible recovery review lists uncertain records and offers **Keep current locations** with explicit confirmation. It changes recovery metadata only, archives the uncertain entries in the last eight local review records, preserves applied inverses and never moves/deletes bookmarks. A snapshot comparison under the mutation lock rejects stale confirmations. This is a deliberately bounded recovery action, not an unreviewed whole-tree restore. Only the first 20 records are displayed with the full count disclosed; large-collection presentation remains a usability limitation.
 
+The review has a dedicated single-column layout, wrapping for opaque URLs, readable spacing and a 44px minimum confirmation target. Native acceptance now exercises 320px containment with a long query URL and keyboard expansion in both legacy/prepared cases; this changed test requires fresh CI rather than relying on the earlier wider-layout result.
+
 Chrome provides no expected-parent compare-and-move API. An owner action after the final source read can still race Chrome's move. No claim of perfect atomicity, actor provenance under every crash, or universal storage-failure recovery is made.
 
 ## Acceptance gates
