@@ -305,16 +305,28 @@ async function scanLegitFolders(barId) {
 
 async function moveSelf(id, parentId) {
   const [bookmark] = await chrome.bookmarks.get(id);
-  const saved = await chrome.storage.local.get(["hq_bookmark_undo_v2", "hq_bookmark_undo"]);
+  const saved = await chrome.storage.local.get(["hq_bookmark_undo_v2", "hq_bookmark_undo", "hq_bookmark_pending_v1"]);
+  if (saved.hq_bookmark_pending_v1?.moves?.length) throw Error("An interrupted sort needs recovery review before another move.");
+  const fromPath = await bookmarkFolderPath(bookmark.parentId, await getBarId());
+  const [current] = await chrome.bookmarks.get(id);
+  const matches = node => node?.url === bookmark.url && node.title === bookmark.title && String(node.parentId) === String(bookmark.parentId);
+  if (!matches(current)) throw Error("Bookmark changed before automatic sort.");
   const transaction = {
     id: crypto.randomUUID(), kind: "automatic-sort", createdAt: Date.now(),
-    moves: [{ id, url: bookmark.url, fromParentId: bookmark.parentId, fromIndex: bookmark.index,
-      fromPath: await bookmarkFolderPath(bookmark.parentId, await getBarId()), toParentId: parentId }],
+    moves: [{ id, url: current.url, fromParentId: current.parentId, fromIndex: current.index,
+      fromPath, toParentId: parentId, phase: "prepared" }],
   };
   await chrome.storage.local.set({ hq_bookmark_pending_v1: transaction });
   selfMovedIds.add(id);
   try {
-    await chrome.bookmarks.move(id, { parentId });
+    const [latest] = await chrome.bookmarks.get(id);
+    if (!matches(latest) || latest.index !== current.index) throw Error("Bookmark changed while automatic recovery was recorded.");
+    const moved = await chrome.bookmarks.move(id, { parentId });
+    if (!moved || String(moved.id) !== String(id) || moved.url !== current.url || moved.title !== current.title || String(moved.parentId) !== String(parentId)) throw Error("Automatic move acknowledgement could not be verified. Review recovery.");
+    transaction.moves[0].phase = "applied";
+    // Failure leaves the durable prepared record uncertain, never promoted by
+    // merely observing that the bookmark happens to be in the target folder.
+    await chrome.storage.local.set({ hq_bookmark_pending_v1: transaction });
     const stack = Array.isArray(saved.hq_bookmark_undo_v2) ? saved.hq_bookmark_undo_v2 :
       (saved.hq_bookmark_undo?.length ? [{ id: "legacy-sort", kind: "legacy-sort", moves: saved.hq_bookmark_undo }] : []);
     await chrome.storage.local.set({ hq_bookmark_undo_v2: [...stack, transaction].slice(-8), hq_bookmark_pending_v1: null, hq_bookmark_undo: [] });

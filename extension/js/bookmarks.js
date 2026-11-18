@@ -92,8 +92,8 @@ const Bookmarks = {
         // Wait for a bounded background batch instead of dropping the owner's click.
         return navigator.locks.request("hq-bookmark-mutations", async () => {
         const saved = await chrome.storage.local.get(this.JOURNAL_KEY);
-        if (saved[this.JOURNAL_KEY]?.moves?.length && label !== "Undo") {
-          throw new Error("An interrupted sort has recovery steps. Use Undo before starting another sort.");
+        if (saved[this.JOURNAL_KEY]?.moves?.length && !["Undo", "Keep current recovery"].includes(label)) {
+          throw new Error("An interrupted sort has recovery steps. Review recovery/Undo before starting another sort.");
         }
         this.pendingTransaction = null;
         this.journalFailed = false;
@@ -700,7 +700,7 @@ const Bookmarks = {
     const matches = node => node?.url && node.url === expected.url && node.title === expected.title && String(node.parentId) === expected.parentId;
     if (!matches(current)) throw new Error("Bookmark changed after preview. Refresh before sorting it.");
     if (String(current.parentId) === String(targetParentId)) return false;
-    const inverse = { id: current.id, url: current.url, fromParentId: current.parentId, fromIndex: current.index, fromPath, toParentId: targetParentId, toPath: [...targetPath] };
+    const inverse = { id: current.id, url: current.url, fromParentId: current.parentId, fromIndex: current.index, fromPath, toParentId: targetParentId, toPath: [...targetPath], phase:"prepared" };
     const transaction = this.pendingTransaction ||= { id: this.operationToken || crypto.randomUUID(), kind: "interrupted-sort", createdAt: Date.now(), moves: [] };
     transaction.moves.push(inverse);
     const discardIntent = () => { const index = transaction.moves.indexOf(inverse); if (index >= 0) transaction.moves.splice(index, 1); };
@@ -708,12 +708,13 @@ const Bookmarks = {
     // any subsequent point leaves a recoverable transaction, not an orphan move.
     try { await chrome.storage.local.set({ [this.JOURNAL_KEY]: transaction }); }
     catch (error) { this.journalFailed = true; discardIntent(); throw error; }
+    let moved;
     try {
       const [latest] = await chrome.bookmarks.get(expected.id);
       if (!matches(latest) || latest.index !== current.index) throw new Error("Bookmark changed while recording recovery. Refresh before sorting it.");
       // Chrome offers no compare-and-move API: an owner action after this last
       // verification can still race the move. Do not claim atomicity with UI.
-      await chrome.bookmarks.move(current.id, { parentId: targetParentId });
+      moved = await chrome.bookmarks.move(current.id, { parentId: targetParentId });
     }
     catch (error) {
       discardIntent();
@@ -721,7 +722,20 @@ const Bookmarks = {
       catch { this.journalFailed = true; }
       throw error;
     }
-    moves.push(inverse);
+    if (!moved || String(moved.id)!==expected.id || moved.url!==expected.url || moved.title!==expected.title || String(moved.parentId)!==String(targetParentId)) {
+      this.journalFailed = true;
+      throw new Error("Chrome returned an unverified move acknowledgement. Recovery review is required; further moves are paused.");
+    }
+    const applied = { ...inverse, phase:"applied" };
+    const intentIndex = transaction.moves.indexOf(inverse);
+    transaction.moves[intentIndex] = applied;
+    try { await chrome.storage.local.set({ [this.JOURNAL_KEY]:transaction }); }
+    catch (error) {
+      transaction.moves[intentIndex] = inverse;
+      this.journalFailed = true;
+      throw new Error(`Bookmark moved, but completion could not be recorded. Recovery review is required: ${String(error?.message || error)}`);
+    }
+    moves.push(applied);
     return true;
   },
 
@@ -730,12 +744,14 @@ const Bookmarks = {
     const stack = Array.isArray(saved[this.UNDO_KEY]) ? saved[this.UNDO_KEY] :
       (Array.isArray(saved.hq_bookmark_undo) && saved.hq_bookmark_undo.length ? [{ id: "legacy-sort", kind: "legacy-sort", createdAt: Date.now(), moves: saved.hq_bookmark_undo }] : []);
     const pending = saved[this.JOURNAL_KEY];
-    return pending?.moves?.length ? [...stack.filter(item => item.id !== pending.id), pending] : stack;
+    return pending?.moves?.length ? [...stack.filter(item => item.id !== pending.id), { ...pending, pendingRecovery:true }] : stack;
   },
 
   async commitTransaction(kind, moves) {
     if (!moves.length) return null;
+    if (this.journalFailed) throw new Error("Recovery storage failed. Review interrupted moves before committing another sort.");
     const stack = await this.readUndoStack();
+    if (stack.some(transaction => transaction.pendingRecovery && transaction.moves.some(move => move.phase !== "applied"))) throw new Error("Unverified move intent remains. Review recovery before committing the sort.");
     const transaction = { id: this.pendingTransaction?.id || crypto.randomUUID(), kind, createdAt: Date.now(), moves };
     await chrome.storage.local.set({ [this.UNDO_KEY]: [...stack.filter(item => item.id !== transaction.id), transaction].slice(-8), [this.JOURNAL_KEY]: null, hq_bookmark_undo: [] });
     this.pendingTransaction = null;
@@ -746,9 +762,46 @@ const Bookmarks = {
     const button = this.el("undo-bookmarks-btn");
     if (!button) return;
     const stack = await this.readUndoStack();
+    const pending = stack.find(transaction => transaction.pendingRecovery);
+    this.renderRecoveryReview(pending);
     button.dataset.hasUndo = stack.length ? "true" : "false";
     button.disabled = this.busy || !stack.length;
-    button.textContent = stack.length ? `Undo ${stack[stack.length - 1].kind.replace(/-/g, " ")}` : "Nothing to undo";
+    const uncertain = pending?.moves?.filter(move => move.phase !== "applied").length || 0;
+    button.textContent = uncertain ? `Review recovery (${uncertain} unverified)` : stack.length ? `Undo ${stack[stack.length - 1].kind.replace(/-/g, " ")}` : "Nothing to undo";
+  },
+
+  renderRecoveryReview(pending) {
+    const anchor=this.el("bookmark-log");
+    if (!anchor || typeof anchor.before !== "function") return;
+    this.el("bookmark-recovery-review")?.remove();
+    const uncertain=(pending?.moves || []).filter(move=>move.phase!=="applied");
+    if (!uncertain.length) return;
+    const section=document.createElement("section");section.id="bookmark-recovery-review";section.className="bookmark-review-row";section.setAttribute("aria-label","Unverified bookmark recovery");
+    const copy=document.createElement("p");copy.textContent=`${uncertain.length} interrupted move${uncertain.length===1?"":"s"} cannot be verified as HQ changes. Undo will leave these bookmarks untouched. Review their current locations; keeping them releases only this uncertain recovery record, not any bookmark.`;
+    const details=document.createElement("details"),summary=document.createElement("summary"),list=document.createElement("ul");summary.textContent="Review uncertain records";details.append(summary,list);
+    for (const move of uncertain.slice(0,20)){const row=document.createElement("li");row.textContent=`${String(move.url || move.id).slice(0,260)} · recorded target ${String(move.toParentId || "unknown")}`;list.append(row);}
+    if (uncertain.length>20){const row=document.createElement("li");row.textContent=`${uncertain.length-20} more records; the reviewed archive retains the complete set.`;list.append(row);}
+    const button=document.createElement("button");button.type="button";button.dataset.bookmarkOperation="true";button.textContent=`Keep current locations for ${uncertain.length} unverified record${uncertain.length===1?"":"s"}`;button.disabled=this.busy;
+    const {pendingRecovery,...expected}=pending;
+    button.onclick=()=>{if(typeof window.confirm!=="function"||!window.confirm(`Keep current bookmark locations and archive these ${uncertain.length} unverified recovery records? No bookmarks will move or be deleted. Verified Undo records remain available.`))return;void this.keepCurrentRecovery(expected,true);};
+    section.append(copy,details,button);anchor.before(section);
+  },
+
+  async keepCurrentRecovery(expected, confirmed=false) {
+    if (!confirmed) return {needsConfirmation:true};
+    const snapshot=JSON.stringify(expected);
+    return this.runExclusive("Keep current recovery",async()=>{
+      const archiveKey="hq_bookmark_recovery_reviews_v1";
+      const saved=await chrome.storage.local.get([this.JOURNAL_KEY,archiveKey]);
+      const pending=saved[this.JOURNAL_KEY];
+      if (!pending || JSON.stringify(pending)!==snapshot) throw new Error("Recovery records changed. Review them again before confirming.");
+      const uncertain=(pending.moves || []).filter(move=>move.phase!=="applied"),applied=(pending.moves || []).filter(move=>move.phase==="applied");
+      if (!uncertain.length) return {kept:0};
+      const archive=Array.isArray(saved[archiveKey])?saved[archiveKey]:[];
+      await chrome.storage.local.set({[this.JOURNAL_KEY]:applied.length?{...pending,moves:applied}:null,[archiveKey]:[...archive,{id:pending.id,reviewedAt:Date.now(),decision:"keep-current-locations",moves:uncertain}].slice(-8)});
+      this.log(`Kept current locations for ${uncertain.length} unverified records. No bookmarks moved or were deleted. The last eight recovery reviews are retained locally.`,true);
+      return {kept:uncertain.length,verifiedUndoRemaining:applied.length};
+    });
   },
 
   async migrateEmojiRootNames(barId) {
@@ -907,7 +960,9 @@ const Bookmarks = {
       let restored = 0;
       let skipped = 0;
       const retry = [];
+      const uncertain = [];
       for (const move of [...transaction.moves].reverse()) {
+        if (transaction.pendingRecovery && move.phase !== "applied") { uncertain.unshift(move); continue; }
         try {
           const [bm] = await chrome.bookmarks.get(move.id);
           if (!bm || (move.url && bm.url !== move.url) || (move.toParentId && bm.parentId !== move.toParentId)) { skipped += 1; continue; }
@@ -923,12 +978,17 @@ const Bookmarks = {
           restored += 1;
         } catch { retry.unshift(move); }
       }
-      if (retry.length) stack.push({ ...transaction, moves: retry });
-      await chrome.storage.local.set({ [this.UNDO_KEY]: stack, [this.JOURNAL_KEY]: null, hq_bookmark_undo: [] });
+      let journal=null;
+      if (transaction.pendingRecovery) {
+        const {pendingRecovery,...pending}=transaction;
+        if (retry.length || uncertain.length) journal={...pending,moves:[...retry,...uncertain]};
+      } else if (retry.length) stack.push({ ...transaction, moves: retry });
+      await chrome.storage.local.set({ [this.UNDO_KEY]: stack, [this.JOURNAL_KEY]: journal, hq_bookmark_undo: [] });
       const removed = await this.cleanupManagedEmptyFolders(barId);
       await this.recordAudit("undo", { transactionId: transaction.id, restored, skipped, removed });
-      this.log(`Undo: ${restored} restored${skipped ? `, ${skipped} left untouched because they changed later` : ""}${retry.length ? `, ${retry.length} could not be restored—retry Undo` : ""}.`, !retry.length);
+      this.log(`Undo: ${restored} restored${skipped ? `, ${skipped} left untouched because they changed later` : ""}${retry.length ? `, ${retry.length} could not be restored—retry Undo` : ""}${uncertain.length ? `; ${uncertain.length} unverified move intents remain untouched. Review recovery and explicitly keep their current locations to release them` : ""}.`, !retry.length && !uncertain.length);
       await this.refreshInboxCount();
+      return {restored,skipped,retry:retry.length,uncertain:uncertain.length};
     });
   },
 

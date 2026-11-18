@@ -301,6 +301,60 @@ try{
      },state.saved);
    }
  });
+ await check('Native recovery keeps uncertain owner moves and preserves verified Undo',async()=>{
+   await page.evaluate(()=>HQPanels.open('bookmarks-flyout'));
+   const outcomes=[];
+   for(const phase of ['legacy','prepared']){
+     const state=await page.evaluate(async phase=>{
+       const keys=[Bookmarks.JOURNAL_KEY,Bookmarks.UNDO_KEY,'hq_bookmark_undo','hq_bookmark_recovery_reviews_v1','hq_realtime_sort_enabled'];
+       const saved=await chrome.storage.local.get(keys),bar=(await chrome.bookmarks.getTree())[0].children[0].id;
+       await chrome.storage.local.set({hq_realtime_sort_enabled:false});Bookmarks.pendingTransaction=null;Bookmarks.journalFailed=false;
+       const source=await chrome.bookmarks.create({parentId:bar,title:'HQ Recovery Source '+phase}),target=await chrome.bookmarks.create({parentId:bar,title:'HQ Recovery Target '+phase});
+       const verified=await chrome.bookmarks.create({parentId:source.id,title:'HQ verified recovery '+phase,url:'https://example.org/verified-recovery-'+phase});
+       const uncertain=await chrome.bookmarks.create({parentId:source.id,title:'HQ owner placement '+phase,url:'https://example.org/owner-recovery-'+phase});
+       const applied=[];await Bookmarks.moveAndRecord(verified,target.id,[],bar,applied);
+       await chrome.bookmarks.move(uncertain.id,{parentId:target.id});
+       const intent={id:uncertain.id,url:uncertain.url,fromParentId:source.id,fromIndex:1,fromPath:[source.title],toParentId:target.id,toPath:[target.title],...(phase==='prepared'?{phase:'prepared'}:{})};
+       const journal={id:'native-recovery-'+phase,kind:'interrupted-sort',createdAt:Date.now(),moves:[intent]};
+       await chrome.storage.local.set({[Bookmarks.JOURNAL_KEY]:journal});await Bookmarks.updateUndoButton();
+       return {keys,saved,source,target,verified,uncertain,applied,journal,current:(await chrome.bookmarks.get(uncertain.id))[0]};
+     },phase);
+     try{
+       await page.locator('#undo-bookmarks-btn').click();await page.waitForFunction(()=>!Bookmarks.busy);
+       await page.locator('#bookmark-recovery-review').waitFor({state:'visible'});
+       assert.deepEqual(await worker.evaluate(id=>chrome.bookmarks.get(id),state.uncertain.id),[state.current],'Undo changed uncertain '+phase+' placement');
+       const keep=page.locator('#bookmark-recovery-review').getByRole('button',{name:/Keep current locations/});
+       const cancelDialog=page.waitForEvent('dialog').then(async dialog=>{assert.equal(dialog.type(),'confirm');assert.match(dialog.message(),/No bookmarks will move or be deleted/);await dialog.dismiss();});
+       await keep.click();await cancelDialog;
+       assert.equal(await worker.evaluate(async()=>Boolean((await chrome.storage.local.get('hq_bookmark_pending_v1')).hq_bookmark_pending_v1)),true,'Cancelled review discarded recovery');
+       await page.evaluate(async state=>{
+         await chrome.storage.local.set({[Bookmarks.JOURNAL_KEY]:{...state.journal,moves:[...state.applied,...state.journal.moves]}});await Bookmarks.updateUndoButton();
+       },state);
+       const acceptDialog=page.waitForEvent('dialog').then(dialog=>dialog.accept());
+       await page.locator('#bookmark-recovery-review').getByRole('button',{name:/Keep current locations/}).click();await acceptDialog;
+       await waitForSaved(()=>worker.evaluate(async()=>(await chrome.storage.local.get('hq_bookmark_pending_v1')).hq_bookmark_pending_v1),journal=>journal?.moves?.length===1&&journal.moves[0].id===state.verified.id&&journal.moves[0].phase==='applied');
+       await page.waitForFunction(()=>!Bookmarks.busy);
+       assert.deepEqual(await worker.evaluate(id=>chrome.bookmarks.get(id),state.uncertain.id),[state.current],'Keep-current changed owner '+phase+' placement');
+       const archived=await worker.evaluate(async()=>(await chrome.storage.local.get('hq_bookmark_recovery_reviews_v1')).hq_bookmark_recovery_reviews_v1);
+       assert(archived.some(item=>item.id===state.journal.id&&item.decision==='keep-current-locations'&&item.moves.length===1&&item.moves[0].id===state.uncertain.id),'Uncertain review was not archived');
+       await page.locator('#undo-bookmarks-btn').click();await page.waitForFunction(()=>!Bookmarks.busy);
+       const restored=(await worker.evaluate(id=>chrome.bookmarks.get(id),state.verified.id))[0];
+       assert.equal(restored.parentId,state.source.id,'Verified inverse was lost');assert.equal(restored.index,state.verified.index,'Verified Undo lost original index');
+       const owner=(await worker.evaluate(id=>chrome.bookmarks.get(id),state.uncertain.id))[0];
+       assert.equal(owner.parentId,state.current.parentId,'Verified Undo moved the uncertain bookmark');assert.equal(owner.url,state.current.url);assert.equal(owner.title,state.current.title);
+       // Removing its verified sibling legitimately renumbers Chrome's index.
+       assert.deepEqual(await worker.evaluate(async id=>(await chrome.bookmarks.getChildren(id)).map(item=>item.id),state.target.id),[state.uncertain.id]);
+       await page.locator('#bookmark-recovery-review').waitFor({state:'detached'});outcomes.push({phase,uncertainUntouched:true,confirmationRequired:true,verifiedUndoPreserved:true});
+     }finally{
+       await page.evaluate(async state=>{
+         for(const id of [state.verified.id,state.uncertain.id,state.source.id,state.target.id])await chrome.bookmarks.remove(id);
+         await navigator.locks.request('hq-bookmark-mutations',async()=>{await chrome.storage.local.remove(state.keys);await chrome.storage.local.set(state.saved);});
+         Bookmarks.pendingTransaction=null;Bookmarks.journalFailed=false;await Bookmarks.updateUndoButton();
+       },state);
+     }
+   }
+   return {outcomes};
+ });
  await check('No uncaught browser errors across tested journeys',async()=>{assert.deepEqual(errors,[]);return {consoleErrors};});
 }catch(error){console.error(error);process.exitCode=1;if(context){for(const p of context.pages().filter(p=>p.url().includes('newtab.html'))){await p.screenshot({path:path.join(output,'failure.png')}).catch(()=>{});const diagnostics=await p.evaluate(()=>({issues:typeof BootDiagnostics==='undefined'?[]:BootDiagnostics.issues,early:window.HQEarlyDiagnostics?.entries()})).catch(()=>null);console.log('Failure diagnostics',JSON.stringify(diagnostics));console.log('Failure panel states',JSON.stringify(await p.evaluate(()=>({hash:location.hash,panels:[...document.querySelectorAll('.flyout.open')].map(e=>({id:e.id,visible:getComputedStyle(e).visibility})),errors:window.HQEarlyDiagnostics?.entries()})).catch(()=>null)));await fs.writeFile(path.join(output,'diagnostics.json'),JSON.stringify(diagnostics,null,2));}}}
 finally{await fs.writeFile(path.join(output,'chromium-results.json'),JSON.stringify({timestamp:new Date().toISOString(),results,errors,consoleErrors,network,providerTests:'External HTTP blocked; Gmail cancellation token stub. No live account or local model download.'},null,2));await context?.close();await fs.rm(profile,{recursive:true,force:true});}
