@@ -20,6 +20,6 @@ test('automatic worker lookup cannot reuse another hash-route shell evidence',as
   const ctx=vm.createContext({URL,Date,chrome:{bookmarks:{get:async()=>[bm]},storage:{local:{get:async()=>({hq_bookmark_evidence_v1:cache})}}},getBarId:async()=>'1',bookmarkFolderPath:async()=>[],scanLegitFolders:async()=>[],markBookmarkDecision:async()=>{},Classifier:{shouldNeverSort:()=>false,normalizePath:()=>null,classify:item=>{observed=item.title;return {};}}});
   vm.runInContext(fn+'\nthis.sort=sortAutomaticBookmark;',ctx);
   await ctx.sort({id:'one',url:bm.url,parentId:'1'});assert.equal(observed,'Saved page');
-  cache['url:'+bm.url]={text:'Calculus lesson',at:Date.now()};
+  cache['url:'+bm.url]={schema:2,resourceKey:'url:'+bm.url,text:'Calculus lesson',at:Date.now()};
   await ctx.sort({id:'one',url:bm.url,parentId:'1'});assert.equal(observed,'Saved page Calculus lesson');
 });

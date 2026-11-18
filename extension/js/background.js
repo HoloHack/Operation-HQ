@@ -345,7 +345,8 @@ async function sortAutomaticBookmark(entry) {
   // Reuse only already-authorized cached metadata; never fetch arbitrary pages automatically.
   let cacheKey;try{const u=new URL(bm.url);if(!/^#!?\//.test(u.hash))u.hash='';cacheKey='url:'+u.href;}catch{}
   const cached=cacheKey&&saved.hq_bookmark_evidence_v1?.[cacheKey];
-  const evidence=cached&&Date.now()-cached.at<7*86400000?String(cached.text||'').slice(0,2400):'';
+  const evidenceAge=Date.now()-cached?.at;
+  const evidence=cached?.schema===2&&cached.resourceKey===cacheKey&&typeof cached.text==='string'&&Number.isFinite(evidenceAge)&&evidenceAge>=0&&evidenceAge<7*86400000?cached.text.slice(0,2400):'';
   const result=Classifier.classify({...bm,title:[bm.title,evidence].filter(Boolean).join(' ')},saved.hq_learned_domains||{},await scanLegitFolders(barId));
   const path=Classifier.normalizePath(result.path,{allowOperational:false});
   if(path&&result.confidence==='high'){

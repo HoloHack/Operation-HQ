@@ -443,9 +443,9 @@ const Bookmarks = {
 
   async fetchPageContext(url) {
     let key;try{const parsed=new URL(url);if(!/^#!?\//.test(parsed.hash))parsed.hash="";key="url:"+parsed.href;}catch{return "";}
-    try{const cache=(await chrome.storage.local.get(this.EVIDENCE_KEY))[this.EVIDENCE_KEY]||{};if(cache[key]?.text&&Date.now()-cache[key].at<7*86400000)return cache[key].text;}catch{}
+    try{const cache=(await chrome.storage.local.get(this.EVIDENCE_KEY))[this.EVIDENCE_KEY]||{},entry=cache[key],age=Date.now()-entry?.at;if(entry?.schema===2&&entry.resourceKey===key&&typeof entry.text==='string'&&entry.text&&Number.isFinite(age)&&age>=0&&age<7*86400000)return entry.text.slice(0,3000);}catch{}
     const text=await this.readPageContext(url);
-    if(text){try{await (this._evidenceWrite=(this._evidenceWrite||Promise.resolve()).catch(()=>{}).then(async()=>{const cache=(await chrome.storage.local.get(this.EVIDENCE_KEY))[this.EVIDENCE_KEY]||{};cache[key]={text,at:Date.now()};const entries=Object.entries(cache).sort((a,b)=>b[1].at-a[1].at).slice(0,600);await chrome.storage.local.set({[this.EVIDENCE_KEY]:Object.fromEntries(entries)});}));}catch{}}
+    if(text){try{await (this._evidenceWrite=(this._evidenceWrite||Promise.resolve()).catch(()=>{}).then(async()=>{const cache=(await chrome.storage.local.get(this.EVIDENCE_KEY))[this.EVIDENCE_KEY]||{};cache[key]={schema:2,resourceKey:key,text,at:Date.now()};const entries=Object.entries(cache).sort((a,b)=>b[1].at-a[1].at).slice(0,600);await chrome.storage.local.set({[this.EVIDENCE_KEY]:Object.fromEntries(entries)});}));}catch{}}
     return text;
   },
 
@@ -466,8 +466,13 @@ const Bookmarks = {
     try {
       for (const endpoint of this.evidenceEndpoints(url)) {
         try {
-          const response = await fetch(endpoint, { signal: controller.signal, credentials: "omit", redirect:"follow" });
-          if (!response.ok || (response.url && !this.evidenceEndpoints(response.url).length)) continue;
+          // A public redirect can still be an unrelated login/home/topic page.
+          // Never fetch the redirect target or attribute its text to this link.
+          const response = await fetch(endpoint, { signal: controller.signal, credentials: "omit", redirect:"error" });
+          if (!response.ok || response.redirected || !response.url) continue;
+          const expectedUrl=new URL(endpoint),actualUrl=new URL(response.url);
+          expectedUrl.hash="";actualUrl.hash=""; // HTTP never sends ordinary anchors.
+          if(actualUrl.href!==expectedUrl.href)continue;
           const type = (response.headers.get("content-type") || "").toLowerCase();
           if (type.includes("application/json")) {
             const data = JSON.parse(await this.boundedPageText(response));
