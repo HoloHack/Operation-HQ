@@ -22,6 +22,14 @@ test('prepared intent before a move is preserved for explicit review, never infe
 test('owner manual move to the intended target cannot be mistaken for a completed prepared or legacy move',async()=>{
   for(const phase of ['prepared',undefined]){const f=fixture();f.nodes.get('a').parentId='to';f.pending([f.inverse('a',phase)]);const result=await f.page().undo();assert.equal(result.uncertain,1);assert.equal(f.calls.length,0);assert.equal(f.nodes.get('a').parentId,'to');}
 });
+test('failed cleanup after the owner moves into the exact intended target remains review-only after restart',async()=>{
+  const f=fixture();let writes=0;
+  f.hooks.beforeSet=async()=>{writes++;if(writes===1)f.nodes.get('a').parentId='to';else throw Error('Cleanup quota');};
+  await assert.rejects(f.move(),/changed while recording recovery/);
+  assert.equal(f.book.journalFailed,true);assert.equal(f.calls.length,0);assert.equal(f.data[f.book.JOURNAL_KEY].moves[0].phase,'prepared');
+  f.hooks.beforeSet=async()=>{};const before=structuredClone(f.nodes.get('a')),result=await f.page().undo();
+  assert.equal(result.uncertain,1);assert.equal(result.restored,0);assert.equal(f.calls.length,0);assert.deepEqual(f.nodes.get('a'),before);
+});
 test('completion ack failure retains prepared disk intent and stops the next move',async()=>{
   const f=fixture(),moves=[];f.hooks.beforeSet=async values=>{if(values[f.book.JOURNAL_KEY]?.moves.some(move=>move.phase==='applied'))throw Error('Ack quota');};await assert.rejects(f.move('a',moves),/completion could not be recorded/);assert.equal(moves.length,0);assert.equal(f.nodes.get('a').parentId,'to');assert.equal(f.data[f.book.JOURNAL_KEY].moves[0].phase,'prepared');assert.equal(f.book.journalFailed,true);await assert.rejects(f.move('b',moves),/Recovery storage failed/);f.hooks.beforeSet=async()=>{};await f.page().undo();assert.equal(f.nodes.get('a').parentId,'to');assert.equal(f.calls.length,1);
 });
