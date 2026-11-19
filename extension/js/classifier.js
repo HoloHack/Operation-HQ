@@ -438,6 +438,18 @@ const Classifier = {
     return null;
   },
 
+  hasUntrustedControlText(bookmark) {
+    // A narrow evidence-quality gate, not a general prompt-injection detector.
+    // Classification instructions are not trustworthy descriptions of content.
+    const text = [bookmark?.title, bookmark?.pageContext].filter(value => typeof value === "string").join(" ").normalize("NFKC").toLowerCase();
+    const override = /\b(?:ignore|disregard|override|bypass)\s+(?:(?:all|any|the|your|these|above|previous|prior|system|developer|earlier|classification)\s+){0,5}instructions?\b/.test(text)
+      || /\b(?:ignore|disregard|override|bypass)\s+(?:(?:all|any|the|your|these)\s+){0,2}(?:previous|prior|system|developer|classification)\s+(?:rules?|prompts?)\b/.test(text);
+    const placement = /\b(?:classify|categorise|categorize|file|sort|move|put|assign)\s+(?:(?:this|the|current|saved)\s+){0,2}(?:bookmark|link|page|resource)\s+(?:as|under|into|in|to)\b/.test(text);
+    const fields = /["']?root["']?\s*[:=]/.test(text) && /["']?sub["']?\s*[:=]/.test(text) && /["']?confidence["']?\s*[:=]/.test(text);
+    const output = /\b(?:return|output|respond(?:\s+with)?)\b[^\n]{0,160}\bconfidence\s*(?:["']?\s*[:=]\s*["']?|\s+)(?:high|medium|low)\b/.test(text);
+    return override || placement || fields || output;
+  },
+
   // learnedMap: { domain: [root, sub|null] } from manual re-files
   // legitFolders: [{title, parentTitle}] — ONLY folders that are already
   // nested one level inside a fixed root (Tier 2). Deliberately excludes
@@ -456,10 +468,15 @@ const Classifier = {
       if (learned) return { path: learned, confidence: "high", source: "learned-exact" };
     }
     const legacyKey=this.legacyFingerprint(bookmark);
-    const legacyPath=this.normalizePath(learnedMap?.[legacyKey]||learnedMap?.[domain],{allowOperational:false});
+    const legacyExactPath=this.normalizePath(learnedMap?.[legacyKey],{allowOperational:false});
+    const legacyPath=legacyExactPath||this.normalizePath(learnedMap?.[domain],{allowOperational:false});
     // Old Google editor URLs still carry a concrete document ID, so a known
     // exact correction can survive the change to canonical editor-independent IDs.
-    if(legacyPath&&/^(?:docs|sheets|drive)\.google\.com\/(?:document|spreadsheets|presentation|file)\/d\/[^/]+/.test(legacyKey))return {path:legacyPath,confidence:'high',source:'learned-exact'};
+    if(legacyExactPath&&/^(?:docs|sheets|drive)\.google\.com\/(?:document|spreadsheets|presentation|file)\/d\/[^/]+/.test(legacyKey))return {path:legacyExactPath,confidence:'high',source:'learned-exact'};
+
+    // Only explicit, scoped owner corrections may override control-like text.
+    // Neither topic words, a trusted host nor an old folder proves its meaning.
+    if (this.hasUntrustedControlText(bookmark)) return {path:null,confidence:"needs-decision",source:"untrusted-control-text",reasons:["classification/control instructions are not page-topic evidence"],candidates:[]};
 
     // 2) Topic beats platform for EVERY bookmark. This is the black-and-
     // white rule: classify what the saved page says it is about first;
