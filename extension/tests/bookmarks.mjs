@@ -60,7 +60,7 @@ const chrome = {
   },
 };
 
-const context = vm.createContext({ navigator, chrome, URL, Set, Map, AbortController, DOMParser: class {}, fetch, crypto: webcrypto, console, setTimeout, clearTimeout });
+const context = vm.createContext({ navigator, chrome, URL, Set, Map, AbortController, DOMParser: class {}, fetch, crypto: webcrypto, TextEncoder, console, setTimeout, clearTimeout });
 vm.runInContext(source("classifier.js"), context, { filename: "classifier.js" });
 vm.runInContext(source("bookmarks.js"), context, { filename: "bookmarks.js" });
 const Classifier = vm.runInContext("Classifier", context);

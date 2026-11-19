@@ -11,7 +11,7 @@ const pass = (message) => console.log(`✓ ${message}`);
 
 const manifest = JSON.parse(read("manifest.json"));
 assert.equal(manifest.manifest_version, 3);
-assert.equal(manifest.version, "3.2.6");
+assert.equal(manifest.version, "3.2.7");
 const extensionHex = createHash("sha256").update(Buffer.from(manifest.key, "base64")).digest("hex").slice(0, 32);
 const extensionId = [...extensionHex].map(char => String.fromCharCode(97 + parseInt(char, 16))).join("");
 assert.equal(extensionId, "cbgepkbfmcahdpahipkdeahppfbggjok", "Manifest key changed the OAuth-bound extension ID");
@@ -103,6 +103,7 @@ pass(`${jsFiles.length} JavaScript modules pass syntax validation`);
 const dynamicDomIds = new Set([
   "forgotten-shuffle-btn", "nudge-yes-btn", "nudge-dismiss-btn",
   "gleam-mission-outcome", "gleam-mission-status", "gleam-mission-before", "gleam-mission-after",
+  "bookmark-model-evaluation", // Created by LocalAI.mountBookmarkEvaluationUI().
 ]);
 const missingLiteralDomIds = [];
 for (const file of jsFiles.filter(file => !file.startsWith("lib/"))) {

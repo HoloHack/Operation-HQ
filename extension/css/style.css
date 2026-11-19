@@ -4255,6 +4255,13 @@ body[data-motion-profile="cinematic"] .widget-tech-frame { animation:widget-fram
 .bookmark-review-row>div:first-child { min-width:0; display:grid; gap:4px; }
 .bookmark-review-row strong,.bookmark-review-row span,.bookmark-review-row small { overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
 .bookmark-review-row strong { color:rgba(248,251,255,.88); font-size:10px; }.bookmark-review-row span { color:rgba(219,231,246,.42); font-size:8px; }.bookmark-review-row small { color:rgba(115,200,255,.58);font-size:8px; }
+#bookmark-recovery-review { grid-template-columns:minmax(0,1fr); gap:12px; margin-block:16px; min-width:0; overflow-wrap:anywhere; font-size:13px; line-height:1.5; }
+#bookmark-recovery-review p { margin:0; }
+#bookmark-recovery-review details { min-width:0; }
+#bookmark-recovery-review summary { cursor:pointer; padding-block:8px; }
+#bookmark-recovery-review ul { max-height:240px; overflow:auto; padding-inline-start:20px; }
+#bookmark-recovery-review li { margin-block:8px; }
+#bookmark-recovery-review button { justify-self:start; max-width:100%; min-height:44px; padding:10px 14px; white-space:normal; text-align:start; }
 .bookmark-review-controls { display:grid; grid-template-columns:minmax(0,1fr) auto auto; gap:7px; }
 .bookmark-review-controls select { min-width:0; min-height:36px!important; padding-block:7px!important; }
 .bookmark-review-controls button { min-height:36px; white-space:nowrap; }
@@ -4375,3 +4382,12 @@ body[data-compositor="active"] .living-widget[data-state="complete"] { --widget-
 .bookmark-pagination { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px; padding:12px 0 18px; border-bottom:1px solid var(--panel-border); margin-bottom:10px; }
 .bookmark-pagination span { flex:1 1 150px; text-align:center; color:var(--text-dim); font-size:12px; line-height:1.5; }
 .bookmark-pagination button { min-height:40px; padding:8px 12px; }
+
+/* Explicit, synthetic-only diagnostics: readable without expanding the main desk. */
+#bookmark-model-evaluation { display:grid; grid-template-columns:minmax(0,1fr); gap:12px; max-width:100%; min-width:0; margin:20px 0; padding:16px; border:1px solid var(--panel-border); border-radius:12px; font-size:16px; line-height:1.5; overflow-wrap:anywhere; }
+#bookmark-model-evaluation h4 { margin:0; font-size:16px; line-height:1.4; }
+#bookmark-model-evaluation p { margin:0; font-size:16px; line-height:1.5; }
+#bookmark-model-evaluation button { justify-self:start; min-height:44px; max-width:100%; white-space:normal; padding:10px 14px; font-size:14px; line-height:1.4; text-align:left; }
+#bookmark-model-evaluation summary { min-height:44px; padding:10px 0; font-size:14px; cursor:pointer; }
+#bookmark-model-evaluation details { min-width:0; max-width:100%; }
+#bookmark-model-evaluation pre { box-sizing:border-box; max-width:100%; padding:12px; border-radius:8px; background:rgba(0,0,0,.16); font-size:13px; line-height:1.5; }

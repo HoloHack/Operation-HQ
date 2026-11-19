@@ -56,33 +56,40 @@ const INBOX_NAME = "Inbox";
 const BOOKMARK_MANAGED_KEY = "hq_bookmark_managed_folders_v2";
 const BOOKMARK_DECISIONS_KEY = "hq_bookmark_decisions_v1";
 const selfMovedIds = new Set(); // bookmark IDs we just moved ourselves — ignore the resulting onMoved event
-let bookmarkDecisionWrite = Promise.resolve();
-
 function updateBookmarkDecisions(mutator) {
-  bookmarkDecisionWrite = bookmarkDecisionWrite.catch(() => {}).then(async () => {
-    const saved = await chrome.storage.local.get(BOOKMARK_DECISIONS_KEY);
-    const current = Array.isArray(saved[BOOKMARK_DECISIONS_KEY]) ? saved[BOOKMARK_DECISIONS_KEY] : [];
-    const next = mutator(current).filter(item => item?.bm?.id && item?.bm?.url);
-    await chrome.storage.local.set({ [BOOKMARK_DECISIONS_KEY]:next });
-  });
-  return bookmarkDecisionWrite;
+  return Classifier.updateDecisionStore(mutator);
 }
 
-function markBookmarkDecision(bookmark, result) {
-  return updateBookmarkDecisions(current => [
+async function markBookmarkDecision(bookmark, result) {
+  return updateBookmarkDecisions(async current => {
+    let live;try{[live]=await chrome.bookmarks.get(String(bookmark.id));}catch{return current;}
+    if (!await Classifier.decisionRecordMatches({bm:bookmark}, live)) return current;
+    const resourceIdentity = await Classifier.decisionIdentity(bookmark);
+    return [
     ...current.filter(item => String(item.bm.id) !== String(bookmark.id)),
     {
+      resourceIdentity,
       bm:{ id:String(bookmark.id), title:String(bookmark.title || "").slice(0,500), url:String(bookmark.url || "").slice(0,3000), parentId:String(bookmark.parentId || ""), sourcePath:Array.isArray(bookmark.sourcePath) ? bookmark.sourcePath.slice(0,12) : [] },
       reasons:(result?.reasons || ["more topic evidence needed"]).map(String).slice(0,6),
       suggestedPath:Classifier.normalizePath(result?.path, { allowOperational:false }),
       candidates:(result?.candidates || []).slice(0,3),
       createdAt:Date.now(),
     },
-  ]);
+    ];
+  });
 }
 
-function clearBookmarkDecision(id) {
-  return updateBookmarkDecisions(current => current.filter(item => String(item.bm.id) !== String(id)));
+function clearBookmarkDecision(id, expectedBookmark) {
+  return updateBookmarkDecisions(async current => {
+    let live;try{[live]=await chrome.bookmarks.get(String(id));}catch{}
+    const next=[];
+    for(const item of current){
+      if(String(item.bm.id)!==String(id)){next.push(item);continue;}
+      const remove=expectedBookmark ? await Classifier.decisionRecordMatches(item, expectedBookmark) : !await Classifier.decisionRecordMatches(item, live);
+      if(!remove)next.push(item);
+    }
+    return next;
+  });
 }
 
 function bulkBookmarkOperationActive(value) {
@@ -296,18 +303,35 @@ async function scanLegitFolders(barId) {
   return legit;
 }
 
-async function moveSelf(id, parentId) {
+async function moveSelf(id, parentId, classifiedBookmark) {
+  // Destination authority belongs to the resource that was classified, not a
+  // fresh snapshot taken after the owner may have edited its title or URL.
+  const expected = classifiedBookmark && { id:String(classifiedBookmark.id), url:classifiedBookmark.url, title:classifiedBookmark.title, parentId:String(classifiedBookmark.parentId) };
+  if (!expected?.url || expected.id !== String(id)) throw Error("Automatic sort needs its classified bookmark snapshot.");
+  const matches = node => node?.url === expected.url && node.title === expected.title && String(node.parentId) === expected.parentId;
   const [bookmark] = await chrome.bookmarks.get(id);
-  const saved = await chrome.storage.local.get(["hq_bookmark_undo_v2", "hq_bookmark_undo"]);
+  if (!matches(bookmark)) throw Error("Bookmark changed before automatic sort.");
+  const saved = await chrome.storage.local.get(["hq_bookmark_undo_v2", "hq_bookmark_undo", "hq_bookmark_pending_v1"]);
+  if (saved.hq_bookmark_pending_v1?.moves?.length) throw Error("An interrupted sort needs recovery review before another move.");
+  const fromPath = await bookmarkFolderPath(bookmark.parentId, await getBarId());
+  const [current] = await chrome.bookmarks.get(id);
+  if (!matches(current)) throw Error("Bookmark changed before automatic sort.");
   const transaction = {
     id: crypto.randomUUID(), kind: "automatic-sort", createdAt: Date.now(),
-    moves: [{ id, url: bookmark.url, fromParentId: bookmark.parentId, fromIndex: bookmark.index,
-      fromPath: await bookmarkFolderPath(bookmark.parentId, await getBarId()), toParentId: parentId }],
+    moves: [{ id, url: current.url, fromParentId: current.parentId, fromIndex: current.index,
+      fromPath, toParentId: parentId, phase: "prepared" }],
   };
   await chrome.storage.local.set({ hq_bookmark_pending_v1: transaction });
   selfMovedIds.add(id);
   try {
-    await chrome.bookmarks.move(id, { parentId });
+    const [latest] = await chrome.bookmarks.get(id);
+    if (!matches(latest) || latest.index !== current.index) throw Error("Bookmark changed while automatic recovery was recorded.");
+    const moved = await chrome.bookmarks.move(id, { parentId });
+    if (!moved || String(moved.id) !== String(id) || moved.url !== current.url || moved.title !== current.title || String(moved.parentId) !== String(parentId)) throw Error("Automatic move acknowledgement could not be verified. Review recovery.");
+    transaction.moves[0].phase = "applied";
+    // Failure leaves the durable prepared record uncertain, never promoted by
+    // merely observing that the bookmark happens to be in the target folder.
+    await chrome.storage.local.set({ hq_bookmark_pending_v1: transaction });
     const stack = Array.isArray(saved.hq_bookmark_undo_v2) ? saved.hq_bookmark_undo_v2 :
       (saved.hq_bookmark_undo?.length ? [{ id: "legacy-sort", kind: "legacy-sort", moves: saved.hq_bookmark_undo }] : []);
     await chrome.storage.local.set({ hq_bookmark_undo_v2: [...stack, transaction].slice(-8), hq_bookmark_pending_v1: null, hq_bookmark_undo: [] });
@@ -324,16 +348,17 @@ async function sortAutomaticBookmark(entry) {
   const saved=await chrome.storage.local.get(['hq_learned_domains','hq_bookmark_evidence_v1']);
   const bm={...current,sourcePath:await bookmarkFolderPath(current.parentId,barId)};
   // Reuse only already-authorized cached metadata; never fetch arbitrary pages automatically.
-  let cacheKey;try{const u=new URL(bm.url);u.hash='';cacheKey='url:'+u.href;}catch{}
+  let cacheKey;try{const u=new URL(bm.url);if(!/^#!?\//.test(u.hash))u.hash='';cacheKey='url:'+u.href;}catch{}
   const cached=cacheKey&&saved.hq_bookmark_evidence_v1?.[cacheKey];
-  const evidence=cached&&Date.now()-cached.at<7*86400000?String(cached.text||'').slice(0,2400):'';
+  const evidenceAge=Date.now()-cached?.at;
+  const evidence=cached?.schema===2&&cached.resourceKey===cacheKey&&typeof cached.text==='string'&&Number.isFinite(evidenceAge)&&evidenceAge>=0&&evidenceAge<7*86400000?cached.text.slice(0,2400):'';
   const result=Classifier.classify({...bm,title:[bm.title,evidence].filter(Boolean).join(' ')},saved.hq_learned_domains||{},await scanLegitFolders(barId));
   const path=Classifier.normalizePath(result.path,{allowOperational:false});
   if(path&&result.confidence==='high'){
     const parent=await getOrCreateFolderPath(path,barId),[latest]=await chrome.bookmarks.get(entry.id);
     if(latest.url!==entry.url||String(latest.parentId)!==entry.parentId||latest.title!==current.title)return {done:false,outcome:'changed-during-read',title:latest.title};
-    if(String(parent)!==String(latest.parentId))await moveSelf(entry.id,parent);
-    await clearBookmarkDecision(entry.id);return {done:true,outcome:'sorted',title:latest.title};
+    if(String(parent)!==String(latest.parentId))await moveSelf(entry.id,parent,current);
+    await clearBookmarkDecision(entry.id, current);return {done:true,outcome:'sorted',title:latest.title};
   }
   await markBookmarkDecision(bm,result);return {done:false,outcome:'needs-evidence',title:bm.title};
 }

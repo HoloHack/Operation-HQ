@@ -92,8 +92,8 @@ const Bookmarks = {
         // Wait for a bounded background batch instead of dropping the owner's click.
         return navigator.locks.request("hq-bookmark-mutations", async () => {
         const saved = await chrome.storage.local.get(this.JOURNAL_KEY);
-        if (saved[this.JOURNAL_KEY]?.moves?.length && label !== "Undo") {
-          throw new Error("An interrupted sort has recovery steps. Use Undo before starting another sort.");
+        if (saved[this.JOURNAL_KEY]?.moves?.length && !["Undo", "Keep current recovery"].includes(label)) {
+          throw new Error("An interrupted sort has recovery steps. Review recovery/Undo before starting another sort.");
         }
         this.pendingTransaction = null;
         this.journalFailed = false;
@@ -206,8 +206,11 @@ const Bookmarks = {
     }
   },
 
-  serializeDecision(item) {
+  async serializeDecision(item) {
+    const resourceIdentity = item.resourceIdentity ?? await Classifier.decisionIdentity(item.bm);
+    if (!/^sha256-v1:[a-f0-9]{64}$/.test(resourceIdentity)) throw new Error("Invalid bookmark decision identity; refresh Preview.");
     return {
+      resourceIdentity,
       bm:{ id:String(item.bm.id), title:String(item.bm.title || "").slice(0,500), url:String(item.bm.url || "").slice(0,3000), parentId:String(item.bm.parentId || ""), sourcePath:Array.isArray(item.bm.sourcePath) ? item.bm.sourcePath.slice(0,12) : [] },
       context:String(item.context || "").slice(0,3000),
       reasons:(item.reasons || []).map(String).slice(0,6),
@@ -217,38 +220,70 @@ const Bookmarks = {
     };
   },
 
-  async persistDecisions(items = this.decisionItems) {
-    const byId = new Map();
-    items.forEach(item => {
-      if (item?.bm?.id && item?.bm?.url) byId.set(String(item.bm.id), this.serializeDecision(item));
+  adoptDecisions(items) {
+    const previous = new Map(this.decisionItems.map(item => [String(item.bm.id), item]));
+    const next = new Map(items.map(item => [String(item.bm.id), item]));
+    for (const id of this.decisionSelections.keys()) if (!Classifier.sameDecisionRecord(previous.get(id), next.get(id))) this.decisionSelections.delete(id);
+    this.decisionItems = items;
+    return items;
+  },
+
+  async persistDecisions(items = [], removedIds = [], expectedItems = this.decisionItems) {
+    const upserts = items.map(item => ({ ...item, bm:item?.bm && { ...item.bm } }));
+    const removals = removedIds.map(String);
+    const expected = new Map(expectedItems.map(item => [String(item.bm.id), { ...item, bm:{ ...item.bm } }]));
+    const next = await Classifier.updateDecisionStore(async current => {
+      const byId = new Map(current.map(item => [String(item.bm.id), item]));
+      // Absence from this tab's snapshot is never a deletion intent.
+      for (const id of removals) if (Classifier.sameDecisionRecord(expected.get(id), byId.get(id))) byId.delete(id);
+      for (const item of upserts) {
+        if (!item?.bm?.id || !item?.bm?.url) continue;
+        let live;try{[live]=await chrome.bookmarks.get(String(item.bm.id));}catch{continue;}
+        if (await this.decisionMatches(item, live)) byId.set(String(item.bm.id), await this.serializeDecision(item));
+      }
+      return [...byId.values()];
     });
-    this.decisionItems = [...byId.values()];
-    await chrome.storage.local.set({ [this.DECISIONS_KEY]:this.decisionItems });
-    return this.decisionItems;
+    return this.adoptDecisions(next);
+  },
+
+  async decisionMatches(item, bookmark) {
+    return Classifier.decisionRecordMatches(item, bookmark);
+  },
+
+  async inspectDecision(item) {
+    try {
+      const [bookmark] = await chrome.bookmarks.get(String(item?.bm?.id || ""));
+      if (!await this.decisionMatches(item, bookmark)) throw new Error("Bookmark changed after review. Refresh Preview before inspecting it.");
+      const url = new URL(bookmark.url);
+      if (!["https:", "http:"].includes(url.protocol)) throw new Error("Inspect supports web links only.");
+      await chrome.tabs.create({ url:bookmark.url });
+      return true;
+    } catch (error) {
+      this.log(`Could not inspect bookmark: ${String(error?.message || error)}`);
+      return false;
+    }
   },
 
   async restoreDecisions() {
-    const saved = await chrome.storage.local.get(this.DECISIONS_KEY);
-    const raw = Array.isArray(saved[this.DECISIONS_KEY]) ? saved[this.DECISIONS_KEY] : [];
-    const current = [];
-    for (const item of raw) {
-      try {
-        const [bm] = await chrome.bookmarks.get(String(item?.bm?.id || ""));
-        if (bm?.url) current.push({ ...item, bm:{ ...item.bm, ...bm } });
-      } catch { /* deleted bookmarks disappear from the pending accuracy gate */ }
-    }
-    await this.persistDecisions(current);
-    this.renderAccuracyGate(current);
-    return current;
+    const next = await Classifier.updateDecisionStore(async raw => {
+      const current = [];
+      for (const item of raw) {
+        let bm;
+        try { [bm] = await chrome.bookmarks.get(String(item?.bm?.id || "")); }
+        catch { this.decisionSelections.delete(String(item?.bm?.id || "")); continue; }
+        // Hash/serialization failure aborts, rather than erasing pending data.
+        if (await this.decisionMatches(item, bm)) current.push(await this.serializeDecision({ ...item, bm:{ ...item.bm, ...bm } }));
+        else this.decisionSelections.delete(String(item?.bm?.id || ""));
+      }
+      return current;
+    });
+    this.adoptDecisions(next);
+    this.renderAccuracyGate(next);
+    return next;
   },
 
   async mergeDecisions(items = [], resolvedIds = []) {
-    const byId = new Map(this.decisionItems.map(item => [String(item.bm.id), item]));
-    resolvedIds.forEach(id => byId.delete(String(id)));
-    items.forEach(item => {
-      if (item?.bm?.id) byId.set(String(item.bm.id), { ...item, createdAt:item.createdAt || Date.now() });
-    });
-    await this.persistDecisions([...byId.values()]);
+    await this.persistDecisions(items.map(item => ({ ...item, createdAt:item.createdAt || Date.now() })), resolvedIds);
     this.renderAccuracyGate();
   },
 
@@ -257,7 +292,7 @@ const Bookmarks = {
     const list = this.el("bookmark-review-list");
     const count = this.el("bookmark-review-count");
     if (!board || !list || !count) return;
-    this.decisionItems = items;
+    this.adoptDecisions(items);
     const ids=new Set(items.map(item=>String(item.bm.id)));for(const id of this.decisionSelections.keys())if(!ids.has(id))this.decisionSelections.delete(id);
     const query=this.decisionFilter.toLowerCase().trim();
     const visible=query?items.filter(item=>[item.bm.title,item.bm.url,...(item.reasons||[])].join(" ").toLowerCase().includes(query)):items;
@@ -324,13 +359,13 @@ const Bookmarks = {
       move.onclick = () => {
         let path;
         try { path = JSON.parse(select.value); } catch { return; }
-        this.applyCorrection(item.bm.id, path);
+        this.applyCorrection(item.bm.id, path, item);
       };
       const open = document.createElement("button");
       open.type = "button";
       open.className = "secondary-btn";
       open.textContent = "Inspect";
-      open.onclick = () => chrome.tabs.create({ url:item.bm.url });
+      open.onclick = () => this.inspectDecision(item);
       controls.append(select, move, open);
       row.append(copy, controls);
       list.append(row);
@@ -407,10 +442,10 @@ const Bookmarks = {
   },
 
   async fetchPageContext(url) {
-    let key;try{const parsed=new URL(url);parsed.hash="";key="url:"+parsed.href;}catch{return "";}
-    try{const cache=(await chrome.storage.local.get(this.EVIDENCE_KEY))[this.EVIDENCE_KEY]||{};if(cache[key]?.text&&Date.now()-cache[key].at<7*86400000)return cache[key].text;}catch{}
+    let key;try{const parsed=new URL(url);if(!/^#!?\//.test(parsed.hash))parsed.hash="";key="url:"+parsed.href;}catch{return "";}
+    try{const cache=(await chrome.storage.local.get(this.EVIDENCE_KEY))[this.EVIDENCE_KEY]||{},entry=cache[key],age=Date.now()-entry?.at;if(entry?.schema===2&&entry.resourceKey===key&&typeof entry.text==='string'&&entry.text&&Number.isFinite(age)&&age>=0&&age<7*86400000)return entry.text.slice(0,3000);}catch{}
     const text=await this.readPageContext(url);
-    if(text){try{await (this._evidenceWrite=(this._evidenceWrite||Promise.resolve()).catch(()=>{}).then(async()=>{const cache=(await chrome.storage.local.get(this.EVIDENCE_KEY))[this.EVIDENCE_KEY]||{};cache[key]={text,at:Date.now()};const entries=Object.entries(cache).sort((a,b)=>b[1].at-a[1].at).slice(0,600);await chrome.storage.local.set({[this.EVIDENCE_KEY]:Object.fromEntries(entries)});}));}catch{}}
+    if(text){try{await (this._evidenceWrite=(this._evidenceWrite||Promise.resolve()).catch(()=>{}).then(async()=>{const cache=(await chrome.storage.local.get(this.EVIDENCE_KEY))[this.EVIDENCE_KEY]||{};cache[key]={schema:2,resourceKey:key,text,at:Date.now()};const entries=Object.entries(cache).sort((a,b)=>b[1].at-a[1].at).slice(0,600);await chrome.storage.local.set({[this.EVIDENCE_KEY]:Object.fromEntries(entries)});}));}catch{}}
     return text;
   },
 
@@ -422,13 +457,22 @@ const Bookmarks = {
   },
 
   async readPageContext(url) {
+    // A fragment route identifies content rendered by the site's own app.
+    // Fetching its HTML returns only the shared shell, not that route's page.
+    // Do not turn generic shell metadata into evidence for every saved route.
+    try { if (/^#!?\//.test(new URL(url).hash)) return ""; } catch { return ""; }
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 7000);
     try {
       for (const endpoint of this.evidenceEndpoints(url)) {
         try {
-          const response = await fetch(endpoint, { signal: controller.signal, credentials: "omit", redirect:"follow" });
-          if (!response.ok || (response.url && !this.evidenceEndpoints(response.url).length)) continue;
+          // A public redirect can still be an unrelated login/home/topic page.
+          // Never fetch the redirect target or attribute its text to this link.
+          const response = await fetch(endpoint, { signal: controller.signal, credentials: "omit", redirect:"error" });
+          if (!response.ok || response.redirected || !response.url) continue;
+          const expectedUrl=new URL(endpoint),actualUrl=new URL(response.url);
+          expectedUrl.hash="";actualUrl.hash=""; // HTTP never sends ordinary anchors.
+          if(actualUrl.href!==expectedUrl.href)continue;
           const type = (response.headers.get("content-type") || "").toLowerCase();
           if (type.includes("application/json")) {
             const data = JSON.parse(await this.boundedPageText(response));
@@ -465,7 +509,7 @@ const Bookmarks = {
     });
     walk(root?.children);
     const pendingIds = new Set(this.decisionItems.map(item => String(item.bm.id)));
-    return allBookmarks.filter(bm => pendingIds.has(String(bm.id)) || legacyHoldingDescendants.has(bm.id) || (!pendingOnly && Classifier.isContentVariesDomain(Classifier.domainOf(bm.url))));
+    return allBookmarks.filter(bm => !Classifier.shouldNeverSort(bm.title) && (pendingIds.has(String(bm.id)) || legacyHoldingDescendants.has(bm.id) || (!pendingOnly && Classifier.isContentVariesDomain(Classifier.domainOf(bm.url)))));
   },
 
   async refineUncategorized({ pendingOnly = false } = {}, permission) {
@@ -653,24 +697,50 @@ const Bookmarks = {
 
   async moveAndRecord(bm, targetParentId, targetPath, barId, moves) {
     if (this.journalFailed) throw new Error("Recovery storage failed; further moves are paused.");
-    const [current] = await chrome.bookmarks.get(bm.id);
-    if (!current?.url || current.url !== bm.url || String(current.parentId) !== String(bm.parentId)) throw new Error("Bookmark changed after preview. Refresh before sorting it.");
+    const expected = { id:String(bm.id), url:bm.url, title:bm.title, parentId:String(bm.parentId) };
+    // Resolve asynchronous ancestry first. The inverse must come from a fresh
+    // read AFTER that traversal, not a snapshot captured before owner edits.
+    const fromPath = await this.folderPath(expected.parentId, barId);
+    const [current] = await chrome.bookmarks.get(expected.id);
+    const matches = node => node?.url && node.url === expected.url && node.title === expected.title && String(node.parentId) === expected.parentId;
+    if (!matches(current)) throw new Error("Bookmark changed after preview. Refresh before sorting it.");
     if (String(current.parentId) === String(targetParentId)) return false;
-    const inverse = { id: current.id, url: current.url, fromParentId: current.parentId, fromIndex: current.index, fromPath: await this.folderPath(current.parentId, barId), toParentId: targetParentId, toPath: [...targetPath] };
+    const inverse = { id: current.id, url: current.url, fromParentId: current.parentId, fromIndex: current.index, fromPath, toParentId: targetParentId, toPath: [...targetPath], phase:"prepared" };
     const transaction = this.pendingTransaction ||= { id: this.operationToken || crypto.randomUUID(), kind: "interrupted-sort", createdAt: Date.now(), moves: [] };
     transaction.moves.push(inverse);
+    const discardIntent = () => { const index = transaction.moves.indexOf(inverse); if (index >= 0) transaction.moves.splice(index, 1); };
     // Persist the inverse BEFORE Chrome can change the tree. A tab closed at
     // any subsequent point leaves a recoverable transaction, not an orphan move.
     try { await chrome.storage.local.set({ [this.JOURNAL_KEY]: transaction }); }
-    catch (error) { this.journalFailed = true; transaction.moves.pop(); throw error; }
-    try { await chrome.bookmarks.move(current.id, { parentId: targetParentId }); }
+    catch (error) { this.journalFailed = true; discardIntent(); throw error; }
+    let moved;
+    try {
+      const [latest] = await chrome.bookmarks.get(expected.id);
+      if (!matches(latest) || latest.index !== current.index) throw new Error("Bookmark changed while recording recovery. Refresh before sorting it.");
+      // Chrome offers no compare-and-move API: an owner action after this last
+      // verification can still race the move. Do not claim atomicity with UI.
+      moved = await chrome.bookmarks.move(current.id, { parentId: targetParentId });
+    }
     catch (error) {
-      transaction.moves.pop();
+      discardIntent();
       try { await chrome.storage.local.set({ [this.JOURNAL_KEY]: transaction }); }
       catch { this.journalFailed = true; }
       throw error;
     }
-    moves.push(inverse);
+    if (!moved || String(moved.id)!==expected.id || moved.url!==expected.url || moved.title!==expected.title || String(moved.parentId)!==String(targetParentId)) {
+      this.journalFailed = true;
+      throw new Error("Chrome returned an unverified move acknowledgement. Recovery review is required; further moves are paused.");
+    }
+    const applied = { ...inverse, phase:"applied" };
+    const intentIndex = transaction.moves.indexOf(inverse);
+    transaction.moves[intentIndex] = applied;
+    try { await chrome.storage.local.set({ [this.JOURNAL_KEY]:transaction }); }
+    catch (error) {
+      transaction.moves[intentIndex] = inverse;
+      this.journalFailed = true;
+      throw new Error(`Bookmark moved, but completion could not be recorded. Recovery review is required: ${String(error?.message || error)}`);
+    }
+    moves.push(applied);
     return true;
   },
 
@@ -679,12 +749,14 @@ const Bookmarks = {
     const stack = Array.isArray(saved[this.UNDO_KEY]) ? saved[this.UNDO_KEY] :
       (Array.isArray(saved.hq_bookmark_undo) && saved.hq_bookmark_undo.length ? [{ id: "legacy-sort", kind: "legacy-sort", createdAt: Date.now(), moves: saved.hq_bookmark_undo }] : []);
     const pending = saved[this.JOURNAL_KEY];
-    return pending?.moves?.length ? [...stack.filter(item => item.id !== pending.id), pending] : stack;
+    return pending?.moves?.length ? [...stack.filter(item => item.id !== pending.id), { ...pending, pendingRecovery:true }] : stack;
   },
 
   async commitTransaction(kind, moves) {
     if (!moves.length) return null;
+    if (this.journalFailed) throw new Error("Recovery storage failed. Review interrupted moves before committing another sort.");
     const stack = await this.readUndoStack();
+    if (stack.some(transaction => transaction.pendingRecovery && transaction.moves.some(move => move.phase !== "applied"))) throw new Error("Unverified move intent remains. Review recovery before committing the sort.");
     const transaction = { id: this.pendingTransaction?.id || crypto.randomUUID(), kind, createdAt: Date.now(), moves };
     await chrome.storage.local.set({ [this.UNDO_KEY]: [...stack.filter(item => item.id !== transaction.id), transaction].slice(-8), [this.JOURNAL_KEY]: null, hq_bookmark_undo: [] });
     this.pendingTransaction = null;
@@ -695,9 +767,46 @@ const Bookmarks = {
     const button = this.el("undo-bookmarks-btn");
     if (!button) return;
     const stack = await this.readUndoStack();
+    const pending = stack.find(transaction => transaction.pendingRecovery);
+    this.renderRecoveryReview(pending);
     button.dataset.hasUndo = stack.length ? "true" : "false";
     button.disabled = this.busy || !stack.length;
-    button.textContent = stack.length ? `Undo ${stack[stack.length - 1].kind.replace(/-/g, " ")}` : "Nothing to undo";
+    const uncertain = pending?.moves?.filter(move => move.phase !== "applied").length || 0;
+    button.textContent = uncertain ? `Review recovery (${uncertain} unverified)` : stack.length ? `Undo ${stack[stack.length - 1].kind.replace(/-/g, " ")}` : "Nothing to undo";
+  },
+
+  renderRecoveryReview(pending) {
+    const anchor=this.el("bookmark-log");
+    if (!anchor || typeof anchor.before !== "function") return;
+    this.el("bookmark-recovery-review")?.remove();
+    const uncertain=(pending?.moves || []).filter(move=>move.phase!=="applied");
+    if (!uncertain.length) return;
+    const section=document.createElement("section");section.id="bookmark-recovery-review";section.className="bookmark-review-row";section.setAttribute("aria-label","Unverified bookmark recovery");
+    const copy=document.createElement("p");copy.textContent=`${uncertain.length} interrupted move${uncertain.length===1?"":"s"} cannot be verified as HQ changes. Undo will leave these bookmarks untouched. Review their current locations; keeping them releases only this uncertain recovery record, not any bookmark.`;
+    const details=document.createElement("details"),summary=document.createElement("summary"),list=document.createElement("ul");summary.textContent="Review uncertain records";details.append(summary,list);
+    for (const move of uncertain.slice(0,20)){const row=document.createElement("li");row.textContent=`${String(move.url || move.id).slice(0,260)} · recorded target ${String(move.toParentId || "unknown")}`;list.append(row);}
+    if (uncertain.length>20){const row=document.createElement("li");row.textContent=`${uncertain.length-20} more records; the reviewed archive retains the complete set.`;list.append(row);}
+    const button=document.createElement("button");button.type="button";button.dataset.bookmarkOperation="true";button.textContent=`Keep current locations for ${uncertain.length} unverified record${uncertain.length===1?"":"s"}`;button.disabled=this.busy;
+    const {pendingRecovery,...expected}=pending;
+    button.onclick=()=>{if(typeof window.confirm!=="function"||!window.confirm(`Keep current bookmark locations and archive these ${uncertain.length} unverified recovery records? No bookmarks will move or be deleted. Verified Undo records remain available.`))return;void this.keepCurrentRecovery(expected,true);};
+    section.append(copy,details,button);anchor.before(section);
+  },
+
+  async keepCurrentRecovery(expected, confirmed=false) {
+    if (!confirmed) return {needsConfirmation:true};
+    const snapshot=JSON.stringify(expected);
+    return this.runExclusive("Keep current recovery",async()=>{
+      const archiveKey="hq_bookmark_recovery_reviews_v1";
+      const saved=await chrome.storage.local.get([this.JOURNAL_KEY,archiveKey]);
+      const pending=saved[this.JOURNAL_KEY];
+      if (!pending || JSON.stringify(pending)!==snapshot) throw new Error("Recovery records changed. Review them again before confirming.");
+      const uncertain=(pending.moves || []).filter(move=>move.phase!=="applied"),applied=(pending.moves || []).filter(move=>move.phase==="applied");
+      if (!uncertain.length) return {kept:0};
+      const archive=Array.isArray(saved[archiveKey])?saved[archiveKey]:[];
+      await chrome.storage.local.set({[this.JOURNAL_KEY]:applied.length?{...pending,moves:applied}:null,[archiveKey]:[...archive,{id:pending.id,reviewedAt:Date.now(),decision:"keep-current-locations",moves:uncertain}].slice(-8)});
+      this.log(`Kept current locations for ${uncertain.length} unverified records. No bookmarks moved or were deleted. The last eight recovery reviews are retained locally.`,true);
+      return {kept:uncertain.length,verifiedUndoRemaining:applied.length};
+    });
   },
 
   async migrateEmojiRootNames(barId) {
@@ -781,15 +890,17 @@ const Bookmarks = {
     return this.sortAll(inbox.id);
   },
 
-  async applyCorrection(bookmarkId, pathArr) {
+  async applyCorrection(bookmarkId, pathArr, rowDecision) {
+    const original = rowDecision || this.decisionItems.find(item=>String(item.bm.id)===String(bookmarkId));
+    const reviewed = original && { ...original, bm:{ ...original.bm } };
+    const chosenPath = Array.isArray(pathArr) ? [...pathArr] : pathArr;
     return this.runExclusive("Verified destination", async () => {
-      const path = Classifier.normalizePath(pathArr, { allowOperational: false });
+      const path = Classifier.normalizePath(chosenPath, { allowOperational: false });
       if (!path) throw new Error("That destination is outside the managed taxonomy.");
       const { barId } = await this.getAllBookmarks();
       const [bm] = await chrome.bookmarks.get(bookmarkId);
       if (!bm?.url) throw new Error("That bookmark no longer exists.");
-      const reviewed=this.decisionItems.find(item=>String(item.bm.id)===String(bookmarkId));
-      if(reviewed&&(reviewed.bm.url!==bm.url||reviewed.bm.parentId!==bm.parentId))throw Error("Bookmark changed after review. Refresh Preview before confirming it.");
+      if (Classifier.shouldNeverSort(bm.title) || !await this.decisionMatches(reviewed, bm)) throw Error("Bookmark changed after review. Refresh Preview before confirming it.");
       const targetParent = await this.getOrCreateFolderPath(path, barId);
       const moves = [];
       await this.moveAndRecord(bm, targetParent, path, barId, moves);
@@ -797,8 +908,7 @@ const Bookmarks = {
       learned[Classifier.fingerprint(bm)] = path;
       await chrome.storage.local.set({ hq_learned_domains: learned });
       await this.commitTransaction("verified-destination", moves);
-      this.decisionItems = this.decisionItems.filter(item => String(item.bm.id) !== String(bookmarkId));
-      await this.persistDecisions();
+      await this.persistDecisions([], [bookmarkId], [reviewed]);
       this.renderAccuracyGate();
       const retired = await this.cleanupLegacyHoldingFolders(barId);
       await this.recordAudit("verified-destination", { bookmarkId, path, moved: moves.length, retired });
@@ -812,7 +922,7 @@ const Bookmarks = {
     if (typeof document === "undefined") return;
     const choices=new Map(this.decisionSelections);
     document.querySelectorAll("#bookmark-review-list select[data-bookmark-decision-id]").forEach(select=>choices.set(select.dataset.bookmarkDecisionId,select.value));
-    const selected=[...choices].map(([id,value])=>{if(!value||!this.decisionItems.some(item=>String(item.bm.id)===id))return null;try{return {id,path:JSON.parse(value)};}catch{return null;}}).filter(Boolean);
+    const selected=[...choices].map(([id,value])=>{const original=this.decisionItems.find(item=>String(item.bm.id)===id);if(!value||!original)return null;try{return {id,path:JSON.parse(value),reviewed:{...original,bm:{...original.bm}}};}catch{return null;}}).filter(Boolean);
 
     if (!selected.length) { this.log("Choose at least one verified destination first."); return; }
     return this.runExclusive("Finish selected decisions", async () => {
@@ -826,8 +936,8 @@ const Bookmarks = {
         if (!path) { failed += 1; continue; }
         try {
           const [bm] = await chrome.bookmarks.get(choice.id);
-          const reviewed=this.decisionItems.find(item=>String(item.bm.id)===String(choice.id));
-          if (!bm?.url || !reviewed || reviewed.bm.url!==bm.url || reviewed.bm.parentId!==bm.parentId) { failed += 1; continue; }
+          const reviewed=choice.reviewed;
+          if (!bm?.url || Classifier.shouldNeverSort(bm.title) || !await this.decisionMatches(reviewed, bm)) { failed += 1; continue; }
           const targetParent = await this.getOrCreateFolderPath(path, barId);
           await this.moveAndRecord(bm, targetParent, path, barId, moves);
           learned[Classifier.fingerprint(bm)] = path;
@@ -836,8 +946,7 @@ const Bookmarks = {
       }
       await chrome.storage.local.set({ hq_learned_domains:learned });
       await this.commitTransaction("verified-destinations", moves);
-      this.decisionItems = this.decisionItems.filter(item => !completed.has(String(item.bm.id)));
-      await this.persistDecisions();
+      await this.persistDecisions([], [...completed], selected.map(choice=>choice.reviewed));
       this.renderAccuracyGate();
       const retired = await this.cleanupLegacyHoldingFolders(barId);
       await this.recordAudit("verified-destinations", { completed:completed.size, failed, moved:moves.length, retired });
@@ -856,7 +965,9 @@ const Bookmarks = {
       let restored = 0;
       let skipped = 0;
       const retry = [];
+      const uncertain = [];
       for (const move of [...transaction.moves].reverse()) {
+        if (transaction.pendingRecovery && move.phase !== "applied") { uncertain.unshift(move); continue; }
         try {
           const [bm] = await chrome.bookmarks.get(move.id);
           if (!bm || (move.url && bm.url !== move.url) || (move.toParentId && bm.parentId !== move.toParentId)) { skipped += 1; continue; }
@@ -872,12 +983,17 @@ const Bookmarks = {
           restored += 1;
         } catch { retry.unshift(move); }
       }
-      if (retry.length) stack.push({ ...transaction, moves: retry });
-      await chrome.storage.local.set({ [this.UNDO_KEY]: stack, [this.JOURNAL_KEY]: null, hq_bookmark_undo: [] });
+      let journal=null;
+      if (transaction.pendingRecovery) {
+        const {pendingRecovery,...pending}=transaction;
+        if (retry.length || uncertain.length) journal={...pending,moves:[...retry,...uncertain]};
+      } else if (retry.length) stack.push({ ...transaction, moves: retry });
+      await chrome.storage.local.set({ [this.UNDO_KEY]: stack, [this.JOURNAL_KEY]: journal, hq_bookmark_undo: [] });
       const removed = await this.cleanupManagedEmptyFolders(barId);
       await this.recordAudit("undo", { transactionId: transaction.id, restored, skipped, removed });
-      this.log(`Undo: ${restored} restored${skipped ? `, ${skipped} left untouched because they changed later` : ""}${retry.length ? `, ${retry.length} could not be restored—retry Undo` : ""}.`, !retry.length);
+      this.log(`Undo: ${restored} restored${skipped ? `, ${skipped} left untouched because they changed later` : ""}${retry.length ? `, ${retry.length} could not be restored—retry Undo` : ""}${uncertain.length ? `; ${uncertain.length} unverified move intents remain untouched. Review recovery and explicitly keep their current locations to release them` : ""}.`, !retry.length && !uncertain.length);
       await this.refreshInboxCount();
+      return {restored,skipped,retry:retry.length,uncertain:uncertain.length};
     });
   },
 
@@ -925,7 +1041,7 @@ const Bookmarks = {
       chrome.storage.onChanged.addListener((changes, area) => {
         if (area !== "local" || !changes[this.DECISIONS_KEY]) return;
         const next = Array.isArray(changes[this.DECISIONS_KEY].newValue) ? changes[this.DECISIONS_KEY].newValue : [];
-        this.decisionItems = next;
+        this.adoptDecisions(next);
         this.renderAccuracyGate();
         this.refreshInboxCount().catch(() => {});
       });

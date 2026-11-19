@@ -300,7 +300,7 @@ const LazyFeatures = {
       await AssessmentIntake.init();
       await StudyOS.init();
     }, ["js/local-ai.js", "js/exam-countdown.js", "js/calendar.js", "js/assignments.js", "js/assessment-intake.js", "js/study-os.js"]],
-    "settings-drawer": ["Advanced settings", () => initializeAdvancedSettings(), ["js/local-ai.js", "js/hq-intelligence.js", "js/research-link.js", "js/research-nudge.js", "js/backup-crypto.js", "js/integration-health.js"]],
+    "settings-drawer": ["Advanced settings", () => initializeAdvancedSettings(), ["js/classifier.js", "js/bookmark-evaluation.js", "js/local-ai.js", "js/hq-intelligence.js", "js/research-link.js", "js/research-nudge.js", "js/backup-crypto.js", "js/integration-health.js"]],
   },
 
   async ensure(panelId, { allowInSafeMode = false } = {}) {
@@ -533,6 +533,7 @@ async function wireLocalAI() {
   const profileDetail = document.getElementById("local-ai-profile-detail");
   if (!btn) return;
   await LocalAI.loadPreference();
+  LocalAI.mountBookmarkEvaluationUI?.();
   if (profileSelect) profileSelect.value = LocalAI.profileId;
 
   function renderProfile() {
