@@ -303,13 +303,18 @@ async function scanLegitFolders(barId) {
   return legit;
 }
 
-async function moveSelf(id, parentId) {
+async function moveSelf(id, parentId, classifiedBookmark) {
+  // Destination authority belongs to the resource that was classified, not a
+  // fresh snapshot taken after the owner may have edited its title or URL.
+  const expected = classifiedBookmark && { id:String(classifiedBookmark.id), url:classifiedBookmark.url, title:classifiedBookmark.title, parentId:String(classifiedBookmark.parentId) };
+  if (!expected?.url || expected.id !== String(id)) throw Error("Automatic sort needs its classified bookmark snapshot.");
+  const matches = node => node?.url === expected.url && node.title === expected.title && String(node.parentId) === expected.parentId;
   const [bookmark] = await chrome.bookmarks.get(id);
+  if (!matches(bookmark)) throw Error("Bookmark changed before automatic sort.");
   const saved = await chrome.storage.local.get(["hq_bookmark_undo_v2", "hq_bookmark_undo", "hq_bookmark_pending_v1"]);
   if (saved.hq_bookmark_pending_v1?.moves?.length) throw Error("An interrupted sort needs recovery review before another move.");
   const fromPath = await bookmarkFolderPath(bookmark.parentId, await getBarId());
   const [current] = await chrome.bookmarks.get(id);
-  const matches = node => node?.url === bookmark.url && node.title === bookmark.title && String(node.parentId) === String(bookmark.parentId);
   if (!matches(current)) throw Error("Bookmark changed before automatic sort.");
   const transaction = {
     id: crypto.randomUUID(), kind: "automatic-sort", createdAt: Date.now(),
@@ -352,7 +357,7 @@ async function sortAutomaticBookmark(entry) {
   if(path&&result.confidence==='high'){
     const parent=await getOrCreateFolderPath(path,barId),[latest]=await chrome.bookmarks.get(entry.id);
     if(latest.url!==entry.url||String(latest.parentId)!==entry.parentId||latest.title!==current.title)return {done:false,outcome:'changed-during-read',title:latest.title};
-    if(String(parent)!==String(latest.parentId))await moveSelf(entry.id,parent);
+    if(String(parent)!==String(latest.parentId))await moveSelf(entry.id,parent,current);
     await clearBookmarkDecision(entry.id, current);return {done:true,outcome:'sorted',title:latest.title};
   }
   await markBookmarkDecision(bm,result);return {done:false,outcome:'needs-evidence',title:bm.title};

@@ -15,11 +15,21 @@ test('malformed and oversized output fail visibly rather than fabricating decisi
 test('automatic worker lookup cannot reuse another hash-route shell evidence',async()=>{
   const source=fs.readFileSync(new URL('../js/background.js',import.meta.url),'utf8');
   const fn=source.slice(source.indexOf('async function sortAutomaticBookmark('),source.indexOf('const BookmarkAutomation='));
-  const cache={'url:https://example.org/':{text:'Guitar music',at:Date.now()}};let observed;
+  const baseKey='url:https://example.org/';
+  const cache={[baseKey]:{schema:2,resourceKey:baseKey,text:'Guitar music',at:Date.now()}};let observed;
   const bm={id:'one',title:'Saved page',parentId:'1',url:'https://example.org/#/math'};
   const ctx=vm.createContext({URL,Date,chrome:{bookmarks:{get:async()=>[bm]},storage:{local:{get:async()=>({hq_bookmark_evidence_v1:cache})}}},getBarId:async()=>'1',bookmarkFolderPath:async()=>[],scanLegitFolders:async()=>[],markBookmarkDecision:async()=>{},Classifier:{shouldNeverSort:()=>false,normalizePath:()=>null,classify:item=>{observed=item.title;return {};}}});
   vm.runInContext(fn+'\nthis.sort=sortAutomaticBookmark;',ctx);
+  bm.url='https://example.org/';
+  await ctx.sort({id:'one',url:bm.url,parentId:'1'});assert.equal(observed,'Saved page Guitar music','The base-resource fixture must be accepted for its own resource');
+  bm.url='https://example.org/#/math';
   await ctx.sort({id:'one',url:bm.url,parentId:'1'});assert.equal(observed,'Saved page');
   cache['url:'+bm.url]={schema:2,resourceKey:'url:'+bm.url,text:'Calculus lesson',at:Date.now()};
   await ctx.sort({id:'one',url:bm.url,parentId:'1'});assert.equal(observed,'Saved page Calculus lesson');
+  // In-memory negative control: stripping a router fragment must expose the
+  // otherwise-valid base entry. No production source is changed by this probe.
+  const unsafe=fn.replace("if(!/^#!?\\//.test(u.hash))u.hash='';","u.hash='';");
+  assert.notEqual(unsafe,fn,'Hash-lookup mutation no longer matches the actual reader');
+  vm.runInContext(unsafe+'\nthis.unsafeSort=sortAutomaticBookmark;',ctx);
+  await ctx.unsafeSort({id:'one',url:bm.url,parentId:'1'});assert.equal(observed,'Saved page Guitar music','Regression control did not expose cross-route cache reuse');
 });

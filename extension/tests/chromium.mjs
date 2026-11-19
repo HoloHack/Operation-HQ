@@ -28,6 +28,27 @@ try{
    assert.equal((await page.evaluate(()=>BootDiagnostics.issues)).length,0);assert.deepEqual(issues.hq_background_errors||[],[]);
    return {extensionId,backgroundDiagnostics:issues};
  });
+ await check('Settings-first loads bookmark evaluation dependencies without a bookmark panel or model',async()=>{
+   const fresh=await context.newPage();
+   try{
+     await fresh.emulateMedia({reducedMotion:'reduce'});
+     await fresh.goto(base+'newtab.html?settings-first-test=1');
+     await fresh.waitForFunction(()=>document.body?.classList.contains('app-ready'));
+     assert.deepEqual(await fresh.evaluate(()=>({classifier:typeof Classifier,evaluation:typeof BookmarkEvaluation,model:typeof LocalAI,openPanels:document.querySelectorAll('.flyout.open').length})),{classifier:'undefined',evaluation:'undefined',model:'undefined',openPanels:0},'Fresh tab unexpectedly inherited optional modules');
+     await fresh.locator('#desk-advanced').click();
+     await fresh.locator('#settings-tab-integrations').click();
+     const evaluation=fresh.locator('#bookmark-model-evaluation');await evaluation.waitFor({state:'visible'});
+     const dependencies=await fresh.evaluate(()=>({classifier:typeof Classifier.classify,evaluation:typeof BookmarkEvaluation.evaluate,bookmarks:typeof Bookmarks,loaded:LocalAI.isLoadedThisSession(),loading:LocalAI._loading,bridge:LocalAI._bridgePromise!==null,heavyRuntime:performance.getEntriesByType('resource').some(resource=>/webllm-loader|web-llm\.js/.test(resource.name))}));
+     assert.deepEqual(dependencies,{classifier:'function',evaluation:'function',bookmarks:'undefined',loaded:false,loading:false,bridge:false,heavyRuntime:false});
+     const run=evaluation.getByRole('button',{name:'Evaluate loaded model · synthetic cases',exact:true});
+     await run.focus();await run.press('Enter');
+     await fresh.waitForFunction(()=>document.querySelector('#bookmark-model-evaluation [role="status"]').textContent.includes('No model is loaded.'));
+     assert.equal(await fresh.evaluate(()=>LocalAI.isLoadedThisSession()),false);
+     assert.equal(await evaluation.locator('pre').textContent(),'');
+     assert.deepEqual(await fresh.evaluate(()=>BootDiagnostics.issues),[]);
+     return {settingsOpenedBeforeAnyPanel:true,classifierAndEvaluationAvailable:true,bookmarkPanelNotLoaded:true,noModelLoadOrInference:true};
+   }finally{await fresh.close();await page.bringToFront();}
+ });
  await check('Ordinary new tabs do not load the Operation HQ workspace',async()=>{
    const manifest=await worker.evaluate(()=>chrome.runtime.getManifest());assert.equal(manifest.chrome_url_overrides,undefined);
    const blank=await context.newPage();await blank.goto('chrome://newtab/');
