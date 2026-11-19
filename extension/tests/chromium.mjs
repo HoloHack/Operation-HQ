@@ -369,6 +369,8 @@ try{
  });
  await check('Synthetic bookmark evaluation refuses an unloaded model and remains keyboard-usable at 320px',async()=>{
    const originalViewport=page.viewportSize();
+   const savedAppearance=await worker.evaluate(()=>chrome.storage.local.get('hq_desk_appearance_v1'));
+   const contrastStates=[];
    const modelRequests=()=>network.filter(url=>/huggingface\.co|mlc-ai|model-lib|\.wasm(?:[?#]|$)|params_shard/i.test(url));
    await page.evaluate(()=>HQPanels.close());
    try{
@@ -376,6 +378,28 @@ try{
      await page.locator('#desk-advanced').click();
      await page.locator('#settings-drawer').waitFor({state:'visible'});
      await page.locator('#settings-tab-integrations').click();
+     const integrations=page.locator('#settings-tab-integrations');
+     const readContrast=()=>integrations.evaluate(button=>{
+       const label=button.querySelector('.settings-tab-label'),foreground=getComputedStyle(label).color,background=getComputedStyle(button).backgroundColor;
+       const rgb=value=>{const values=value.match(/[\d.]+/g)?.map(Number);if(!values||values.length<3)throw Error('Unsupported computed color: '+value);if(values.length>3&&values[3]!==1)throw Error('Contrast requires opaque computed colors: '+value);return values.slice(0,3);};
+       const luminance=color=>rgb(color).map(channel=>{const value=channel/255;return value<=0.04045?value/12.92:((value+0.055)/1.055)**2.4;}).reduce((sum,value,index)=>sum+value*[0.2126,0.7152,0.0722][index],0);
+       const light=luminance(foreground),dark=luminance(background);
+       return {foreground,background,ratio:(Math.max(light,dark)+0.05)/(Math.min(light,dark)+0.05),surface:document.body.dataset.deskSurface,selected:button.getAttribute('aria-selected'),hovered:button.matches(':hover'),focused:button===document.activeElement,focusVisible:button.matches(':focus-visible'),backgroundImage:getComputedStyle(button).backgroundImage,labelVisible:label.getBoundingClientRect().width>0&&getComputedStyle(label).visibility==='visible',labelOpacity:getComputedStyle(label).opacity,buttonOpacity:getComputedStyle(button).opacity};
+     });
+     for(const surface of ['ink','paper']){
+       await worker.evaluate(surface=>chrome.storage.local.set({hq_desk_appearance_v1:{surface,hue:220,motion:'reduced'}}),surface);
+       await page.waitForFunction(surface=>document.body.dataset.deskSurface===surface,surface);
+       await integrations.hover();await page.waitForTimeout(180);
+       const hovered=await readContrast();
+       assert.equal(hovered.selected,'true');assert.equal(hovered.hovered,true);assert.equal(hovered.labelVisible,true);assert.equal(hovered.backgroundImage,'none');assert.equal(hovered.labelOpacity,'1');assert.equal(hovered.buttonOpacity,'1');
+       assert(hovered.ratio>=4.5,`${surface} selected-hover label contrast is insufficient: ${JSON.stringify(hovered)}`);
+       contrastStates.push({state:'selected-hover',...hovered});
+       await page.mouse.move(0,0);await page.locator('#settings-tab-privacy').focus();await page.locator('#settings-tab-privacy').press('ArrowRight');await page.waitForTimeout(180);
+       const focused=await readContrast();
+       assert.equal(focused.selected,'true');assert.equal(focused.hovered,false);assert.equal(focused.focused,true);assert.equal(focused.focusVisible,true);assert.equal(focused.labelVisible,true);assert.equal(focused.backgroundImage,'none');assert.equal(focused.labelOpacity,'1');assert.equal(focused.buttonOpacity,'1');
+       assert(focused.ratio>=4.5,`${surface} selected-keyboard-focus label contrast is insufficient: ${JSON.stringify(focused)}`);
+       contrastStates.push({state:'selected-keyboard-focus',...focused});
+     }
      const section=page.locator('#bookmark-model-evaluation');
      await section.waitFor({state:'visible'});await section.scrollIntoViewIfNeeded();
      const run=section.getByRole('button',{name:'Evaluate loaded model · synthetic cases',exact:true});
@@ -404,11 +428,20 @@ try{
      for(const box of [geometry.section,...geometry.buttons])assert(box.width>0&&box.left>=0&&box.right<=geometry.viewport,'Narrow evaluation control escaped viewport: '+JSON.stringify(geometry));
      assert(geometry.scrollWidth<=geometry.clientWidth+1,'Narrow evaluation section overflowed: '+JSON.stringify(geometry));
      await page.screenshot({path:path.join(output,'bookmark-model-unloaded-320.png')});
-     return {actualSettingsRoute:true,unloadedRefusal:true,noModelRequests:true,noFabricatedInference:true,keyboardControls:true,narrowContained:true};
+     return {actualSettingsRoute:true,unloadedRefusal:true,noModelRequests:true,noFabricatedInference:true,keyboardControls:true,narrowContained:true,contrastStates,contrastScope:'Actual computed label/button colors at hue 220 on ink and paper; not every custom hue.'};
    }finally{
      if(await page.locator('#close-settings').isVisible())await page.locator('#close-settings').click();
+     await worker.evaluate(async saved=>{if(Object.hasOwn(saved,'hq_desk_appearance_v1'))await chrome.storage.local.set(saved);else await chrome.storage.local.remove('hq_desk_appearance_v1');},savedAppearance);
      if(originalViewport)await page.setViewportSize(originalViewport);
    }
+ });
+ await check('Final process memory is recorded after every journey and test cleanup',async()=>{
+   await page.evaluate(()=>HQPanels.close());
+   if(await page.locator('#close-settings').isVisible())await page.locator('#close-settings').click();
+   await page.waitForTimeout(10000);
+   const memory=await profileMemory(profile);assert(memory.available);
+   await fs.writeFile(path.join(output,'memory-final-all-journeys.json'),JSON.stringify(memory,null,2));
+   return {memory,scope:'End-of-suite Linux profile PSS after all application journeys and their fixture cleanup, with ten seconds settling. Earlier memory-after-tools/memory-settled are retained mid-suite checkpoints. Not a paired optimization result, target-Mac measurement or 300 MB certification.'};
  });
  await check('No uncaught browser errors across tested journeys',async()=>{assert.deepEqual(errors,[]);return {consoleErrors};});
 }catch(error){console.error(error);process.exitCode=1;if(context){for(const p of context.pages().filter(p=>p.url().includes('newtab.html'))){await p.screenshot({path:path.join(output,'failure.png')}).catch(()=>{});const diagnostics=await p.evaluate(()=>({issues:typeof BootDiagnostics==='undefined'?[]:BootDiagnostics.issues,early:window.HQEarlyDiagnostics?.entries()})).catch(()=>null);console.log('Failure diagnostics',JSON.stringify(diagnostics));console.log('Failure panel states',JSON.stringify(await p.evaluate(()=>({hash:location.hash,panels:[...document.querySelectorAll('.flyout.open')].map(e=>({id:e.id,visible:getComputedStyle(e).visibility})),errors:window.HQEarlyDiagnostics?.entries()})).catch(()=>null)));await fs.writeFile(path.join(output,'diagnostics.json'),JSON.stringify(diagnostics,null,2));}}}

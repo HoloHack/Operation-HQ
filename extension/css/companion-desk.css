@@ -47,6 +47,12 @@ body[data-workspace="tools"] .flyout.open{top:0!important;right:0!important;left
 
 /* Closed tool trees have no layout/paint layers. Opacity alone kept every
    previously opened workspace alive in the compositor behind the desk. */
+/* A selected button keeps its paired foreground/background while hovered.
+   The generic hover rule otherwise replaces only its background, leaving
+   dark selected text on the dark ink surface (and pale text on paper). */
+body[data-workspace="tools"] button:is(.active,[aria-pressed="true"],[aria-selected="true"]):hover:not(:disabled){
+  background:var(--desk-accent)!important;color:var(--desk-page)!important;transform:none;
+}
 body[data-workspace="tools"] .flyout:not(.open),
 body[data-workspace="tools"] #settings-drawer.hidden{display:none!important}
 
