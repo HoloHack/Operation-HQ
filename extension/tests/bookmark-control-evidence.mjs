@@ -39,3 +39,9 @@ test('the actual worker sorting function holds control-text bookmarks without mo
     vm.runInContext(source+'\n'+fn+'\nthis.sort=sortAutomaticBookmark;',context);const result=await context.sort({id:'one',url,parentId:'1'});assert.equal(result.outcome,'needs-evidence');assert.equal(mutations,0);assert.equal(held[0].source,'untrusted-control-text');assert.equal(held[0].path,null);
   }
 });
+test('the actual worker also holds control directives coming from previously cached page evidence',async()=>{
+  const background=fs.readFileSync(new URL('../js/background.js',import.meta.url),'utf8'),fn=background.slice(background.indexOf('async function sortAutomaticBookmark('),background.indexOf('const BookmarkAutomation='));
+  const bookmark={id:'one',parentId:'1',title:'API reference',url:'https://developer.mozilla.org/en-US/docs/Web/JavaScript'},key='url:'+bookmark.url,held=[];
+  const context=vm.createContext({URL,Date,console,chrome:{bookmarks:{get:async()=>[bookmark]},storage:{local:{get:async()=>({hq_bookmark_evidence_v1:{[key]:{schema:2,resourceKey:key,at:Date.now(),text:texts[0]}}})}}},getBarId:async()=>'1',bookmarkFolderPath:async()=>[],scanLegitFolders:async()=>[],markBookmarkDecision:async(_bookmark,result)=>held.push(result),getOrCreateFolderPath:async()=>assert.fail('Control text created a folder'),moveSelf:async()=>assert.fail('Control text caused a move'),clearBookmarkDecision:async()=>{}});
+  vm.runInContext(source+'\n'+fn+'\nthis.sort=sortAutomaticBookmark;',context);const result=await context.sort({id:'one',url:bookmark.url,parentId:'1'});assert.equal(result.outcome,'needs-evidence');assert.equal(held[0].source,'untrusted-control-text');
+});

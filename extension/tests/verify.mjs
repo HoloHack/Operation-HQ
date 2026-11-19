@@ -103,6 +103,7 @@ pass(`${jsFiles.length} JavaScript modules pass syntax validation`);
 const dynamicDomIds = new Set([
   "forgotten-shuffle-btn", "nudge-yes-btn", "nudge-dismiss-btn",
   "gleam-mission-outcome", "gleam-mission-status", "gleam-mission-before", "gleam-mission-after",
+  "bookmark-model-evaluation", // Created by LocalAI.mountBookmarkEvaluationUI().
 ]);
 const missingLiteralDomIds = [];
 for (const file of jsFiles.filter(file => !file.startsWith("lib/"))) {
