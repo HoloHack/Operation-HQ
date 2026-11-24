@@ -35,6 +35,9 @@ jobs:
       - run: node tests/memory-benchmark.mjs
         env:
           HQ_MEMORY_BASELINE: ${{ github.workspace }}/memory-baseline/extension
+      # Same-build diagnostic, not a Mac RAM target or leak certification.
+      # Synthetic documents/disposable profiles only; never reset owner Notes.
+      - run: node tests/notes-memory.mjs
       - run: python3 scripts/package-release.py
       - uses: actions/upload-artifact@v4
         if: always()
