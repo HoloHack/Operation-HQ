@@ -41,10 +41,19 @@ try{
      const dependencies=await fresh.evaluate(()=>({classifier:typeof Classifier.classify,evaluation:typeof BookmarkEvaluation.evaluate,bookmarks:typeof Bookmarks,loaded:LocalAI.isLoadedThisSession(),loading:LocalAI._loading,bridge:LocalAI._bridgePromise!==null,heavyRuntime:performance.getEntriesByType('resource').some(resource=>/webllm-loader|web-llm\.js/.test(resource.name))}));
      assert.deepEqual(dependencies,{classifier:'function',evaluation:'function',bookmarks:'undefined',loaded:false,loading:false,bridge:false,heavyRuntime:false});
      const run=evaluation.getByRole('button',{name:'Evaluate loaded model · synthetic cases',exact:true});
+     const cohort=evaluation.getByRole('combobox',{name:'Synthetic bookmark evaluation set',exact:true});
+     await cohort.selectOption('resource-disjoint');
+     const cohortAudit=await fresh.evaluate(async()=>{
+       const read=async name=>(await fetch(chrome.runtime.getURL(`js/${name}.json`))).json();
+       const development=await read('bookmark-evaluation-cases'),candidate=await read('bookmark-evaluation-holdout');
+       return {unique:BookmarkEvaluation.validateFixture(candidate,Classifier,{against:development.cases}).length};
+     });
+     assert.equal(cohortAudit.unique,24);
      await run.focus();await run.press('Enter');
      await fresh.waitForFunction(()=>document.querySelector('#bookmark-model-evaluation [role="status"]').textContent.includes('No model is loaded.'));
      assert.equal(await fresh.evaluate(()=>LocalAI.isLoadedThisSession()),false);
      assert.equal(await evaluation.locator('pre').textContent(),'');
+     assert.equal(await cohort.isEnabled(),true);assert.equal(await cohort.inputValue(),'resource-disjoint');
      assert.deepEqual(await fresh.evaluate(()=>BootDiagnostics.issues),[]);
      return {settingsOpenedBeforeAnyPanel:true,classifierAndEvaluationAvailable:true,bookmarkPanelNotLoaded:true,noModelLoadOrInference:true};
    }finally{await fresh.close();await page.bringToFront();}

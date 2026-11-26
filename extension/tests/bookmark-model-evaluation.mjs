@@ -65,3 +65,76 @@ test('hash failure never starts inference and releases the evaluation UI control
   const anchor={after(section){mounted=section;}};f.ctx.document={getElementById:id=>id==='local-ai-output'?anchor:null,createElement:node};f.ctx.chrome={runtime:{getURL:path=>'chrome-extension://fixture/'+path}};f.ctx.fetch=async()=>({ok:true,json:async()=>packaged});
   f.ai.mountBookmarkEvaluationUI();const run=mounted.children[2],cancel=mounted.children[3],status=mounted.children[4];await run.onclick();assert.equal(run.disabled,false);assert.equal(cancel.disabled,true);assert.equal(f.ai._bookmarkEvaluationActive,false);assert.equal(f.ai.isRunning(),false);assert.match(status.textContent,/Evaluation stopped: Evaluation hashing is unavailable/);assert.equal(f.calls.length,0);
 });
+
+test('invalid synthetic labels, IDs, URLs and oversized inputs fail before inference',async()=>{
+  const base={id:'new',title:'Synthetic algebra lesson',url:'https://example.org/frozen/new',expected:['School & Academics','Mathematics']};
+  for(const edit of [{expected:['Inbox']},{expected:['School & Academics','Unknown']},{expected:'Mathematics'},{id:''},{id:' spaced '},{url:'javascript:alert(1)'},{url:'https://user:pass@example.org/new'},{pageContext:'x'.repeat(3001)}]){
+    const f=fixture(()=> '[]');await assert.rejects(f.evaluation.evaluate({...f,fixture:{version:1,cases:[{...base,...edit}]}}),/Invalid/);assert.equal(f.calls.length,0);
+  }
+  const f=fixture(()=> '[]');await assert.rejects(f.evaluation.evaluate({...f,fixture:{cases:[base,{...base,url:'https://example.org/other'}]}}),/duplicate evaluation IDs/);assert.equal(f.calls.length,0);
+});
+test('evaluation aliases cannot hide conflicting labels or cross-cohort YouTube resource overlap',async()=>{
+  const a={id:'a',title:'Synthetic algebra lesson',url:'https://www.youtube.com/watch?v=frozen_video_x',expected:['School & Academics','Mathematics']};
+  const b={...a,id:'b',url:'https://youtu.be/frozen_video_x?t=3',expected:['Entertainment','Music']};
+  const f=fixture(()=> '[]');await assert.rejects(f.evaluation.evaluate({...f,fixture:{cases:[a,b]}}),/Conflicting labels/);assert.equal(f.calls.length,0);
+  for(const url of ['https://youtu.be/frozen_video_x','https://m.youtube.com/shorts/frozen_video_x','https://youtube.com/embed/frozen_video_x']){
+    await assert.rejects(f.evaluation.evaluate({...f,fixture:{cases:[{...a,id:'fresh',url}]},against:[a]}),/cohorts overlap/);
+  }
+  const cases=f.evaluation.validateFixture({cases:[a,{...b,expected:a.expected}]},f.classifier);assert.equal(cases.length,1);assert.equal(f.calls.length,0);
+});
+test('packaged new cohort validates resource-disjointness and records its immutable provenance without labels in prompts',async()=>{
+  const cohort=JSON.parse(fs.readFileSync(new URL('../js/bookmark-evaluation-holdout.json',import.meta.url),'utf8'));
+  const f=fixture(()=> '[]');f.evaluation.validateFixture(cohort,f.classifier,{against:packaged.cases});
+  const report=await f.evaluation.evaluate({...f,fixture:cohort,against:packaged.cases});
+  assert.equal(report.baseline.metrics.total,cohort.cases.length);assert.equal(report.fixture.comparisonResources,packaged.cases.length);
+  assert.equal(report.fixture.sha256,await f.evaluation.hash(JSON.stringify(cohort)));assert.equal(report.fixture.scope,cohort.scope);
+  for(const call of f.calls)for(const row of call.records)assert.deepEqual(Object.keys(row),['id','title','url','pageContext']);
+});
+
+function evaluationUI(f,fetcher){
+  let mounted;const node=()=>({children:[],style:{},append(...children){this.children.push(...children);},setAttribute(){}});
+  f.ctx.document={getElementById:id=>id==='local-ai-output'?{after(section){mounted=section;}}:null,createElement:node};
+  f.ctx.chrome={runtime:{getURL:path=>'chrome-extension://fixture/'+path}};f.ctx.fetch=fetcher;
+  f.ai.mountBookmarkEvaluationUI();return {run:mounted.children[2],cancel:mounted.children[3],status:mounted.children[4],report:mounted.children[5].children[1],select:mounted.children[6].children[0]};
+}
+test('new-cohort UI only loads fixed packaged synthetic files and locks its selector during inference',async()=>{
+  const cohort=JSON.parse(fs.readFileSync(new URL('../js/bookmark-evaluation-holdout.json',import.meta.url),'utf8')),urls=[];
+  let ui;const f=fixture(()=>{assert.equal(ui.select.disabled,true);return '[]';});
+  ui=evaluationUI(f,async url=>{urls.push(url);return {ok:true,json:async()=>url.endsWith('holdout.json')?cohort:packaged};});
+  ui.select.value='resource-disjoint';await ui.run.onclick();
+  assert.deepEqual(urls,['chrome-extension://fixture/js/bookmark-evaluation-cases.json','chrome-extension://fixture/js/bookmark-evaluation-holdout.json']);
+  assert.equal(f.calls.flatMap(call=>call.records).length,cohort.cases.length);assert.equal(ui.select.disabled,false);assert.equal(ui.run.disabled,false);assert.equal(ui.cancel.disabled,true);
+  assert.match(ui.status.textContent,/automatic bookmark filing is unchanged/);assert.equal(JSON.parse(ui.report.textContent).fixture.comparisonResources,packaged.cases.length);
+});
+test('UI overlap, unknown cohort and hashing failures release all controls without inference',async()=>{
+  for(const mode of ['overlap','unknown','hash']){
+    const f=fixture(()=> '[]'),urls=[];if(mode==='hash')f.ctx.crypto={};
+    const ui=evaluationUI(f,async url=>{urls.push(url);return {ok:true,json:async()=>packaged};});
+    ui.select.value=mode==='unknown'?'untrusted-url':mode==='overlap'?'resource-disjoint':'development';await ui.run.onclick();
+    assert.equal(f.calls.length,0);assert.equal(ui.select.disabled,false);assert.equal(ui.run.disabled,false);assert.equal(ui.cancel.disabled,true);assert.equal(f.ai._bookmarkEvaluationActive,false);assert.match(ui.status.textContent,/Evaluation stopped/);
+    if(mode==='unknown')assert.equal(urls.length,0);
+  }
+});
+test('UI cancellation unlocks the selector and prevents later model requests',async()=>{
+  let ui;const f=fixture(()=>{ui.cancel.onclick();return '[]';});
+  ui=evaluationUI(f,async()=>({ok:true,json:async()=>packaged}));await ui.run.onclick();
+  assert.equal(f.calls.length,1);assert.equal(ui.select.disabled,false);assert.equal(ui.run.disabled,false);assert.equal(ui.cancel.disabled,true);assert.match(ui.status.textContent,/interrupted model attempt/);
+});
+
+test('evidence baseline receives the same four metadata topics as the model without exposing labels',async()=>{
+  const cohort=JSON.parse(fs.readFileSync(new URL('../js/bookmark-evaluation-holdout.json',import.meta.url),'utf8'));
+  const cases=cohort.cases.filter(item=>item.pageContext),calls=[];assert.equal(cases.length,4);
+  const f=fixture(()=> '[]'),original=f.classifier.classify.bind(f.classifier);
+  f.classifier.classify=(item,...args)=>{calls.push({id:item.id,title:item.title});return original(item,...args);};
+  const report=await f.evaluation.evaluate({...f,fixture:{...cohort,cases}});
+  assert.equal(report.evidenceBaseline.metrics.total,4);assert.match(report.baseline.scope,/Title and URL only/);assert.match(report.unchangedAutomaticPolicy.scope,/excludes supplied pageContext/);
+  for(const item of cases){
+    assert(calls.some(call=>call.id===item.id&&call.title===item.title));
+    assert(calls.some(call=>call.id===item.id&&call.title===item.title+' '+item.pageContext));
+    const record=f.calls.flatMap(call=>call.records).find(record=>record.id===item.id);assert.equal(record.pageContext,item.pageContext);assert.equal(record.title,item.title);assert.deepEqual(Object.keys(record),['id','title','url','pageContext']);
+    const expected=original({...item,title:item.title+' '+item.pageContext},{},[]),row=report.evidenceBaseline.cases.find(row=>row.id===item.id);
+    assert.equal(JSON.stringify(row.prediction),JSON.stringify(expected.confidence==='high'&&expected.path?Array.from(expected.path):null));
+  }
+  const protectedFixture={cases:[{id:'protected-context',title:'Inbox',url:'https://example.org/protected-context',pageContext:'Mathematics algebra calculus homework exercises',expected:null}]};
+  const guarded=await f.evaluation.evaluate({...f,fixture:protectedFixture});assert.equal(guarded.evidenceBaseline.cases[0].source,'protected-title');assert.equal(guarded.evidenceBaseline.cases[0].prediction,null);
+});

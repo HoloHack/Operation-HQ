@@ -294,20 +294,28 @@ const LocalAI = {
     const status=document.createElement("p");status.setAttribute("role","status");status.setAttribute("aria-live","polite");status.textContent="Not run. A local model must be explicitly loaded first.";
     const details=document.createElement("details"),summary=document.createElement("summary"),report=document.createElement("pre");summary.textContent="Evaluation report · synthetic inputs and model output";report.style.cssText="white-space:pre-wrap;overflow-wrap:anywhere;max-height:28rem;overflow:auto";details.append(summary,report);
     section.append(title,description,run,cancel,status,details);anchor.after(section);
+    const cohortLabel=document.createElement("label");cohortLabel.textContent="Synthetic example set ";
+    const cohort=document.createElement("select");cohort.setAttribute("aria-label","Synthetic bookmark evaluation set");
+    for(const [value,text]of [["development","Development examples"],["resource-disjoint","New resource-disjoint examples"]]){const option=document.createElement("option");option.value=value;option.textContent=text;cohort.append(option);}
+    cohort.value="development";cohortLabel.append(cohort);section.append(cohortLabel);
     let controller;
     cancel.onclick=()=>controller?.abort();
     run.onclick=async()=>{
       if(!this.isLoadedThisSession()){status.textContent="No model is loaded. Load one explicitly first; evaluation has not downloaded or started one.";return;}
       if(this._bookmarkEvaluationActive){status.textContent="An evaluation is already running.";return;}
-      this._bookmarkEvaluationActive=true;controller=new AbortController();run.disabled=true;cancel.disabled=false;report.textContent="";status.textContent="Reading packaged synthetic cases…";
+      const selected=cohort.value;
+      this._bookmarkEvaluationActive=true;controller=new AbortController();run.disabled=true;cohort.disabled=true;cancel.disabled=false;report.textContent="";status.textContent="Reading packaged synthetic cases…";
       try{
-        const response=await fetch(chrome.runtime.getURL("js/bookmark-evaluation-cases.json"),{signal:controller.signal});if(!response.ok)throw new Error("Packaged evaluation cases could not be read.");
-        const fixture=await response.json();
-        const result=await BookmarkEvaluation.evaluate({ai:this,classifier:Classifier,fixture,signal:controller.signal,onProgress:progress=>status.textContent=`Evaluating synthetic examples: ${progress.completed} / ${progress.total}`});
+        if(!["development","resource-disjoint"].includes(selected))throw new Error("Unknown synthetic example set.");
+        const load=async path=>{const response=await fetch(chrome.runtime.getURL(path),{signal:controller.signal});if(!response.ok)throw new Error("Packaged evaluation cases could not be read.");return response.json();};
+        const development=await load("js/bookmark-evaluation-cases.json");
+        const fixture=selected==="development"?development:await load("js/bookmark-evaluation-holdout.json");
+        if(selected!=="development")BookmarkEvaluation.validateFixture(fixture,Classifier,{against:development.cases});
+        const result=await BookmarkEvaluation.evaluate({ai:this,classifier:Classifier,fixture,against:selected==="development"?[]:development.cases,signal:controller.signal,onProgress:progress=>status.textContent=`Evaluating synthetic examples: ${progress.completed} / ${progress.total}`});
         report.textContent=JSON.stringify(result,null,2);
         status.textContent=`${result.modelInference}. Model suggestions: ${result.modelSuggestions.metrics.correctAccepted} correct / ${result.modelSuggestions.metrics.accepted} accepted, ${result.modelSuggestions.metrics.abstained} abstained; ${result.counts.failedCases} failed, ${result.counts.cancelledCases} cancelled. Synthetic set only; automatic bookmark filing is unchanged.`;
       }catch(error){status.textContent=`Evaluation stopped: ${String(error?.message||error)}. No bookmarks were read or changed.`;}
-      finally{this._bookmarkEvaluationActive=false;controller=null;run.disabled=false;cancel.disabled=true;}
+      finally{this._bookmarkEvaluationActive=false;controller=null;run.disabled=false;cohort.disabled=false;cancel.disabled=true;}
     };
   },
 
