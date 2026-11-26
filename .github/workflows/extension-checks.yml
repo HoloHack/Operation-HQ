@@ -9,7 +9,9 @@ permissions:
 jobs:
   chromium:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Three sequential Notes comparisons add about eight minutes; retain a
+    # bounded allowance so earlier browser checks do not starve evidence upload.
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: extension
@@ -40,6 +42,18 @@ jobs:
       - run: node tests/notes-memory.mjs
         env:
           HQ_NOTES_WARMED: '1'
+          HQ_NOTES_SAMPLE: '0'
+          HQ_NOTES_WARM_POSITION: last
+      - run: node tests/notes-memory.mjs
+        env:
+          HQ_NOTES_WARMED: '1'
+          HQ_NOTES_SAMPLE: '1'
+          HQ_NOTES_WARM_POSITION: middle
+      - run: node tests/notes-memory.mjs
+        env:
+          HQ_NOTES_WARMED: '1'
+          HQ_NOTES_SAMPLE: '2'
+          HQ_NOTES_WARM_POSITION: first
       - run: python3 scripts/package-release.py
       - uses: actions/upload-artifact@v4
         if: always()

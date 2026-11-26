@@ -13,7 +13,9 @@ const sample=Number(process.env.HQ_NOTES_SAMPLE||0);
 const idleMs=Number(process.env.HQ_NOTES_IDLE_MS||30000);
 const order=process.env.HQ_NOTES_ORDER||(sample%2?'edited-first':'baseline-first');
 const warmed=process.env.HQ_NOTES_WARMED||'0';
+const warmPosition=process.env.HQ_NOTES_WARM_POSITION||'last';
 assert(['0','1'].includes(warmed),'HQ_NOTES_WARMED must be 0 or 1');
+assert(['first','middle','last'].includes(warmPosition),'HQ_NOTES_WARM_POSITION must be first, middle or last');
 assert(Number.isInteger(sample)&&sample>=0&&sample<=20,'Sample must be an integer from 0 to 20');
 assert(Number.isInteger(idleMs)&&idleMs>=0&&idleMs<=300000,'Idle interval must be 0–300000 ms');
 assert(['baseline-first','edited-first'].includes(order),'Unknown arm order');
@@ -25,10 +27,11 @@ const marker=cycle=>` [cycle-${String(cycle).padStart(2,'0')}]`;
 const result={version:1,sample,order,idleMs,seed:{bytes:100000,sha256:sha(seed)},startedAt:new Date().toISOString(),arms:[],scope:'One cold two-arm pair of disposable Linux profiles with configurable order. Repeated alternating pairs have not been run by this invocation. Small real keyboard edits on a fixed synthetic 100 KB document; no private data, model, provider, forced GC or runtime optimization. Never-open versus first-open includes lazy bundle cost. Later-cycle slope is a hypothesis diagnostic, not proof of a leak or a Mac/per-tab/300 MB result. Default idle is 30 seconds, not five minutes; inspect idleMs.'};
 const sleep=async ms=>{while(ms>0){const step=Math.min(ms,30000);await new Promise(resolve=>setTimeout(resolve,step));ms-=step;}};
 const arms=order==='baseline-first'?['never-open','edit-close-reopen']:['edit-close-reopen','never-open'];
-if(warmed==='1')arms.push('warmed-read-only');
+if(warmed==='1')arms.splice({first:0,middle:1,last:2}[warmPosition],0,'warmed-read-only');
 result.warmedReadOnly=warmed==='1';
+result.warmPosition=warmed==='1'?warmPosition:null;
 result.armOrder=[...arms];
-if(warmed==='1')result.scope=result.scope.replace('One cold two-arm pair','One cold three-arm comparison')+' The optional third arm warms the editor and opens/closes it twenty times without edits; it always runs last, so order effects remain possible. This is a matched same-build control, not a causal estimate of history cost.';
+if(warmed==='1')result.scope=result.scope.replace('One cold two-arm pair','One cold three-arm comparison')+` The optional third arm warms the editor and opens/closes it twenty times without edits; it runs ${warmPosition} in this invocation, so order effects remain possible. This is a matched same-build control, not a causal estimate of history cost.`;
 
 async function assertSaved(page,plain,{editor=false}={}){
   await page.waitForFunction(async({plain,editor})=>{
@@ -126,6 +129,6 @@ try{
 }catch(error){result.error=String(error.stack||error);process.exitCode=1;}
 finally{
   result.finishedAt=new Date().toISOString();
-  const file=path.join(output,`notes-memory-${sample}-${order}${warmed==='1'?'-warmed':''}.json`);await fs.writeFile(file,JSON.stringify(result,null,2));
+  const file=path.join(output,`notes-memory-${sample}-${order}${warmed==='1'?`-warmed-${warmPosition}`:''}.json`);await fs.writeFile(file,JSON.stringify(result,null,2));
   console.log(JSON.stringify({file,passed:result.passed===true,arms:result.arms.map(arm=>({arm:arm.arm,passed:arm.passed===true,snapshots:arm.snapshots.length,error:arm.error})),error:result.error}));
 }
