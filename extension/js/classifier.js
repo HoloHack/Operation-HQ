@@ -362,8 +362,9 @@ const Classifier = {
   fingerprint(bookmark) {
     try {
       const url=new URL(bookmark.url),domain=url.hostname.toLowerCase().replace(/^www\./,''),segments=url.pathname.split('/').filter(Boolean);
-      if(this.contentVariesBase(domain)==='youtube.com'&&url.searchParams.get('v'))return `youtube.com/watch?v=${url.searchParams.get('v')}`;
-      if(domain==='youtu.be'&&segments[0])return `${domain}/${segments[0]}`;
+      const plainVideoOrigin=['https:','http:'].includes(url.protocol)&&!url.username&&!url.password&&!url.port;
+      if(plainVideoOrigin&&['youtube.com','m.youtube.com'].includes(domain)&&url.pathname==='/watch'&&url.searchParams.getAll('v').length===1&&/^[A-Za-z0-9_-]{1,200}$/.test(url.searchParams.get('v')||''))return `youtube.com/watch?v=${url.searchParams.get('v')}`;
+      if(plainVideoOrigin&&domain==='youtu.be'&&segments.length===1&&/^[A-Za-z0-9_-]{1,200}$/.test(segments[0]))return `${domain}/${segments[0]}`;
       if(['docs.google.com','sheets.google.com','drive.google.com'].includes(domain)){
         const d=segments.indexOf('d');if(d>=0&&segments[d+1])return `${domain}/${segments.slice(0,d+2).join('/')}`;
         if(domain==='drive.google.com'&&url.searchParams.get('id'))return `drive.google.com/file/d/${url.searchParams.get('id')}`;
@@ -373,6 +374,26 @@ const Classifier = {
       if(!/^#!?\//.test(url.hash))url.hash='';
       return 'page:'+url.href;
     }catch{return 'invalid:'+String(bookmark.url||'');}
+  },
+  youtubeCorrectionAliases(bookmark) {
+    // Borrow only a whole-video correction. Chapter/playlist/time/clip links
+    // can have a different meaning and retain only their existing exact rule.
+    // This finite read-only lookup does not rewrite URLs or migrate old keys.
+    try {
+      const url=new URL(bookmark.url),host=url.hostname.toLowerCase();
+      if(!['https:','http:'].includes(url.protocol)||url.username||url.password||url.port||url.hash||!['youtube.com','www.youtube.com','m.youtube.com','youtu.be','www.youtu.be'].includes(host))return [];
+      const parts=url.pathname.split('/').filter(Boolean),short=['youtu.be','www.youtu.be'].includes(host);
+      const watch=!short&&url.pathname==='/watch';
+      let id;
+      if(short&&parts.length===1)id=parts[0];
+      else if(watch&&url.searchParams.getAll('v').length===1)id=url.searchParams.get('v');
+      else if(!short&&parts.length===2&&['shorts','embed','live'].includes(parts[0]))id=parts[1];
+      if(!/^[A-Za-z0-9_-]{1,200}$/.test(id||''))return [];
+      for(const key of url.searchParams.keys())if(!(watch&&key==='v')&&!/^utm_/i.test(key)&&!['fbclid','gclid'].includes(key))return [];
+      const keys=[`youtube.com/watch?v=${id}`,`youtu.be/${id}`];
+      for(const scheme of ['https','http'])for(const domain of ['youtube.com','m.youtube.com'])for(const route of ['shorts','embed','live'])for(const suffix of ['','/'])keys.push(`page:${scheme}://${domain}/${route}/${id}${suffix}`);
+      return keys;
+    } catch { return []; }
   },
   // Historical keys are retained only as unverified suggestions unless they
   // contain a concrete document ID. They must not authorize a whole domain.
@@ -467,6 +488,13 @@ const Classifier = {
       const learned = this.normalizePath(learnedMap[fingerprint], { allowOperational: false });
       if (learned) return { path: learned, confidence: "high", source: "learned-exact" };
     }
+    const aliasPaths=new Map();
+    for(const key of this.youtubeCorrectionAliases(bookmark)){
+      const path=this.normalizePath(learnedMap?.[key],{allowOperational:false});
+      if(path)aliasPaths.set(JSON.stringify(path),path);
+    }
+    if(aliasPaths.size===1)return {path:aliasPaths.values().next().value,confidence:'high',source:'learned-video-alias'};
+    if(aliasPaths.size>1)return {path:null,confidence:'needs-decision',source:'learned-alias-conflict',reasons:['owner corrections for this video disagree across saved URL forms; choose its destination explicitly'],candidates:[]};
     const legacyKey=this.legacyFingerprint(bookmark);
     const legacyExactPath=this.normalizePath(learnedMap?.[legacyKey],{allowOperational:false});
     const legacyPath=legacyExactPath||this.normalizePath(learnedMap?.[domain],{allowOperational:false});

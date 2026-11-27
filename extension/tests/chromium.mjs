@@ -40,6 +40,19 @@ try{
      const evaluation=fresh.locator('#bookmark-model-evaluation');await evaluation.waitFor({state:'visible'});
      const dependencies=await fresh.evaluate(()=>({classifier:typeof Classifier.classify,evaluation:typeof BookmarkEvaluation.evaluate,bookmarks:typeof Bookmarks,loaded:LocalAI.isLoadedThisSession(),loading:LocalAI._loading,bridge:LocalAI._bridgePromise!==null,heavyRuntime:performance.getEntriesByType('resource').some(resource=>/webllm-loader|web-llm\.js/.test(resource.name))}));
      assert.deepEqual(dependencies,{classifier:'function',evaluation:'function',bookmarks:'undefined',loaded:false,loading:false,bridge:false,heavyRuntime:false});
+     const videoCorrections=await fresh.evaluate(()=>{
+       const math=['School & Academics','Mathematics'],music=['Entertainment','Music'];
+       const saved={'youtube.com/watch?v=browser_alias_27':math};
+       const classify=url=>Classifier.classify({title:'Saved page',url},saved,[]);
+       const shared=classify('https://youtu.be/browser_alias_27');
+       const unrelated=classify('https://youtu.be/browser_other_27');
+       const playlist=classify('https://youtu.be/browser_alias_27?list=other');
+       const conflict=Classifier.classify({title:'Saved page',url:'https://youtube.com/embed/browser_alias_27'},{...saved,'youtu.be/browser_alias_27':music},[]);
+       return {shared,unrelated,playlist,conflict,unchanged:JSON.stringify(saved)===JSON.stringify({'youtube.com/watch?v=browser_alias_27':math})};
+     });
+     assert.equal(videoCorrections.shared.source,'learned-video-alias');assert.deepEqual(videoCorrections.shared.path,['School & Academics','Mathematics']);
+     assert.notEqual(videoCorrections.unrelated.confidence,'high');assert.notEqual(videoCorrections.playlist.confidence,'high');
+     assert.equal(videoCorrections.conflict.source,'learned-alias-conflict');assert.equal(videoCorrections.conflict.path,null);assert.equal(videoCorrections.unchanged,true);
      const run=evaluation.getByRole('button',{name:'Evaluate loaded model · synthetic cases',exact:true});
      const cohort=evaluation.getByRole('combobox',{name:'Synthetic bookmark evaluation set',exact:true});
      await cohort.selectOption('resource-disjoint');
