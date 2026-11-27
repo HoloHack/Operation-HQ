@@ -9,7 +9,9 @@ permissions:
 jobs:
   chromium:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Three sequential Notes comparisons add about eight minutes; retain a
+    # bounded allowance so earlier browser checks do not starve evidence upload.
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: extension
@@ -22,6 +24,9 @@ jobs:
           cache-dependency-path: extension/package-lock.json
       - run: npm ci --ignore-scripts
       - run: npm test
+      # Diagnostic output is not a semantic-quality pass: preserve wrong
+      # accepted predictions, coverage and abstentions for review.
+      - run: mkdir -p test-results && npm run --silent benchmark:bookmarks > test-results/bookmark-benchmark.json
       - run: npx playwright install --with-deps chromium
       - run: npm run test:browser
       - uses: actions/checkout@v4
@@ -32,6 +37,23 @@ jobs:
       - run: node tests/memory-benchmark.mjs
         env:
           HQ_MEMORY_BASELINE: ${{ github.workspace }}/memory-baseline/extension
+      # Same-build diagnostic, not a Mac RAM target or leak certification.
+      # Synthetic documents/disposable profiles only; never reset owner Notes.
+      - run: node tests/notes-memory.mjs
+        env:
+          HQ_NOTES_WARMED: '1'
+          HQ_NOTES_SAMPLE: '0'
+          HQ_NOTES_WARM_POSITION: last
+      - run: node tests/notes-memory.mjs
+        env:
+          HQ_NOTES_WARMED: '1'
+          HQ_NOTES_SAMPLE: '1'
+          HQ_NOTES_WARM_POSITION: middle
+      - run: node tests/notes-memory.mjs
+        env:
+          HQ_NOTES_WARMED: '1'
+          HQ_NOTES_SAMPLE: '2'
+          HQ_NOTES_WARM_POSITION: first
       - run: python3 scripts/package-release.py
       - uses: actions/upload-artifact@v4
         if: always()

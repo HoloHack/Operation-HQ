@@ -44,7 +44,7 @@ function fixture() {
     },
   };
   function page(lockNavigator = navigator) {
-    const context = vm.createContext({ chrome, navigator: lockNavigator, crypto: webcrypto, console, URL, setTimeout, clearTimeout, AbortController });
+    const context = vm.createContext({ chrome, navigator: lockNavigator, crypto: webcrypto, TextEncoder, console, URL, setTimeout, clearTimeout, AbortController });
     vm.runInContext(source("classifier") + "\n" + source("bookmarks"), context);
     return vm.runInContext("Bookmarks", context);
   }

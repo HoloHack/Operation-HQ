@@ -323,11 +323,48 @@ const Classifier = {
     return NEVER_SORT_TITLES.some(k => t === k);
   },
 
+  async decisionIdentity(bookmark) {
+    // Distinct from topic-learning identity: every URL/title character is
+    // significant when deciding whether an owner's reviewed resource changed.
+    if (!globalThis.crypto?.subtle || typeof TextEncoder === "undefined") throw new Error("Bookmark identity verification is unavailable; no changes made.");
+    const bytes = new TextEncoder().encode(JSON.stringify([String(bookmark?.url || ""), String(bookmark?.title || "")]));
+    const digest = await crypto.subtle.digest("SHA-256", bytes);
+    return "sha256-v1:" + Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
+  },
+
+  async updateDecisionStore(mutator) {
+    // Always acquire mutation before decision locks, never the reverse.
+    if (!globalThis.navigator?.locks?.request) throw new Error("Bookmark decision coordination is unavailable; no decisions changed.");
+    return navigator.locks.request("hq-bookmark-decisions-v1", async () => {
+      const key = "hq_bookmark_decisions_v1";
+      const saved = await chrome.storage.local.get(key);
+      const current = Array.isArray(saved[key]) ? saved[key] : [];
+      const next = await mutator(current);
+      if (!Array.isArray(next)) throw new Error("Invalid bookmark decision update.");
+      const valid = next.filter(item => item?.bm?.id && item?.bm?.url);
+      await chrome.storage.local.set({ [key]:valid });
+      return valid;
+    });
+  },
+
+  sameDecisionRecord(before, after) {
+    if (!before?.bm || !after?.bm || String(before.bm.parentId) !== String(after.bm.parentId)) return false;
+    if (before.resourceIdentity != null || after.resourceIdentity != null) return Boolean(before.resourceIdentity && before.resourceIdentity === after.resourceIdentity);
+    return before.bm.url === after.bm.url && before.bm.title === after.bm.title;
+  },
+
+  async decisionRecordMatches(item, bookmark) {
+    if (!item?.bm || !bookmark?.url || String(item.bm.parentId) !== String(bookmark.parentId)) return false;
+    if (item.resourceIdentity != null) return /^sha256-v1:[a-f0-9]{64}$/.test(item.resourceIdentity) && item.resourceIdentity === await this.decisionIdentity(bookmark);
+    return item.bm.url === bookmark.url && item.bm.title === bookmark.title;
+  },
+
   fingerprint(bookmark) {
     try {
       const url=new URL(bookmark.url),domain=url.hostname.toLowerCase().replace(/^www\./,''),segments=url.pathname.split('/').filter(Boolean);
-      if(this.contentVariesBase(domain)==='youtube.com'&&url.searchParams.get('v'))return `youtube.com/watch?v=${url.searchParams.get('v')}`;
-      if(domain==='youtu.be'&&segments[0])return `${domain}/${segments[0]}`;
+      const plainVideoOrigin=['https:','http:'].includes(url.protocol)&&!url.username&&!url.password&&!url.port;
+      if(plainVideoOrigin&&['youtube.com','m.youtube.com'].includes(domain)&&url.pathname==='/watch'&&url.searchParams.getAll('v').length===1&&/^[A-Za-z0-9_-]{1,200}$/.test(url.searchParams.get('v')||''))return `youtube.com/watch?v=${url.searchParams.get('v')}`;
+      if(plainVideoOrigin&&domain==='youtu.be'&&segments.length===1&&/^[A-Za-z0-9_-]{1,200}$/.test(segments[0]))return `${domain}/${segments[0]}`;
       if(['docs.google.com','sheets.google.com','drive.google.com'].includes(domain)){
         const d=segments.indexOf('d');if(d>=0&&segments[d+1])return `${domain}/${segments.slice(0,d+2).join('/')}`;
         if(domain==='drive.google.com'&&url.searchParams.get('id'))return `drive.google.com/file/d/${url.searchParams.get('id')}`;
@@ -337,6 +374,26 @@ const Classifier = {
       if(!/^#!?\//.test(url.hash))url.hash='';
       return 'page:'+url.href;
     }catch{return 'invalid:'+String(bookmark.url||'');}
+  },
+  youtubeCorrectionAliases(bookmark) {
+    // Borrow only a whole-video correction. Chapter/playlist/time/clip links
+    // can have a different meaning and retain only their existing exact rule.
+    // This finite read-only lookup does not rewrite URLs or migrate old keys.
+    try {
+      const url=new URL(bookmark.url),host=url.hostname.toLowerCase();
+      if(!['https:','http:'].includes(url.protocol)||url.username||url.password||url.port||url.hash||!['youtube.com','www.youtube.com','m.youtube.com','youtu.be','www.youtu.be'].includes(host))return [];
+      const parts=url.pathname.split('/').filter(Boolean),short=['youtu.be','www.youtu.be'].includes(host);
+      const watch=!short&&url.pathname==='/watch';
+      let id;
+      if(short&&parts.length===1)id=parts[0];
+      else if(watch&&url.searchParams.getAll('v').length===1)id=url.searchParams.get('v');
+      else if(!short&&parts.length===2&&['shorts','embed','live'].includes(parts[0]))id=parts[1];
+      if(!/^[A-Za-z0-9_-]{1,200}$/.test(id||''))return [];
+      for(const key of url.searchParams.keys())if(!(watch&&key==='v')&&!/^utm_/i.test(key)&&!['fbclid','gclid'].includes(key))return [];
+      const keys=[`youtube.com/watch?v=${id}`,`youtu.be/${id}`];
+      for(const scheme of ['https','http'])for(const domain of ['youtube.com','m.youtube.com'])for(const route of ['shorts','embed','live'])for(const suffix of ['','/'])keys.push(`page:${scheme}://${domain}/${route}/${id}${suffix}`);
+      return keys;
+    } catch { return []; }
   },
   // Historical keys are retained only as unverified suggestions unless they
   // contain a concrete document ID. They must not authorize a whole domain.
@@ -402,6 +459,18 @@ const Classifier = {
     return null;
   },
 
+  hasUntrustedControlText(bookmark) {
+    // A narrow evidence-quality gate, not a general prompt-injection detector.
+    // Classification instructions are not trustworthy descriptions of content.
+    const text = [bookmark?.title, bookmark?.pageContext].filter(value => typeof value === "string").join(" ").normalize("NFKC").toLowerCase();
+    const override = /\b(?:ignore|disregard|override|bypass)\s+(?:(?:all|any|the|your|these|above|previous|prior|system|developer|earlier|classification)\s+){0,5}instructions?\b/.test(text)
+      || /\b(?:ignore|disregard|override|bypass)\s+(?:(?:all|any|the|your|these)\s+){0,2}(?:previous|prior|system|developer|classification)\s+(?:rules?|prompts?)\b/.test(text);
+    const placement = /\b(?:classify|categorise|categorize|file|sort|move|put|assign)\s+(?:(?:this|the|current|saved)\s+){0,2}(?:bookmark|link|page|resource)\s+(?:as|under|into|in|to)\b/.test(text);
+    const fields = /["']?root["']?\s*[:=]/.test(text) && /["']?sub["']?\s*[:=]/.test(text) && /["']?confidence["']?\s*[:=]/.test(text);
+    const output = /\b(?:return|output|respond(?:\s+with)?)\b[^\n]{0,160}\bconfidence\s*(?:["']?\s*[:=]\s*["']?|\s+)(?:high|medium|low)\b/.test(text);
+    return override || placement || fields || output;
+  },
+
   // learnedMap: { domain: [root, sub|null] } from manual re-files
   // legitFolders: [{title, parentTitle}] — ONLY folders that are already
   // nested one level inside a fixed root (Tier 2). Deliberately excludes
@@ -419,11 +488,23 @@ const Classifier = {
       const learned = this.normalizePath(learnedMap[fingerprint], { allowOperational: false });
       if (learned) return { path: learned, confidence: "high", source: "learned-exact" };
     }
+    const aliasPaths=new Map();
+    for(const key of this.youtubeCorrectionAliases(bookmark)){
+      const path=this.normalizePath(learnedMap?.[key],{allowOperational:false});
+      if(path)aliasPaths.set(JSON.stringify(path),path);
+    }
+    if(aliasPaths.size===1)return {path:aliasPaths.values().next().value,confidence:'high',source:'learned-video-alias'};
+    if(aliasPaths.size>1)return {path:null,confidence:'needs-decision',source:'learned-alias-conflict',reasons:['owner corrections for this video disagree across saved URL forms; choose its destination explicitly'],candidates:[]};
     const legacyKey=this.legacyFingerprint(bookmark);
-    const legacyPath=this.normalizePath(learnedMap?.[legacyKey]||learnedMap?.[domain],{allowOperational:false});
+    const legacyExactPath=this.normalizePath(learnedMap?.[legacyKey],{allowOperational:false});
+    const legacyPath=legacyExactPath||this.normalizePath(learnedMap?.[domain],{allowOperational:false});
     // Old Google editor URLs still carry a concrete document ID, so a known
     // exact correction can survive the change to canonical editor-independent IDs.
-    if(legacyPath&&/^(?:docs|sheets|drive)\.google\.com\/(?:document|spreadsheets|presentation|file)\/d\/[^/]+/.test(legacyKey))return {path:legacyPath,confidence:'high',source:'learned-exact'};
+    if(legacyExactPath&&/^(?:docs|sheets|drive)\.google\.com\/(?:document|spreadsheets|presentation|file)\/d\/[^/]+/.test(legacyKey))return {path:legacyExactPath,confidence:'high',source:'learned-exact'};
+
+    // Only explicit, scoped owner corrections may override control-like text.
+    // Neither topic words, a trusted host nor an old folder proves its meaning.
+    if (this.hasUntrustedControlText(bookmark)) return {path:null,confidence:"needs-decision",source:"untrusted-control-text",reasons:["classification/control instructions are not page-topic evidence"],candidates:[]};
 
     // 2) Topic beats platform for EVERY bookmark. This is the black-and-
     // white rule: classify what the saved page says it is about first;

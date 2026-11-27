@@ -13,7 +13,7 @@ let context;
 async function waitForSaved(read,accept){const end=Date.now()+12000;while(Date.now()<end){const value=await read();if(accept(value))return value;await new Promise(r=>setTimeout(r,50));}throw new Error("Saved data did not reach the expected state.");}
 async function check(name,run){const start=Date.now();try{const details=await run();results.push({name,passed:true,milliseconds:Date.now()-start,details});console.log('✓ '+name+(details?' '+JSON.stringify(details):''));}catch(error){results.push({name,passed:false,error:String(error.stack||error)});throw error;}}
 try{
- context=await chromium.launchPersistentContext(profile,{channel:'chromium',headless:true,viewport:{width:1440,height:960},args:[`--disable-extensions-except=${root}`,`--load-extension=${root}`,'--no-sandbox']});
+ context=await chromium.launchPersistentContext(profile,{channel:'chromium',...(process.env.HQ_CHROMIUM_EXECUTABLE?{executablePath:process.env.HQ_CHROMIUM_EXECUTABLE}:{}),headless:true,viewport:{width:1440,height:960},args:[`--disable-extensions-except=${root}`,`--load-extension=${root}`,'--no-sandbox']});
  context.setDefaultTimeout(12000);
  let worker=context.serviceWorkers()[0]||await context.waitForEvent('serviceworker');
  const extensionId=new URL(worker.url()).host,base=`chrome-extension://${extensionId}/`;
@@ -27,6 +27,49 @@ try{
    const issues=await worker.evaluate(()=>chrome.storage.local.get('hq_background_errors'));
    assert.equal((await page.evaluate(()=>BootDiagnostics.issues)).length,0);assert.deepEqual(issues.hq_background_errors||[],[]);
    return {extensionId,backgroundDiagnostics:issues};
+ });
+ await check('Settings-first loads bookmark evaluation dependencies without a bookmark panel or model',async()=>{
+   const fresh=await context.newPage();
+   try{
+     await fresh.emulateMedia({reducedMotion:'reduce'});
+     await fresh.goto(base+'newtab.html?settings-first-test=1');
+     await fresh.waitForFunction(()=>document.body?.classList.contains('app-ready'));
+     assert.deepEqual(await fresh.evaluate(()=>({classifier:typeof Classifier,evaluation:typeof BookmarkEvaluation,model:typeof LocalAI,openPanels:document.querySelectorAll('.flyout.open').length})),{classifier:'undefined',evaluation:'undefined',model:'undefined',openPanels:0},'Fresh tab unexpectedly inherited optional modules');
+     await fresh.locator('#desk-advanced').click();
+     await fresh.locator('#settings-tab-integrations').click();
+     const evaluation=fresh.locator('#bookmark-model-evaluation');await evaluation.waitFor({state:'visible'});
+     const dependencies=await fresh.evaluate(()=>({classifier:typeof Classifier.classify,evaluation:typeof BookmarkEvaluation.evaluate,bookmarks:typeof Bookmarks,loaded:LocalAI.isLoadedThisSession(),loading:LocalAI._loading,bridge:LocalAI._bridgePromise!==null,heavyRuntime:performance.getEntriesByType('resource').some(resource=>/webllm-loader|web-llm\.js/.test(resource.name))}));
+     assert.deepEqual(dependencies,{classifier:'function',evaluation:'function',bookmarks:'undefined',loaded:false,loading:false,bridge:false,heavyRuntime:false});
+     const videoCorrections=await fresh.evaluate(()=>{
+       const math=['School & Academics','Mathematics'],music=['Entertainment','Music'];
+       const saved={'youtube.com/watch?v=browser_alias_27':math};
+       const classify=url=>Classifier.classify({title:'Saved page',url},saved,[]);
+       const shared=classify('https://youtu.be/browser_alias_27');
+       const unrelated=classify('https://youtu.be/browser_other_27');
+       const playlist=classify('https://youtu.be/browser_alias_27?list=other');
+       const conflict=Classifier.classify({title:'Saved page',url:'https://youtube.com/embed/browser_alias_27'},{...saved,'youtu.be/browser_alias_27':music},[]);
+       return {shared,unrelated,playlist,conflict,unchanged:JSON.stringify(saved)===JSON.stringify({'youtube.com/watch?v=browser_alias_27':math})};
+     });
+     assert.equal(videoCorrections.shared.source,'learned-video-alias');assert.deepEqual(videoCorrections.shared.path,['School & Academics','Mathematics']);
+     assert.notEqual(videoCorrections.unrelated.confidence,'high');assert.notEqual(videoCorrections.playlist.confidence,'high');
+     assert.equal(videoCorrections.conflict.source,'learned-alias-conflict');assert.equal(videoCorrections.conflict.path,null);assert.equal(videoCorrections.unchanged,true);
+     const run=evaluation.getByRole('button',{name:'Evaluate loaded model · synthetic cases',exact:true});
+     const cohort=evaluation.getByRole('combobox',{name:'Synthetic bookmark evaluation set',exact:true});
+     await cohort.selectOption('resource-disjoint');
+     const cohortAudit=await fresh.evaluate(async()=>{
+       const read=async name=>(await fetch(chrome.runtime.getURL(`js/${name}.json`))).json();
+       const development=await read('bookmark-evaluation-cases'),candidate=await read('bookmark-evaluation-holdout');
+       return {unique:BookmarkEvaluation.validateFixture(candidate,Classifier,{against:development.cases}).length};
+     });
+     assert.equal(cohortAudit.unique,24);
+     await run.focus();await run.press('Enter');
+     await fresh.waitForFunction(()=>document.querySelector('#bookmark-model-evaluation [role="status"]').textContent.includes('No model is loaded.'));
+     assert.equal(await fresh.evaluate(()=>LocalAI.isLoadedThisSession()),false);
+     assert.equal(await evaluation.locator('pre').textContent(),'');
+     assert.equal(await cohort.isEnabled(),true);assert.equal(await cohort.inputValue(),'resource-disjoint');
+     assert.deepEqual(await fresh.evaluate(()=>BootDiagnostics.issues),[]);
+     return {settingsOpenedBeforeAnyPanel:true,classifierAndEvaluationAvailable:true,bookmarkPanelNotLoaded:true,noModelLoadOrInference:true};
+   }finally{await fresh.close();await page.bringToFront();}
  });
  await check('Ordinary new tabs do not load the Operation HQ workspace',async()=>{
    const manifest=await worker.evaluate(()=>chrome.runtime.getManifest());assert.equal(manifest.chrome_url_overrides,undefined);
@@ -229,6 +272,219 @@ try{
  await check('Closed tools release their layout and record settled profile memory',async()=>{
    await page.evaluate(()=>HQPanels.close());const hidden=await page.locator('.flyout').evaluateAll(items=>items.map(e=>({id:e.id,display:getComputedStyle(e).display,width:e.getBoundingClientRect().width})));assert(hidden.every(e=>e.display==='none'&&e.width===0),'Closed panels retained layout: '+JSON.stringify(hidden.filter(e=>e.width>0)));assert.equal(await page.locator('#settings-drawer').evaluate(e=>getComputedStyle(e).display),'none');
    await new Promise(resolve=>setTimeout(resolve,10000));const memory=await profileMemory(profile);assert(memory.available);await fs.writeFile(path.join(output,'memory-settled.json'),JSON.stringify(memory,null,2));return {closedPanels:hidden.length,memory};
+ });
+ await check('Long bookmark decisions survive restoration and reject renamed resources',async()=>{
+   const result=await page.evaluate(async()=>{
+     await chrome.storage.local.set({hq_realtime_sort_enabled:false});
+     const bar=(await chrome.bookmarks.getTree())[0].children[0].id;
+     const saved=(await chrome.storage.local.get(Bookmarks.DECISIONS_KEY))[Bookmarks.DECISIONS_KEY];
+     const original=Bookmarks.decisionItems,selections=[...Bookmarks.decisionSelections];
+     const bookmark=await chrome.bookmarks.create({parentId:bar,title:'Long resource '+ 'x'.repeat(600),url:'https://example.org/?resource='+ 'y'.repeat(3200)});
+     try{
+       await Bookmarks.persistDecisions([{bm:bookmark,reasons:['Synthetic decision']}]);
+       const bounded=Bookmarks.decisionItems.find(item=>String(item.bm.id)===String(bookmark.id));
+       if(!bounded)throw new Error('Synthetic long-resource decision was not persisted: '+bookmark.id);
+       const identity=bounded.resourceIdentity;
+       await Bookmarks.restoreDecisions();
+       const retained=Bookmarks.decisionItems.some(item=>item.bm.id===bookmark.id);
+       const valid=await Bookmarks.decisionMatches(bounded,bookmark);
+       const changed=await chrome.bookmarks.update(bookmark.id,{title:'INBOX'});
+       const stale=await Bookmarks.decisionMatches(bounded,changed);
+       const outcome=await Bookmarks.applyCorrection(bookmark.id,['School & Academics','Mathematics']);
+       const untouched=(await chrome.bookmarks.get(bookmark.id))[0].parentId===bar;
+       return {identity,fixtureId:bookmark.id,boundedId:bounded.bm.id,retained,valid,stale,untouched,blocked:outcome?.error===true,titleLength:bounded.bm.title.length,urlLength:bounded.bm.url.length};
+     }finally{await chrome.bookmarks.remove(bookmark.id);await Classifier.updateDecisionStore(()=>saved||[]);Bookmarks.decisionItems=original;Bookmarks.decisionSelections=new Map(selections);Bookmarks.renderAccuracyGate();}
+   });
+   const diagnostic=JSON.stringify(result);assert.match(result.identity,/^sha256-v1:[a-f0-9]{64}$/,diagnostic);assert.equal(result.fixtureId,result.boundedId,diagnostic);assert(result.retained&&result.valid&&result.untouched&&result.blocked,diagnostic);assert.equal(result.stale,false,diagnostic);assert.equal(result.titleLength,500,diagnostic);assert.equal(result.urlLength,3000,diagnostic);return result;
+ });
+ await check('Native page and worker decision writers preserve queued additions and restores',async()=>{
+   const state=await worker.evaluate(async()=>{
+     const saved=await chrome.storage.local.get(['hq_realtime_sort_enabled','hq_bookmark_decisions_v1']);
+     await chrome.storage.local.set({hq_realtime_sort_enabled:false});
+     const bar=(await chrome.bookmarks.getTree())[0].children[0].id,fixtures=[];
+     for(const name of ['seed','worker','page'])fixtures.push(await chrome.bookmarks.create({parentId:bar,title:'HQ decision race '+name,url:'https://example.org/decision-race-'+name}));
+     return {saved,fixtures};
+   });
+   try{
+     await page.evaluate(async bookmark=>{
+       globalThis.__HQDecisionRace={original:Bookmarks.decisionItems,selections:[...Bookmarks.decisionSelections],held:false};
+       await Bookmarks.persistDecisions([{bm:bookmark,reasons:['Synthetic seed']}]);
+       globalThis.__HQDecisionRace.holder=navigator.locks.request('hq-bookmark-decisions-v1',async()=>{
+         globalThis.__HQDecisionRace.held=true;
+         await new Promise(resolve=>globalThis.__HQDecisionRace.release=resolve);
+       });
+     },state.fixtures[0]);
+     await page.waitForFunction(()=>globalThis.__HQDecisionRace.held);
+     await worker.evaluate(bookmark=>{globalThis.__HQWorkerDecisionRace=markBookmarkDecision(bookmark,{reasons:['Synthetic worker addition']});},state.fixtures[1]);
+     await waitForSaved(()=>page.evaluate(async()=>(await navigator.locks.query()).pending.filter(lock=>lock.name==='hq-bookmark-decisions-v1').length),count=>count>=1);
+     await page.evaluate(bookmark=>{
+       const state=globalThis.__HQDecisionRace;
+       state.write=Bookmarks.persistDecisions([{bm:bookmark,reasons:['Synthetic page addition']}]);
+       state.restore=Bookmarks.restoreDecisions();
+     },state.fixtures[2]);
+     await waitForSaved(()=>page.evaluate(async()=>(await navigator.locks.query()).pending.filter(lock=>lock.name==='hq-bookmark-decisions-v1').length),count=>count>=3);
+     await page.evaluate(()=>globalThis.__HQDecisionRace.release());
+     await worker.evaluate(()=>globalThis.__HQWorkerDecisionRace);
+     await page.evaluate(()=>Promise.all([globalThis.__HQDecisionRace.holder,globalThis.__HQDecisionRace.write,globalThis.__HQDecisionRace.restore]));
+     const ids=await worker.evaluate(async()=>(await chrome.storage.local.get('hq_bookmark_decisions_v1')).hq_bookmark_decisions_v1.map(item=>String(item.bm.id)));
+     for(const bookmark of state.fixtures)assert(ids.includes(bookmark.id),'Concurrent writer lost fixture '+bookmark.id);
+     assert.equal(new Set(ids).size,ids.length,'Concurrent writers duplicated decision IDs');
+     return {workerAndPageAdditionsRetained:true,restoreRetainedQueuedWrites:true,uniqueIds:true};
+   }finally{
+     await page.evaluate(async()=>{
+       const state=globalThis.__HQDecisionRace;if(!state)return;
+       state.release?.();await Promise.allSettled([state.holder,state.write,state.restore].filter(Boolean));
+     });
+     await worker.evaluate(async()=>{if(globalThis.__HQWorkerDecisionRace)await Promise.allSettled([globalThis.__HQWorkerDecisionRace]);delete globalThis.__HQWorkerDecisionRace;});
+     for(const bookmark of state.fixtures)await worker.evaluate(id=>chrome.bookmarks.remove(id),bookmark.id);
+     await page.evaluate(async saved=>{
+       await Classifier.updateDecisionStore(()=>saved.hq_bookmark_decisions_v1||[]);
+       const state=globalThis.__HQDecisionRace;if(state){Bookmarks.decisionItems=state.original;Bookmarks.decisionSelections=new Map(state.selections);Bookmarks.renderAccuracyGate();}
+       await chrome.storage.local.set({hq_realtime_sort_enabled:saved.hq_realtime_sort_enabled??false});delete globalThis.__HQDecisionRace;
+     },state.saved);
+   }
+ });
+ await check('Native recovery keeps uncertain owner moves and preserves verified Undo',async()=>{
+   await page.evaluate(()=>HQPanels.open('bookmarks-flyout'));
+   const outcomes=[];
+   for(const phase of ['legacy','prepared']){
+     const state=await page.evaluate(async phase=>{
+       const keys=[Bookmarks.JOURNAL_KEY,Bookmarks.UNDO_KEY,'hq_bookmark_undo','hq_bookmark_recovery_reviews_v1','hq_realtime_sort_enabled'];
+       const saved=await chrome.storage.local.get(keys),bar=(await chrome.bookmarks.getTree())[0].children[0].id;
+       await chrome.storage.local.set({hq_realtime_sort_enabled:false});Bookmarks.pendingTransaction=null;Bookmarks.journalFailed=false;
+       const source=await chrome.bookmarks.create({parentId:bar,title:'HQ Recovery Source '+phase}),target=await chrome.bookmarks.create({parentId:bar,title:'HQ Recovery Target '+phase});
+       const verified=await chrome.bookmarks.create({parentId:source.id,title:'HQ verified recovery '+phase,url:'https://example.org/verified-recovery-'+phase});
+       const uncertain=await chrome.bookmarks.create({parentId:source.id,title:'HQ owner placement '+phase,url:'https://example.org/owner-recovery-'+phase+'?opaque='+'x'.repeat(280)});
+       const applied=[];await Bookmarks.moveAndRecord(verified,target.id,[],bar,applied);
+       await chrome.bookmarks.move(uncertain.id,{parentId:target.id});
+       const intent={id:uncertain.id,url:uncertain.url,fromParentId:source.id,fromIndex:1,fromPath:[source.title],toParentId:target.id,toPath:[target.title],...(phase==='prepared'?{phase:'prepared'}:{})};
+       const journal={id:'native-recovery-'+phase,kind:'interrupted-sort',createdAt:Date.now(),moves:[intent]};
+       await chrome.storage.local.set({[Bookmarks.JOURNAL_KEY]:journal});await Bookmarks.updateUndoButton();
+       return {keys,saved,source,target,verified,uncertain,applied,journal,current:(await chrome.bookmarks.get(uncertain.id))[0]};
+     },phase);
+     try{
+       await page.locator('#undo-bookmarks-btn').click();await page.waitForFunction(()=>!Bookmarks.busy);
+       await page.locator('#bookmark-recovery-review').waitFor({state:'visible'});
+       await page.setViewportSize({width:320,height:960});
+       const summary=page.locator('#bookmark-recovery-review summary');await summary.focus();await summary.press('Enter');
+       assert.equal(await page.locator('#bookmark-recovery-review details').evaluate(element=>element.open),true,'Recovery details did not open with Enter');
+       const geometry=await page.locator('#bookmark-recovery-review').evaluate(section=>{
+         const rect=element=>{const box=element.getBoundingClientRect();return {left:box.left,right:box.right,width:box.width};};
+         return {viewport:innerWidth,section:rect(section),button:rect(section.querySelector('button')),scrollWidth:section.scrollWidth,clientWidth:section.clientWidth};
+       });
+       for(const name of ['section','button'])assert(geometry[name].width>0&&geometry[name].left>=0&&geometry[name].right<=geometry.viewport,`${phase} narrow recovery ${name} escaped viewport: ${JSON.stringify(geometry)}`);
+       assert(geometry.scrollWidth<=geometry.clientWidth+1,'Opaque recovery URL overflowed: '+JSON.stringify(geometry));
+       await page.screenshot({path:path.join(output,'bookmark-recovery-'+phase+'-320.png')});
+       await page.setViewportSize({width:1440,height:960});
+       assert.deepEqual(await worker.evaluate(id=>chrome.bookmarks.get(id),state.uncertain.id),[state.current],'Undo changed uncertain '+phase+' placement');
+       const keep=page.locator('#bookmark-recovery-review').getByRole('button',{name:/Keep current locations/});
+       const cancelDialog=page.waitForEvent('dialog').then(async dialog=>{assert.equal(dialog.type(),'confirm');assert.match(dialog.message(),/No bookmarks will move or be deleted/);await dialog.dismiss();});
+       await keep.click();await cancelDialog;
+       assert.equal(await worker.evaluate(async()=>Boolean((await chrome.storage.local.get('hq_bookmark_pending_v1')).hq_bookmark_pending_v1)),true,'Cancelled review discarded recovery');
+       await page.evaluate(async state=>{
+         await chrome.storage.local.set({[Bookmarks.JOURNAL_KEY]:{...state.journal,moves:[...state.applied,...state.journal.moves]}});await Bookmarks.updateUndoButton();
+       },state);
+       const acceptDialog=page.waitForEvent('dialog').then(dialog=>dialog.accept());
+       await page.locator('#bookmark-recovery-review').getByRole('button',{name:/Keep current locations/}).click();await acceptDialog;
+       await waitForSaved(()=>worker.evaluate(async()=>(await chrome.storage.local.get('hq_bookmark_pending_v1')).hq_bookmark_pending_v1),journal=>journal?.moves?.length===1&&journal.moves[0].id===state.verified.id&&journal.moves[0].phase==='applied');
+       await page.waitForFunction(()=>!Bookmarks.busy);
+       assert.deepEqual(await worker.evaluate(id=>chrome.bookmarks.get(id),state.uncertain.id),[state.current],'Keep-current changed owner '+phase+' placement');
+       const archived=await worker.evaluate(async()=>(await chrome.storage.local.get('hq_bookmark_recovery_reviews_v1')).hq_bookmark_recovery_reviews_v1);
+       assert(archived.some(item=>item.id===state.journal.id&&item.decision==='keep-current-locations'&&item.moves.length===1&&item.moves[0].id===state.uncertain.id),'Uncertain review was not archived');
+       await page.locator('#undo-bookmarks-btn').click();await page.waitForFunction(()=>!Bookmarks.busy);
+       const restored=(await worker.evaluate(id=>chrome.bookmarks.get(id),state.verified.id))[0];
+       assert.equal(restored.parentId,state.source.id,'Verified inverse was lost');assert.equal(restored.index,state.verified.index,'Verified Undo lost original index');
+       const owner=(await worker.evaluate(id=>chrome.bookmarks.get(id),state.uncertain.id))[0];
+       assert.equal(owner.parentId,state.current.parentId,'Verified Undo moved the uncertain bookmark');assert.equal(owner.url,state.current.url);assert.equal(owner.title,state.current.title);
+       // Removing its verified sibling legitimately renumbers Chrome's index.
+       assert.deepEqual(await worker.evaluate(async id=>(await chrome.bookmarks.getChildren(id)).map(item=>item.id),state.target.id),[state.uncertain.id]);
+       await page.locator('#bookmark-recovery-review').waitFor({state:'detached'});outcomes.push({phase,uncertainUntouched:true,confirmationRequired:true,verifiedUndoPreserved:true,narrowRecoveryContained:true,keyboardDetails:true});
+     }finally{
+       await page.setViewportSize({width:1440,height:960});
+       await page.evaluate(async state=>{
+         for(const id of [state.verified.id,state.uncertain.id,state.source.id,state.target.id])await chrome.bookmarks.remove(id);
+         await navigator.locks.request('hq-bookmark-mutations',async()=>{await chrome.storage.local.remove(state.keys);await chrome.storage.local.set(state.saved);});
+         Bookmarks.pendingTransaction=null;Bookmarks.journalFailed=false;await Bookmarks.updateUndoButton();
+       },state);
+     }
+   }
+   return {outcomes};
+ });
+ await check('Synthetic bookmark evaluation refuses an unloaded model and remains keyboard-usable at 320px',async()=>{
+   const originalViewport=page.viewportSize();
+   const savedAppearance=await worker.evaluate(()=>chrome.storage.local.get('hq_desk_appearance_v1'));
+   const contrastStates=[];
+   const modelRequests=()=>network.filter(url=>/huggingface\.co|mlc-ai|model-lib|\.wasm(?:[?#]|$)|params_shard/i.test(url));
+   await page.evaluate(()=>HQPanels.close());
+   try{
+     await page.setViewportSize({width:320,height:960});
+     await page.locator('#desk-advanced').click();
+     await page.locator('#settings-drawer').waitFor({state:'visible'});
+     await page.locator('#settings-tab-integrations').click();
+     const integrations=page.locator('#settings-tab-integrations');
+     const readContrast=()=>integrations.evaluate(button=>{
+       const label=button.querySelector('.settings-tab-label'),foreground=getComputedStyle(label).color,background=getComputedStyle(button).backgroundColor;
+       const rgb=value=>{const values=value.match(/[\d.]+/g)?.map(Number);if(!values||values.length<3)throw Error('Unsupported computed color: '+value);if(values.length>3&&values[3]!==1)throw Error('Contrast requires opaque computed colors: '+value);return values.slice(0,3);};
+       const luminance=color=>rgb(color).map(channel=>{const value=channel/255;return value<=0.04045?value/12.92:((value+0.055)/1.055)**2.4;}).reduce((sum,value,index)=>sum+value*[0.2126,0.7152,0.0722][index],0);
+       const light=luminance(foreground),dark=luminance(background);
+       return {foreground,background,ratio:(Math.max(light,dark)+0.05)/(Math.min(light,dark)+0.05),surface:document.body.dataset.deskSurface,selected:button.getAttribute('aria-selected'),hovered:button.matches(':hover'),focused:button===document.activeElement,focusVisible:button.matches(':focus-visible'),backgroundImage:getComputedStyle(button).backgroundImage,labelVisible:label.getBoundingClientRect().width>0&&getComputedStyle(label).visibility==='visible',labelOpacity:getComputedStyle(label).opacity,buttonOpacity:getComputedStyle(button).opacity};
+     });
+     for(const surface of ['ink','paper']){
+       await worker.evaluate(surface=>chrome.storage.local.set({hq_desk_appearance_v1:{surface,hue:220,motion:'reduced'}}),surface);
+       await page.waitForFunction(surface=>document.body.dataset.deskSurface===surface,surface);
+       await integrations.hover();await page.waitForTimeout(180);
+       const hovered=await readContrast();
+       assert.equal(hovered.selected,'true');assert.equal(hovered.hovered,true);assert.equal(hovered.labelVisible,true);assert.equal(hovered.backgroundImage,'none');assert.equal(hovered.labelOpacity,'1');assert.equal(hovered.buttonOpacity,'1');
+       assert(hovered.ratio>=4.5,`${surface} selected-hover label contrast is insufficient: ${JSON.stringify(hovered)}`);
+       contrastStates.push({state:'selected-hover',...hovered});
+       await page.mouse.move(0,0);await page.locator('#settings-tab-privacy').focus();await page.locator('#settings-tab-privacy').press('ArrowRight');await page.waitForTimeout(180);
+       const focused=await readContrast();
+       assert.equal(focused.selected,'true');assert.equal(focused.hovered,false);assert.equal(focused.focused,true);assert.equal(focused.focusVisible,true);assert.equal(focused.labelVisible,true);assert.equal(focused.backgroundImage,'none');assert.equal(focused.labelOpacity,'1');assert.equal(focused.buttonOpacity,'1');
+       assert(focused.ratio>=4.5,`${surface} selected-keyboard-focus label contrast is insufficient: ${JSON.stringify(focused)}`);
+       contrastStates.push({state:'selected-keyboard-focus',...focused});
+     }
+     const section=page.locator('#bookmark-model-evaluation');
+     await section.waitFor({state:'visible'});await section.scrollIntoViewIfNeeded();
+     const run=section.getByRole('button',{name:'Evaluate loaded model · synthetic cases',exact:true});
+     const cancel=section.getByRole('button',{name:'Cancel evaluation',exact:true});
+     const status=section.getByRole('status');
+     const before=await page.evaluate(()=>({loaded:LocalAI.isLoadedThisSession(),loading:LocalAI._loading,bridge:LocalAI._bridgePromise!==null,vendorScripts:[...document.scripts].filter(script=>/web-llm/i.test(script.src)).length}));
+     assert.equal(before.loaded,false,'This journey requires the actual unloaded-model state');
+     const priorModelRequests=modelRequests().length;
+     assert.equal(await run.isEnabled(),true);assert.equal(await cancel.isDisabled(),true);
+     await run.focus();await run.press('Enter');
+     await page.waitForFunction(()=>document.querySelector('#bookmark-model-evaluation [role="status"]').textContent.includes('No model is loaded.'));
+     assert.match(await status.textContent(),/evaluation has not downloaded or started one/);
+     assert.equal(await run.isEnabled(),true);assert.equal(await cancel.isDisabled(),true);
+     const after=await page.evaluate(()=>({loaded:LocalAI.isLoadedThisSession(),loading:LocalAI._loading,bridge:LocalAI._bridgePromise!==null,vendorScripts:[...document.scripts].filter(script=>/web-llm/i.test(script.src)).length}));
+     assert.deepEqual(after,before,'Unloaded evaluation changed model/runtime state');
+     assert.equal(modelRequests().length,priorModelRequests,'Unloaded evaluation attempted a model request');
+     assert.equal(await section.locator('pre').textContent(),'','Unloaded evaluation fabricated a model report');
+     await run.press('Tab');
+     assert.equal(await section.locator('summary').evaluate(element=>element===document.activeElement),true,'Tab did not reach evaluation details past disabled Cancel');
+     await section.locator('summary').press('Enter');
+     assert.equal(await section.locator('details').evaluate(element=>element.open),true,'Evaluation details are not keyboard-operable');
+     const geometry=await section.evaluate(element=>{
+       const rect=node=>{const box=node.getBoundingClientRect();return {left:box.left,right:box.right,width:box.width};};
+       return {viewport:innerWidth,section:rect(element),buttons:[...element.querySelectorAll('button')].map(rect),scrollWidth:element.scrollWidth,clientWidth:element.clientWidth};
+     });
+     for(const box of [geometry.section,...geometry.buttons])assert(box.width>0&&box.left>=0&&box.right<=geometry.viewport,'Narrow evaluation control escaped viewport: '+JSON.stringify(geometry));
+     assert(geometry.scrollWidth<=geometry.clientWidth+1,'Narrow evaluation section overflowed: '+JSON.stringify(geometry));
+     await page.screenshot({path:path.join(output,'bookmark-model-unloaded-320.png')});
+     return {actualSettingsRoute:true,unloadedRefusal:true,noModelRequests:true,noFabricatedInference:true,keyboardControls:true,narrowContained:true,contrastStates,contrastScope:'Actual computed label/button colors at hue 220 on ink and paper; not every custom hue.'};
+   }finally{
+     if(await page.locator('#close-settings').isVisible())await page.locator('#close-settings').click();
+     await worker.evaluate(async saved=>{if(Object.hasOwn(saved,'hq_desk_appearance_v1'))await chrome.storage.local.set(saved);else await chrome.storage.local.remove('hq_desk_appearance_v1');},savedAppearance);
+     if(originalViewport)await page.setViewportSize(originalViewport);
+   }
+ });
+ await check('Final process memory is recorded after every journey and test cleanup',async()=>{
+   await page.evaluate(()=>HQPanels.close());
+   if(await page.locator('#close-settings').isVisible())await page.locator('#close-settings').click();
+   await page.waitForTimeout(10000);
+   const memory=await profileMemory(profile);assert(memory.available);
+   await fs.writeFile(path.join(output,'memory-final-all-journeys.json'),JSON.stringify(memory,null,2));
+   return {memory,scope:'End-of-suite Linux profile PSS after all application journeys and their fixture cleanup, with ten seconds settling. Earlier memory-after-tools/memory-settled are retained mid-suite checkpoints. Not a paired optimization result, target-Mac measurement or 300 MB certification.'};
  });
  await check('No uncaught browser errors across tested journeys',async()=>{assert.deepEqual(errors,[]);return {consoleErrors};});
 }catch(error){console.error(error);process.exitCode=1;if(context){for(const p of context.pages().filter(p=>p.url().includes('newtab.html'))){await p.screenshot({path:path.join(output,'failure.png')}).catch(()=>{});const diagnostics=await p.evaluate(()=>({issues:typeof BootDiagnostics==='undefined'?[]:BootDiagnostics.issues,early:window.HQEarlyDiagnostics?.entries()})).catch(()=>null);console.log('Failure diagnostics',JSON.stringify(diagnostics));console.log('Failure panel states',JSON.stringify(await p.evaluate(()=>({hash:location.hash,panels:[...document.querySelectorAll('.flyout.open')].map(e=>({id:e.id,visible:getComputedStyle(e).visibility})),errors:window.HQEarlyDiagnostics?.entries()})).catch(()=>null)));await fs.writeFile(path.join(output,'diagnostics.json'),JSON.stringify(diagnostics,null,2));}}}
